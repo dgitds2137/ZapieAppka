@@ -200,18 +200,16 @@ class FastFoodApp(MDApp):
 
 
     def build(self):
-        root = Builder.load_file("fastfood.kv")
-
         token = self.load_token()
         print("token", token)
 
         if token:
-            root.current = "dashboard"
+            self.root.current = "dashboard"
         else:
-            root.current = "login"
+            self.root.current = "login"
 
         print("BUILD")
-        return root
+        return super().build()
 
 
     def go_back(self):
