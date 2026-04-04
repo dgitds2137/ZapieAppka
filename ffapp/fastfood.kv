@@ -1,3 +1,6 @@
+#:import dp kivy.metrics.dp
+#:import FitImage kivymd.uix.fitimage.fitimage.FitImage
+
 ScreenManager:
     RegisterScreen:
     LoginScreen:
@@ -73,74 +76,92 @@ ScreenManager:
             on_release: app.add_to_cart(root.position)
 
 
+#:import dp kivy.metrics.dp
+#:import FitImage kivymd.uix.fitimage.fitimage.FitImage
+
 <ProductCard>:
+    orientation: "vertical"
     size_hint: None, None
-    size: dp(260), dp(230)
-    radius: [22, 22, 22, 22]
-    elevation: 0
-    md_bg_color: 0.10, 0.10, 0.10, 0.96
-    padding: dp(12)
-    ripple_behavior: True
+    size: dp(280), dp(330)
+    padding: dp(10)
+    spacing: dp(10)
 
-    BoxLayout:
-        orientation: "vertical"
-        spacing: dp(8)
+    canvas.before:
+        Color:
+            rgba: 0.08, 0.08, 0.08, 1
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [24, 24, 24, 24]
 
-        RelativeLayout:
-            size_hint_y: None
-            height: dp(130)
+    FloatLayout:
+        size_hint_y: None
+        height: dp(155)
 
-            AsyncImage:
+        MDCard:
+            size_hint: 1, 1
+            pos_hint: {"x": 0, "y": 0}
+            radius: [8, 8, 8, 8]
+            elevation: 0
+            padding: 0
+            md_bg_color: 0, 0, 0, 1
+            line_color: 0, 0, 0, 0
+
+            FitImage:
                 source: root.image
-                allow_stretch: True
-                keep_ratio: False
+                radius: [8, 8, 8, 8]
                 size_hint: 1, 1
-                pos_hint: {"x": 0, "y": 0}
 
-            MDIconButton:
-                icon: "cart-outline"
-                theme_icon_color: "Custom"
-                icon_color: 1, 1, 1, 1
-                pos_hint: {"x": 0.0, "top": 1}
+        MDIconButton:
+            icon: "cart-outline"
+            theme_icon_color: "Custom"
+            icon_color: 1, 1, 1, 1
+            pos_hint: {"x": 0.0, "top": 0.98}
 
-            MDIconButton:
-                icon: "heart-outline"
-                theme_icon_color: "Custom"
-                icon_color: 1, 1, 1, 1
-                pos_hint: {"right": 1, "top": 1}
-
-            MDLabel:
-                text: root.prep_time
-                theme_text_color: "Custom"
-                text_color: 1, 1, 1, 1
-                halign: "right"
-                pos_hint: {"right": 0.96, "y": 0.02}
+        MDIconButton:
+            icon: "heart-outline"
+            theme_icon_color: "Custom"
+            icon_color: 1, 1, 1, 1
+            pos_hint: {"right": 1, "top": 0.98}
 
         MDLabel:
-            text: root.title
-            bold: True
+            text: root.prep_time
             theme_text_color: "Custom"
             text_color: 1, 1, 1, 1
-            adaptive_height: True
-
-        MDLabel:
-            text: root.desc
-            theme_text_color: "Custom"
-            text_color: 0.85, 0.85, 0.85, 1
-            text_size: self.width, None
-            shorten: True
-            shorten_from: "right"
-            max_lines: 2
-            size_hint_y: None
-            height: dp(38)
-
-        MDLabel:
-            text: root.calories
-            theme_text_color: "Custom"
-            text_color: 0.65, 0.65, 0.65, 1
             halign: "right"
-            adaptive_height: True
+            size_hint: None, None
+            size: dp(80), dp(24)
+            pos_hint: {"right": 0.97, "y": 0.02}
 
+    MDLabel:
+        text: root.title
+        bold: True
+        theme_text_color: "Custom"
+        text_color: 1, 1, 1, 1
+        size_hint_y: None
+        height: self.texture_size[1]
+
+    MDLabel:
+        text: root.desc
+        theme_text_color: "Custom"
+        text_color: 0.72, 0.72, 0.72, 1
+        text_size: self.width, None
+        halign: "left"
+        valign: "top"
+        size_hint_y: None
+        line_height: 1.1
+        max_lines: 4
+        height: dp(84)
+
+    Widget
+
+    MDLabel:
+        text: root.calories
+        theme_text_color: "Custom"
+        text_color: 0.62, 0.62, 0.62, 1
+        halign: "right"
+        size_hint_y: None
+        height: self.texture_size[1]
 
 <DashboardScreen>:
     name: "dashboard"
@@ -175,7 +196,7 @@ ScreenManager:
 
                 ScrollView:
                     size_hint_y: None
-                    height: dp(240)
+                    height: dp(380)
                     do_scroll_y: False
                     do_scroll_x: True
                     bar_width: 0
@@ -185,11 +206,14 @@ ScreenManager:
                         orientation: "horizontal"
                         size_hint_x: None
                         width: self.minimum_width
+                        size_hint_y: None
+                        height: dp(340)
                         spacing: dp(14)
-                        padding: dp(2), dp(2)
+                        padding: dp(2), dp(8)
 
-                # tutaj zostawiasz swoje obecne dolne sekcje z ekranu:
-                # ostatnio zamawiane / ulubione / kategorie / bottom bar / FAB
+                Widget:
+                    size_hint_y: None
+                    height: dp(20)
 
 <DeliveryScreen>:
     name: "delivery"

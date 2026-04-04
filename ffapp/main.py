@@ -50,7 +50,10 @@ import requests
 API = "http://127.0.0.1:8000"
 
 
-class ProductCard(MDCard):
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.boxlayout import BoxLayout
+
+class ProductCard(ButtonBehavior, BoxLayout):
     title = StringProperty("")
     desc = StringProperty("")
     image = StringProperty("")
