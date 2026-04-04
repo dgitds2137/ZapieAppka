@@ -1,0 +1,573 @@
+ScreenManager:
+    RegisterScreen:
+    LoginScreen:
+    DashboardScreen:
+    DeliveryScreen:
+    PositionScreen:
+    CartScreen:
+    OrderSummaryScreen:
+    OrdersHistoryScreen:
+    AddressScreen:
+
+
+<PositionScreen>:
+    name: "position"
+    id: position
+    pos_id: 0
+    position: None
+
+    BoxLayout:
+        orientation: "vertical"
+        size_hint_y: 1
+        size_hint_x: 1
+        pos_hint: {"top": 1}
+
+        # --- górny pasek z powrotem i serduszkiem ---
+        FloatLayout:
+            size_hint_y: None
+            height: dp(50)
+
+            MDIconButton:
+                icon: "arrow-left"
+                pos_hint: {"x": 0, "top": 1}
+                on_release: app.go_back()
+
+            MDIconButton:
+                id: fav_btn
+                icon: "heart-outline"
+                pos_hint: {"right": 1, "top": 1}
+                on_release: app.toggle_favorite()
+
+        # --- obrazek, tytuł i opis ---
+        AsyncImage:
+            id: pos_image
+            source: ""
+            allow_stretch: True
+            keep_ratio: True
+            size_hint_x: 0.8
+            size_hint_y: None
+            height: dp(250)
+            pos_hint: {"center_x": 0.5}
+
+        MDLabel:
+            id: pos_title
+            text: ""
+            font_style: "Title"
+            halign: "center"
+            size_hint_y: None
+            height: dp(40)
+
+        MDLabel:
+            id: pos_desc
+            text: ""
+            halign: "center"
+            theme_text_color: "Secondary"
+            size_hint_y: None
+            height: dp(80)
+
+        MDButton:
+            id: add_to
+            text: "Dodaj do koszyka (0)"
+            size_hint_x: 0.8
+            pos_hint: {"center_x": 0.5}
+            on_release: app.add_to_cart(root.position)
+
+
+<DashboardScreen>:
+    name: "dashboard"
+
+    MDBoxLayout:
+        orientation: "vertical"
+
+        MDLabel:
+            text: "Popular"
+            font_style: "Label"
+            halign: "left"
+            padding_x: dp(10)
+
+        ScrollView:
+            size_hint_y: None
+            height: dp(300)
+            do_scroll_x: True
+            do_scroll_y: False
+            bar_width: 0
+
+            MDBoxLayout:
+                id: popular_box
+                orientation: "horizontal"
+                adaptive_width: True
+                size_hint_y: None
+                height: dp(300)
+                spacing: dp(10)
+                padding: dp(10)
+
+        MDLabel:
+            text: "Last"
+            font_style: "Label"
+            halign: "left"
+            padding_x: dp(10)
+
+        ScrollView:
+            size_hint_y: None
+            height: dp(300)
+            do_scroll_x: True
+            do_scroll_y: False
+            bar_width: 0
+
+            MDBoxLayout:
+                id: last_orders_box
+                orientation: "horizontal"
+                adaptive_width: True
+                size_hint_y: None
+                height: dp(300)
+                spacing: dp(10)
+                padding: dp(10)
+
+        MDLabel:
+            text: "Ulubione"
+            font_style: "Label"
+            halign: "left"
+            padding_x: dp(10)
+
+        ScrollView:
+            size_hint_y: None
+            height: dp(300)
+            do_scroll_x: True
+            do_scroll_y: False
+            bar_width: 0
+
+            MDBoxLayout:
+                id: favorites_box
+                orientation: "horizontal"
+                adaptive_width: True
+                size_hint_y: None
+                height: dp(300)
+                spacing: dp(10)
+                padding: dp(10)
+
+        # --- FAB koszyka ---
+        FloatLayout:
+            size_hint_y: None
+            height: dp(80)
+
+            MDFabButton:
+                id: cart_btn
+                icon: "cart"
+                md_bg_color: 1, 0.5, 0, 1
+                pos_hint: {"right": 0.95, "y": 0.05}
+                on_release: app.open_cart()
+
+
+
+            MDLabel:
+                id: cart_count
+                text: ""   # pusty, dopóki koszyk jest pusty
+                halign: "center"
+                font_style: "Label"
+                size_hint: None, None
+                size: dp(24), dp(24)
+                pos_hint: {"right": 1, "y": 0.15}
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+
+        # --- dolny pasek nawigacyjny ---
+        MDBoxLayout:
+            orientation: "horizontal"
+            size_hint_y: None
+            height: dp(70)
+            md_bg_color: (1, 0.5, 0, 1)   # intensywny pomarańcz
+
+            # Odbiór osobisty
+            MDBoxLayout:
+                orientation: "vertical"
+                size_hint_x: 0.33
+                padding: dp(5)
+                md_bg_color: (1, 0.5, 0, 1)
+                MDIconButton:
+                    icon: "store"
+                    pos_hint: {"center_x": 0.5}
+                    on_release: app.handle_pickup()
+                MDLabel:
+                    text: "Odbiór"
+                    halign: "center"
+                    theme_text_color: "Custom"
+                    text_color: 1,1,1,1
+
+            # Historia zamówień
+            MDBoxLayout:
+                orientation: "vertical"
+                size_hint_x: 0.33
+                padding: dp(5)
+                MDIconButton:
+                    icon: "clipboard-text-clock-outline"
+                    pos_hint: {"center_x": 0.5}
+                    on_release: app.handle_delivery()
+                MDLabel:
+                    text: "Historia zamówien"
+                    halign: "center"
+                    theme_text_color: "Custom"
+                    text_color: 1,1,1,1
+
+            # Profil
+            MDBoxLayout:
+                orientation: "vertical"
+                size_hint_x: 0.33
+                padding: dp(5)
+                MDIconButton:
+                    icon: "account-circle"
+                    pos_hint: {"center_x": 0.5}
+                    on_release: app.open_profile()
+                MDLabel:
+                    text: "Profil"
+                    halign: "center"
+                    theme_text_color: "Custom"
+                    text_color: 1,1,1,1
+
+
+
+<DeliveryScreen>:
+    name: "delivery"
+
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: dp(20)
+        spacing: dp(20)
+
+        MDLabel:
+            text: "Adres dostawy"
+            halign: "center"
+            font_style: "Title"
+
+        MDTextField:
+            id: street
+            hint_text: "Ulica i numer"
+            mode: "filled"
+
+        MDTextField:
+            id: city
+            hint_text: "Miasto"
+            mode: "filled"
+
+        MDTextField:
+            id: postal
+            hint_text: "Kod pocztowy"
+            mode: "filled"
+
+        MDTextField:
+            id: phone
+            hint_text: "Telefon kontaktowy"
+            mode: "filled"
+
+        MDButton:
+            text: "Zapisz adres"
+            on_release: app.save_address()
+
+
+<RegisterScreen>:
+    name: "register"
+
+    MDFloatLayout:
+        md_bg_color: 1, 0.95, 0.9, 1   # jasne, kremowe tło
+
+        # pasek nagłówka
+        MDBoxLayout:
+            orientation: "horizontal"
+            size_hint_y: None
+            height: "120dp"
+            md_bg_color: 1, 0.4, 0.2, 1   # intensywny burgerowy pomarańcz
+            padding: dp(20)
+
+            MDLabel:
+                text: "🍔 Rejestracja"
+                font_style: "Title"
+                halign: "center"
+                theme_text_color: "Custom"
+                text_color: 1,1,1,1
+
+        # formularz w karcie
+        MDCard:
+            orientation: "vertical"
+            size_hint: .9, None
+            height: self.minimum_height
+            pos_hint: {"center_x": .5, "center_y": .5}
+            padding: dp(25)
+            spacing: dp(20)
+            radius: [20, 20, 20, 20]
+            md_bg_color: 1,1,1,1
+            elevation: 8
+
+            MDLabel:
+                text: "Utwórz konto"
+                halign: "center"
+                font_style: "Title"
+                theme_text_color: "Primary"
+
+            MDTextField:
+                id: email
+                hint_text: "Email"
+                mode: "filled"
+                fill_color: 1, 0.95, 0.9, 1
+                icon_right: "email"
+
+            MDTextField:
+                id: phone
+                hint_text: "Numer telefonu"
+                input_filter: "int"
+                mode: "filled"
+                fill_color: 1, 0.95, 0.9, 1
+                icon_right: "phone"
+
+            MDTextField:
+                id: password
+                hint_text: "Hasło"
+                password: True
+                mode: "filled"
+                fill_color: 1, 0.95, 0.9, 1
+                icon_right: "lock"
+
+            MDButton:
+                text: "Zarejestruj"
+                md_bg_color: 1, 0.5, 0, 1
+                text_color: 1, 1, 1, 1
+                on_release: app.register()
+
+            MDButton:
+                text: "Zaloguj przez Google"
+                md_bg_color: 1, 0, 0, 1  # czerwony Google
+                text_color: 1, 1, 1, 1
+                on_release: app.google_login()
+
+
+<LoginScreen>:
+    name: "login"
+
+    MDFloatLayout:
+        md_bg_color: 1, 0.95, 0.9, 1   # jasne tło w ciepłym odcieniu
+
+        # pasek u góry
+        MDBoxLayout:
+            orientation: "horizontal"
+            size_hint_y: None
+            height: "120dp"
+            md_bg_color: 1, 0.4, 0.2, 1
+            padding: dp(20)
+
+            MDLabel:
+                text: "🍟 FastFoodApp"
+                font_style: "Title"
+                halign: "center"
+                theme_text_color: "Custom"
+                text_color: 1,1,1,1
+
+        # formularz
+        MDCard:
+            orientation: "vertical"
+            size_hint: .9, None
+            height: self.minimum_height
+            pos_hint: {"center_x": .5, "center_y": .5}
+            padding: dp(25)
+            spacing: dp(20)
+            radius: [20, 20, 20, 20]
+            md_bg_color: 1,1,1,1
+            elevation: 8
+
+            MDLabel:
+                text: "Logowanie"
+                halign: "center"
+                font_style: "Title"
+                theme_text_color: "Primary"
+
+            MDTextField:
+                id: email
+                hint_text: "Email"
+                mode: "filled"
+                fill_color: 1, 0.95, 0.9, 1
+                icon_right: "email"
+
+            MDTextField:
+                id: password
+                hint_text: "Hasło"
+                password: True
+                mode: "filled"
+                fill_color: 1, 0.95, 0.9, 1
+                icon_right: "lock"
+
+            MDButton:
+                text: "Zaloguj"
+                md_bg_color: 1, 0.5, 0, 1
+                text_color: 1, 1, 1, 1
+                elevation: 0
+                on_release: app.login()
+                size_hint_y: None
+                height: "52dp"
+                font_size: "26sp"
+                bold: True
+
+            MDButton:
+                text: "Nie masz konta? Zarejestruj się"
+                style: "text"
+                on_release: app.switch_to_register()
+
+            MDCircularProgressIndicator:
+                id: login_spinner
+                size_hint: None, None
+                size: dp(46), dp(46)
+                active: False
+                pos_hint: {"center_x": .5}
+
+            MDButton:
+                text: "Zaloguj przez Google"
+                md_bg_color: 1, 0, 0, 1
+                text_color: 1, 1, 1, 1
+                on_release: app.google_login()
+
+
+<CartScreen>:
+    name: "cart"
+
+    MDBoxLayout:
+        orientation: "vertical"
+        spacing: dp(10)
+        padding: dp(10)
+
+        MDLabel:
+            text: "Twój koszyk"
+            font_style: "Title"
+            halign: "center"
+            size_hint_y: None
+            height: dp(40)
+
+        ScrollView:
+            MDBoxLayout:
+                id: cart_box
+                orientation: "vertical"
+                adaptive_height: True
+                spacing: dp(10)
+
+        # --- pole na uwagi ---
+        MDTextField:
+            id: notes_field
+            hint_text: "Uwagi do zamówienia"
+            multiline: True
+            size_hint_y: None
+            height: dp(100)
+
+        # --- metoda dostawy ---
+        MDLabel:
+            text: "Metoda dostawy"
+            font_style: "Body"
+            halign: "left"
+            size_hint_y: None
+            height: dp(30)
+
+        MDBoxLayout:
+            orientation: "horizontal"
+            size_hint_y: None
+            height: dp(40)
+            spacing: dp(10)
+
+            MDCheckbox:
+                group: "delivery"
+                active: True
+                on_active: app.set_delivery("local")
+
+            MDLabel:
+                text: "Na miejscu"
+                halign: "left"
+
+        MDBoxLayout:
+            orientation: "horizontal"
+            size_hint_y: None
+            height: dp(40)
+            spacing: dp(10)
+
+            MDCheckbox:
+                group: "delivery"
+                on_active: app.set_delivery("delivery")
+
+            MDLabel:
+                text: "Dostawa"
+                halign: "left"
+
+        # --- przycisk potwierdzenia ---
+        MDButton:
+            text: "Potwierdź zamówienie"
+            size_hint_x: 0.8
+            pos_hint: {"center_x": 0.5}
+            on_release: app.confirm_order()
+
+
+<OrderSummaryScreen>:
+    name: "summary"
+
+    MDBoxLayout:
+        orientation: "vertical"
+
+        MDTopAppBar:
+            title: "Podsumowanie"
+            left_action_items: [["arrow-left", lambda x: app.go_back()]]
+
+        MDBoxLayout:
+            orientation: "vertical"
+            padding: dp(10)
+            spacing: dp(10)
+
+            MDLabel:
+                id: order_type_label
+                text: "Typ zamówienia"
+
+            MDLabel:
+                id: address_label
+                text: "Adres:"
+
+            MDTextField:
+                id: notes_field
+                hint_text: "Uwagi do zamówienia"
+
+        MDBoxLayout:
+            size_hint_y: None
+            height: "60dp"
+            padding: dp(10)
+
+            MDButton:
+                text: "Wyślij zamówienie"
+                pos_hint: {"center_x": 0.5}
+                on_release:
+                    app.submit_order()
+
+
+<OrdersHistoryScreen>:
+    name: "history"
+
+    MDBoxLayout:
+        orientation: "vertical"
+
+        MDTopAppBar:
+            title: "Ostatnie zamówienia"
+            left_action_items: [["arrow-left", lambda x: app.go_back()]]
+
+        ScrollView:
+            MDList:
+                id: history_list
+
+
+<AddressScreen>:
+    name: "addresses"
+
+    MDBoxLayout:
+        orientation: "vertical"
+
+        MDTopAppBar:
+            title: "Adresy dostawy"
+            left_action_items: [["arrow-left", lambda x: app.go_back()]]
+
+        ScrollView:
+            MDList:
+                id: addresses_list
+
+        MDFabButton:
+            icon: "plus"
+            md_bg_color: 1, 0.5, 0, 1
+            pos_hint: {"right": 0.95, "y": 0.05}
+            on_release: app.show_address_form()
+

@@ -1,0 +1,57 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Virtual environment ---
+venv/
+.venv/
+env/
+ENV/
+
+# --- FastAPI / general ---
+*.log
+*.sqlite3
+*.db
+
+# --- Secrets ---
+.env
+.env.*
+client_secret.json
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Build / dist ---
+build/
+dist/
+*.egg-info/
+
+# --- Kivy ---
+*.kv~
+.kivy/
+kivy_*.log
+
+# --- Media / assets (opcjonalnie, jeśli nie chcesz wrzucać) ---
+# *.png
+# *.jpg
+# *.jpeg
+# *.avif
+
+# --- PyInstaller (jeśli kiedyś użyjesz) ---
+*.spec
+
+# --- Tests / cache ---
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Git ---
+*.orig
