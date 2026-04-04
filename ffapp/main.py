@@ -65,13 +65,12 @@ class DashboardScreen(MDScreen):
 
     def load_products(self):
         try:
-            response = requests.get(f"{API}/positions", timeout=8)
-            response.raise_for_status()
-            products = response.json()
-
-            # na razie "popularne" = pierwsze 8
-            self.show_products(products[:8])
-
+            resp = httpx.get("http://127.0.0.1:8000/positions", timeout=8)
+            if resp.status_code == 200:
+                products = resp.json()
+                self.show_products(products[:8])
+            else:
+                print("Błąd pobierania pozycji:", resp.status_code, resp.text)
         except Exception as e:
             print("Błąd ładowania produktów:", e)
 
@@ -79,7 +78,7 @@ class DashboardScreen(MDScreen):
         box = self.ids.popular_box
         box.clear_widgets()
 
-        for p in products[:8]:
+        for p in products:
             card = ProductCard(
                 title=str(p.get("name", "")),
                 desc=str(p.get("description", "")),
@@ -88,7 +87,7 @@ class DashboardScreen(MDScreen):
                 prep_time="15 min",
                 position_id=int(p.get("position_id", 0) or 0),
             )
-            card.bind(on_release=lambda inst, pos=p: self.open_product(pos))
+            card.bind(on_release=lambda inst, pos=p: App.get_running_app().open_position(pos))
             box.add_widget(card)
 
     def open_product(self, pos):
