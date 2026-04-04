@@ -79,7 +79,7 @@ class DashboardScreen(MDScreen):
         box = self.ids.popular_box
         box.clear_widgets()
 
-        for p in products:
+        for p in products[:8]:
             card = ProductCard(
                 title=str(p.get("name", "")),
                 desc=str(p.get("description", "")),
