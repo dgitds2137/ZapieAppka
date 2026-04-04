@@ -1,91 +1,98 @@
 from datetime import datetime
 from typing import Optional, List
-import enum
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, ConfigDict
 from sqlalchemy import (
     Column,
     Integer,
     String,
     DateTime,
     ForeignKey,
-    Boolean,
-    Enum,
-    Text,
     Numeric,
+    Boolean,
+    Text,
 )
-from sqlalchemy.orm import declarative_base, relationship, Mapped, mapped_column
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
 
-# =========================================================
-# ENUMS
-# =========================================================
+# =========================
+# SQLAlchemy DB models
+# =========================
 
-class OrderType(str, enum.Enum):
-    delivery = "delivery"
-    pickup = "pickup"
+class UserDB(Base):
+    __tablename__ = "Users"
 
+    user_id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=True)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    password = Column(String(255), nullable=False)
+    phone = Column(String(50), nullable=True)
+    role = Column(String(50), nullable=True, default="client")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-class OrderStatus(str, enum.Enum):
-    draft = "draft"
-    submitted = "submitted"
-    accepted = "accepted"
-    in_progress = "in_progress"
-    ready = "ready"
-    completed = "completed"
-    cancelled = "cancelled"
-
-
-# =========================================================
-# Pydantic pomocnicze
-# =========================================================
-
-class KitchenUpdate(BaseModel):
-    order_id: str
-    status: str
-    eta: int
+    orders = relationship("OrderDB", back_populates="user", cascade="all, delete-orphan")
+    addresses = relationship("UserAddressDB", back_populates="user", cascade="all, delete-orphan")
 
 
-class Notification(BaseModel):
-    user_id: str
-    message: str
+class OrderDB(Base):
+    __tablename__ = "Orders"
+
+    order_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("Users.user_id"), nullable=True, index=True)
+    status = Column(String(20), nullable=True)
+    priority = Column(Integer, nullable=True, default=0)
+    eta_minutes = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("UserDB", back_populates="orders")
+    items = relationship("OrderItemDB", back_populates="order", cascade="all, delete-orphan")
+    kitchen_updates = relationship("KitchenUpdateDB", back_populates="order", cascade="all, delete-orphan")
 
 
-class OrderRequest(BaseModel):
-    user_id: str
-    items: list[str]
-    priority: bool = False
+class OrderItemDB(Base):
+    __tablename__ = "OrderItems"
 
+    item_id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("Orders.order_id"), nullable=True, index=True)
+    product_name = Column(String(100), nullable=True)
+    quantity = Column(Integer, nullable=True)
+    price = Column(Numeric(10, 2), nullable=True)
 
-class GoogleAuthRequest(BaseModel):
-    id_token: str
+    order = relationship("OrderDB", back_populates="items")
 
-
-# =========================================================
-# SQLAlchemy MODELS
-# =========================================================
 
 class KitchenUpdateDB(Base):
     __tablename__ = "KitchenUpdates"
 
     update_id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, nullable=False)
-    status = Column(String, nullable=False)
-    eta_minutes = Column(Integer, nullable=False)
+    order_id = Column(Integer, ForeignKey("Orders.order_id"), nullable=True, index=True)
+    status = Column(String(20), nullable=True)
+    eta_minutes = Column(Integer, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
+    order = relationship("OrderDB", back_populates="kitchen_updates")
 
-class UserAddress(Base):
+
+class MenuPositionDB(Base):
+    __tablename__ = "MenuPositions"
+
+    position_id = Column(Integer, primary_key=True, index=True)
+    position_type = Column(String(50), nullable=True, index=True)
+    name = Column(String(80), nullable=True)
+    weight = Column(Integer, nullable=True)
+    calories = Column(Integer, nullable=True)
+    price = Column(Numeric(18, 0), nullable=True)
+    description = Column(Text, nullable=True)
+    photo_url = Column(String, nullable=True)
+
+
+class UserAddressDB(Base):
     __tablename__ = "UserAddresses"
 
     address_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(
-        Integer,
-        ForeignKey("Users.user_id", ondelete="CASCADE", onupdate="CASCADE"),
-        nullable=False,
-    )
+    user_id = Column(Integer, ForeignKey("Users.user_id"), nullable=False, index=True)
     street = Column(String(200), nullable=False)
     city = Column(String(100), nullable=False)
     postal = Column(String(20), nullable=False)
@@ -93,361 +100,126 @@ class UserAddress(Base):
     is_primary = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    user = relationship("UsersDB", back_populates="addresses")
-
-    # nowy flow /orders
-    orders = relationship("Order", back_populates="address")
+    user = relationship("UserDB", back_populates="addresses")
 
 
-class MenuPositionDB(Base):
-    __tablename__ = "MenuPositions"
+# =========================
+# Pydantic schemas
+# =========================
 
-    position_id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(100), nullable=True)
-    description = Column(String(255), nullable=True)
-    photo_url = Column(String(255), nullable=True)
-
-    favorites = relationship(
-        "UserFavoritesDB",
-        back_populates="menupositions",
-        cascade="all, delete-orphan",
-    )
-    last_orders = relationship(
-        "UserLastOrdersDB",
-        back_populates="menupositions",
-        cascade="all, delete-orphan",
-    )
-
-    # relacja dla nowego OrderItem
-    order_items = relationship("OrderItem", back_populates="menu_position")
-
-
-class UserFavoritesDB(Base):
-    __tablename__ = "UserFavorites"
-
-    user_id = Column(
-        Integer,
-        ForeignKey("Users.user_id", ondelete="CASCADE", onupdate="CASCADE"),
-        primary_key=True,
-    )
-    position_id = Column(
-        Integer,
-        ForeignKey("MenuPositions.position_id", ondelete="CASCADE", onupdate="CASCADE"),
-        primary_key=True,
-    )
-
-    user = relationship("UsersDB", back_populates="favorites")
-    menupositions = relationship("MenuPositionDB", back_populates="favorites")
-
-
-class UserLastOrdersDB(Base):
-    __tablename__ = "UserLastOrders"
-
-    user_id = Column(
-        Integer,
-        ForeignKey("Users.user_id", ondelete="CASCADE", onupdate="CASCADE"),
-        primary_key=True,
-    )
-    position_id = Column(
-        Integer,
-        ForeignKey("MenuPositions.position_id", ondelete="CASCADE", onupdate="CASCADE"),
-        primary_key=True,
-    )
-    last_ordered_date = Column(DateTime, default=datetime.utcnow)
-
-    user = relationship("UsersDB", back_populates="last_orders")
-    menupositions = relationship("MenuPositionDB", back_populates="last_orders")
-
-
-class UsersDB(Base):
-    __tablename__ = "Users"
-
-    user_id = Column(Integer, primary_key=True, index=True, nullable=False)
-    name = Column(String(100), nullable=True)
-    email = Column(String(255), nullable=True)
-    password = Column(String(500), nullable=True)
-    phone = Column(String(50), nullable=True)
-    role = Column(String(50), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    favorites = relationship(
-        "UserFavoritesDB",
-        back_populates="user",
-        cascade="all, delete-orphan",
-    )
-    sessions = relationship("SessionsDB", back_populates="user")
-    last_orders = relationship("UserLastOrdersDB", back_populates="user")
-    addresses = relationship("UserAddress", back_populates="user")
-    orders = relationship("Order", back_populates="user")
-
-class SessionsDB(Base):
-    __tablename__ = "Sessions"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("Users.user_id"), nullable=False)
-    session_token = Column(String, unique=True, nullable=False)
-
-    user = relationship("UsersDB", back_populates="sessions")
-
-
-# =========================================================
-# NOWY FLOW: orders / order_items
-# dopasowany do istniejących tabel MSSQL
-# =========================================================
-
-class Order(Base):
-    __tablename__ = "Orders"
-
-    order_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("Users.user_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    order_type: Mapped[OrderType] = mapped_column(
-        Enum(OrderType),
-        default=OrderType.pickup,
-    )
-    address_id: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        ForeignKey("UserAddresses.address_id"),
-        nullable=True,
-    )
-    status: Mapped[OrderStatus] = mapped_column(
-        Enum(OrderStatus),
-        default=OrderStatus.draft,
-    )
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-    )
-
-    user = relationship("UsersDB", back_populates="orders")
-    address = relationship("UserAddress", back_populates="orders")
-    items = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
-
-
-class OrderItem(Base):
-    __tablename__ = "OrderItems"
-
-    order_item_id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    order_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("Orders.order_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    menu_position_id: Mapped[int] = mapped_column(
-        Integer,
-        ForeignKey("MenuPositions.position_id"),
-        nullable=False,
-    )
-    quantity: Mapped[int] = mapped_column(Integer, default=1)
-    price_snapshot: Mapped[float] = mapped_column(Numeric(10, 2), default=0)
-
-    order = relationship("Order", back_populates="items")
-    menu_position = relationship("MenuPositionDB", back_populates="order_items")
-
-
-
-
-# =========================================================
-# Pydantic SCHEMAS
-# =========================================================
-
-class KitchenUpdateCreate(BaseModel):
-    order_id: int
-    status: str
-    eta_minutes: int
-
-
-class KitchenUpdateOut(BaseModel):
-    update_id: int
-    order_id: int
-    status: str
-    eta_minutes: int
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ---------- Address ----------
-
-class AddressBase(BaseModel):
-    street: str
-    city: str
-    postal: str
-    phone: Optional[str] = None
-    is_primary: bool = False
-
-
-class AddressCreate(AddressBase):
-    pass
-
-
-class AddressUpdate(AddressBase):
-    pass
-
-
-class Address(BaseModel):
-    address_id: int
-    user_id: int
-    street: str
-    city: str
-    postal: str
-    phone: Optional[str] = None
-    is_primary: bool = False
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class AddressSchema(BaseModel):
-    address_id: int
-    street: str
-    city: str
-    postal: str
-    phone: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ---------- Menu ----------
-
-class MenuPositionSchema(BaseModel):
-    position_id: int
+class UserBase(BaseModel):
     name: Optional[str] = None
-    description: Optional[str] = None
-    photo_url: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class MenuPositionOut(BaseModel):
-    position_id: int
-    name: Optional[str] = None
-    description: Optional[str] = None
-    photo_url: Optional[str] = None
-    price: Optional[float] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ---------- Favorites / last orders ----------
-
-class UserFavoriteSchema(BaseModel):
-    user_id: int
-    position_id: int
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class UserLastOrdersSchema(BaseModel):
-    user_id: int
-    last_ordered_date: datetime
-    position_id: int
-    menupositions: MenuPositionSchema
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-# ---------- User ----------
-
-class UserSchema(BaseModel):
-    user_id: int
-    name: Optional[str] = None
-    email: Optional[str] = None
+    email: EmailStr
     phone: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[str] = "client"
 
-    favorites: List[UserFavoriteSchema] = []
-    last_orders: List[UserLastOrdersSchema] = []
-    addresses: List[AddressSchema] = []
+
+class UserCreate(UserBase):
+    password: str
+
+
+class UserSchema(UserBase):
+    user_id: int
+    created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
-
-# ---------- Order item ----------
 
 class OrderItemBase(BaseModel):
-    menu_position_id: int
-    quantity: int
+    product_name: Optional[str] = None
+    quantity: Optional[int] = None
+    price: Optional[float] = None
 
 
 class OrderItemCreate(OrderItemBase):
     pass
 
 
-class OrderItemUpdate(BaseModel):
-    quantity: int
-
-
-class OrderItemOut(BaseModel):
-    order_item_id: int
-    menu_position_id: int
-    quantity: int
-    price_snapshot: float
+class OrderItemSchema(OrderItemBase):
+    item_id: int
 
     model_config = ConfigDict(from_attributes=True)
 
 
-# ---------- Order ----------
-
 class OrderBase(BaseModel):
-    order_type: OrderType = OrderType.pickup
-    address_id: Optional[int] = None
-    notes: Optional[str] = None
+    user_id: Optional[int] = None
+    status: Optional[str] = None
+    priority: Optional[int] = 0
+    eta_minutes: Optional[int] = None
 
 
 class OrderCreate(OrderBase):
-    pass
+    items: List[OrderItemCreate] = []
+
+
+class OrderSchema(OrderBase):
+    order_id: int
+    created_at: Optional[datetime] = None
+    items: List[OrderItemSchema] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ===== Compatibility aliases for old imports =====
+
+DeliveryOrderDB = OrderDB
+UserAddress = UserAddressDB
+
+
+class KitchenUpdateCreate(BaseModel):
+    order_id: int | None = None
+    status: str | None = None
+    eta_minutes: int | None = None
+
+
+class DeliveryOrderIn(BaseModel):
+    user_id: int | None = None
+    status: str | None = None
+    priority: int | None = 0
+    eta_minutes: int | None = None
+
+
+class DeliveryOrderOut(DeliveryOrderIn):
+    order_id: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class GoogleAuthRequest(BaseModel):
+    token: str
+
+
+class AddressCreate(BaseModel):
+    user_id: int
+    street: str
+    city: str
+    postal: str
+    phone: str | None = None
+    is_primary: bool | None = False
+
+
+class AddressUpdate(BaseModel):
+    street: str | None = None
+    city: str | None = None
+    postal: str | None = None
+    phone: str | None = None
+    is_primary: bool | None = None
 
 
 class OrderUpdate(BaseModel):
-    address_id: Optional[int] = None
-    notes: Optional[str] = None
-    status: Optional[OrderStatus] = None
+    status: str | None = None
+    priority: int | None = None
+    eta_minutes: int | None = None
 
 
-class OrderOut(BaseModel):
-    order_id: int
-    user_id: int
-    order_type: OrderType
-    status: OrderStatus
-    address: Optional[AddressSchema] = None
-    notes: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    items: List[OrderItemOut] = []
+class OrderItemUpdate(BaseModel):
+    product_name: str | None = None
+    quantity: int | None = None
+    price: float | None = None
 
-    model_config = ConfigDict(from_attributes=True)
+class SessionsDB(Base):
+    __tablename__ = "Sessions"
 
-
-# ---------- Legacy delivery ----------
-
-class DeliveryOrderIn(BaseModel):
-    user_id: Optional[int] = None
-    status: Optional[str] = None
-    priority: Optional[bool] = None
-    eta_minutes: Optional[int] = None
-
-
-class DeliveryOrderOut(BaseModel):
-    order_id: int
-    user_id: Optional[int] = None
-    status: Optional[str] = None
-    priority: Optional[bool] = None
-    eta_minutes: Optional[int] = None
-    created_at: Optional[datetime] = None
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class DeliveryOrder(BaseModel):
-    customer_name: str = Field(..., example="Jan Kowalski")
-    address: str = Field(..., example="ul. Kwiatowa 12, Warszawa")
-    phone: str = Field(..., example="+48 123 456 789")
-    items: str = Field(..., example="Pizza Margherita x2, Cola x1")
-    notes: Optional[str] = Field(None, example="Bez cebuli")
-
-    model_config = ConfigDict(from_attributes=True)
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("Users.user_id"), nullable=False, index=True)
+    session_token = Column(String, nullable=False)

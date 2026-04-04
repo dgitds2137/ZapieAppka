@@ -2,13 +2,12 @@ from fastapi import FastAPI, Depends
 from router import routes
 
 from sqlalchemy.orm import Session
-
-from models import DeliveryOrderDB, DeliveryOrder, UserSchema   
+from models import Base, OrderDB, OrderSchema, UserDB, UserSchema
 from fastapi import HTTPException
 from db import get_db
 from models import DeliveryOrderDB, KitchenUpdateDB, KitchenUpdateCreate, MenuPositionDB, DeliveryOrderIn, SessionsDB, UserAddress, AddressCreate, AddressUpdate
-from models import UsersDB
-from models import OrderCreate, OrderUpdate, Order, OrderItemCreate, OrderItem, OrderItemUpdate, AddressCreate
+from models import UserDB, DeliveryOrderOut, DeliveryOrderIn, OrderUpdate, OrderItemUpdate
+from models import OrderCreate, OrderUpdate, OrderDB, OrderItemCreate, OrderItemDB, OrderItemUpdate, AddressCreate
 import bcrypt
 import jwt
 import uuid
@@ -185,7 +184,7 @@ class OrderService:
         return order
 
 
-    def create_order(db: Session, user_id: int, data: OrderCreate) -> Order:
+    def create_order(db: Session, user_id: int, data: OrderCreate) -> OrderDB:
         order = Order(
             user_id=user_id,
             order_type=data.order_type,
@@ -199,7 +198,7 @@ class OrderService:
         return order
 
 
-    def get_order(db: Session, order_id: int, user_id: int | None = None) -> Order | None:
+    def get_order(db: Session, order_id: int, user_id: int | None = None) -> OrderDB | None:
         q = db.query(Order).options(joinedload(Order.items))
         if user_id:
             q = q.filter(Order.user_id == user_id)
@@ -207,8 +206,8 @@ class OrderService:
 
 
     def update_order(
-        db: Session, order: Order, data: OrderUpdate
-    ) -> Order:
+        db: Session, order: OrderDB, data: OrderUpdate
+    ) -> OrderDB:
         if order.status not in [OrderStatus.draft, OrderStatus.submitted]:
             return order  # blokada edycji
 
@@ -222,7 +221,7 @@ class OrderService:
         return order
 
 
-    def submit_order(db: Session, order: Order) -> Order:
+    def submit_order(db: Session, order: OrderDB) -> OrderDB:
         if order.status == OrderStatus.draft:
             order.status = OrderStatus.submitted
             db.commit()
@@ -231,8 +230,8 @@ class OrderService:
 
 
     def add_item_to_order(
-        db: Session, order: Order, data: OrderItemCreate
-    ) -> OrderItem:
+        db: Session, order: OrderDB, data: OrderItemCreate
+    ) -> OrderItemDB:
         if order.status not in [OrderStatus.draft, OrderStatus.submitted]:
             raise ValueError("Order cannot be modified")
 
@@ -265,8 +264,8 @@ class OrderService:
 
 
     def update_order_item(
-        db: Session, order: Order, item_id: int, data: OrderItemUpdate
-    ) -> OrderItem | None:
+        db: Session, order: OrderDB, item_id: int, data: OrderItemUpdate
+    ) -> OrderItemDB | None:
         if order.status not in [OrderStatus.draft, OrderStatus.submitted]:
             return None
 
@@ -285,7 +284,7 @@ class OrderService:
         return item
 
 
-    def delete_order_item(db: Session, order: Order, item_id: int) -> bool:
+    def delete_order_item(db: Session, order: OrderDB, item_id: int) -> bool:
         if order.status not in [OrderStatus.draft, OrderStatus.submitted]:
             return False
 
@@ -301,7 +300,7 @@ class OrderService:
         return True
 
 
-    def get_user_orders(db: Session, user_id: int, limit: int = 20) -> list[Order]:
+    def get_user_orders(db: Session, user_id: int, limit: int = 20) -> list[OrderDB]:
         return (
             db.query(Order)
             .options(joinedload(Order.items))
@@ -312,7 +311,7 @@ class OrderService:
         )
 
 
-    def reorder_from_existing(db: Session, source_order_id: int, user_id: int) -> Order | None:
+    def reorder_from_existing(db: Session, source_order_id: int, user_id: int) -> OrderDB | None:
         source = get_order(db, source_order_id, user_id=user_id)
         if not source:
             return None
