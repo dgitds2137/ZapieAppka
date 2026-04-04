@@ -1,3 +1,5 @@
+from http.client import HTTPException
+
 from fastapi import APIRouter, Depends, Form
 from sqlalchemy.orm import Session
 from models import (
@@ -12,8 +14,9 @@ from models import (
     AddressCreate,
     AddressUpdate,
     OrderUpdate,
-    OrderItemUpdate
+    OrderItemUpdate,
 )
+
 import base64
 from datetime import datetime, timedelta
 
@@ -43,7 +46,7 @@ def routes(OrderService, KitchenService, MenuService, UserService, get_db):
     @r.post("/login")
     def login(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
         decoded_pwd = base64.b64decode(password.encode("utf-8")).decode("utf-8")
-        
+
         return UserService(db).login(email, decoded_pwd)
     
     @r.get("/get_user/{email}", response_model=UserSchema)

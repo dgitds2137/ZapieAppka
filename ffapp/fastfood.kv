@@ -76,154 +76,67 @@ ScreenManager:
 <DashboardScreen>:
     name: "dashboard"
 
-    MDBoxLayout:
-        orientation: "vertical"
-
-        MDLabel:
-            text: "Popular"
-            font_style: "Label"
-            halign: "left"
-            padding_x: dp(10)
+    MDScreen:
+        md_bg_color: 0, 0, 0, 1
 
         ScrollView:
-            size_hint_y: None
-            height: dp(300)
-            do_scroll_x: True
-            do_scroll_y: False
-            bar_width: 0
+            do_scroll_x: False
 
-            MDBoxLayout:
-                id: popular_box
-                orientation: "horizontal"
-                adaptive_width: True
-                size_hint_y: None
-                height: dp(300)
-                spacing: dp(10)
-                padding: dp(10)
-
-        MDLabel:
-            text: "Last"
-            font_style: "Label"
-            halign: "left"
-            padding_x: dp(10)
-
-        ScrollView:
-            size_hint_y: None
-            height: dp(300)
-            do_scroll_x: True
-            do_scroll_y: False
-            bar_width: 0
-
-            MDBoxLayout:
-                id: last_orders_box
-                orientation: "horizontal"
-                adaptive_width: True
-                size_hint_y: None
-                height: dp(300)
-                spacing: dp(10)
-                padding: dp(10)
-
-        MDLabel:
-            text: "Ulubione"
-            font_style: "Label"
-            halign: "left"
-            padding_x: dp(10)
-
-        ScrollView:
-            size_hint_y: None
-            height: dp(300)
-            do_scroll_x: True
-            do_scroll_y: False
-            bar_width: 0
-
-            MDBoxLayout:
-                id: favorites_box
-                orientation: "horizontal"
-                adaptive_width: True
-                size_hint_y: None
-                height: dp(300)
-                spacing: dp(10)
-                padding: dp(10)
-
-        # --- FAB koszyka ---
-        FloatLayout:
-            size_hint_y: None
-            height: dp(80)
-
-            MDFabButton:
-                id: cart_btn
-                icon: "cart"
-                md_bg_color: 1, 0.5, 0, 1
-                pos_hint: {"right": 0.95, "y": 0.05}
-                on_release: app.open_cart()
-
-
-
-            MDLabel:
-                id: cart_count
-                text: ""   # pusty, dopóki koszyk jest pusty
-                halign: "center"
-                font_style: "Label"
-                size_hint: None, None
-                size: dp(24), dp(24)
-                pos_hint: {"right": 1, "y": 0.15}
-                theme_text_color: "Custom"
-                text_color: 1, 1, 1, 1
-
-        # --- dolny pasek nawigacyjny ---
-        MDBoxLayout:
-            orientation: "horizontal"
-            size_hint_y: None
-            height: dp(70)
-            md_bg_color: (1, 0.5, 0, 1)   # intensywny pomarańcz
-
-            # Odbiór osobisty
             MDBoxLayout:
                 orientation: "vertical"
-                size_hint_x: 0.33
-                padding: dp(5)
-                md_bg_color: (1, 0.5, 0, 1)
-                MDIconButton:
-                    icon: "store"
-                    pos_hint: {"center_x": 0.5}
-                    on_release: app.handle_pickup()
+                adaptive_height: True
+                padding: dp(16)
+                spacing: dp(20)
+
                 MDLabel:
-                    text: "Odbiór"
-                    halign: "center"
+                    text: "Popularne"
+                    bold: True
+                    font_size: "28sp"
                     theme_text_color: "Custom"
-                    text_color: 1,1,1,1
+                    text_color: 1, 1, 1, 1
+                    size_hint_y: None
+                    height: self.texture_size[1]
 
-            # Historia zamówień
-            MDBoxLayout:
-                orientation: "vertical"
-                size_hint_x: 0.33
-                padding: dp(5)
-                MDIconButton:
-                    icon: "clipboard-text-clock-outline"
-                    pos_hint: {"center_x": 0.5}
-                    on_release: app.handle_delivery()
-                MDLabel:
-                    text: "Historia zamówien"
-                    halign: "center"
-                    theme_text_color: "Custom"
-                    text_color: 1,1,1,1
+                MDGridLayout:
+                    id: products_grid
+                    cols: 2
+                    adaptive_height: True
+                    spacing: dp(12)
 
-            # Profil
-            MDBoxLayout:
-                orientation: "vertical"
-                size_hint_x: 0.33
-                padding: dp(5)
-                MDIconButton:
-                    icon: "account-circle"
-                    pos_hint: {"center_x": 0.5}
-                    on_release: app.open_profile()
-                MDLabel:
-                    text: "Profil"
-                    halign: "center"
-                    theme_text_color: "Custom"
-                    text_color: 1,1,1,1
+<ProductCard>:
+    orientation: "vertical"
+    size_hint_y: None
+    height: dp(220)
+    radius: [18, 18, 18, 18]
+    elevation: 0
+    padding: dp(8)
+    spacing: dp(8)
+    md_bg_color: 0.12, 0.12, 0.12, 1
 
+    AsyncImage:
+        source: root.image
+        size_hint_y: None
+        height: dp(120)
+        allow_stretch: True
+        keep_ratio: False
 
+    MDLabel:
+        text: root.title
+        bold: True
+        theme_text_color: "Custom"
+        text_color: 1, 1, 1, 1
+        font_size: "18sp"
+        size_hint_y: None
+        height: self.texture_size[1]
+
+    MDLabel:
+        text: root.desc
+        theme_text_color: "Custom"
+        text_color: 0.75, 0.75, 0.75, 1
+        font_size: "13sp"
+        text_size: self.width, None
+        size_hint_y: None
+        height: self.texture_size[1]
 
 <DeliveryScreen>:
     name: "delivery"
@@ -266,160 +179,184 @@ ScreenManager:
 <RegisterScreen>:
     name: "register"
 
-    MDFloatLayout:
-        md_bg_color: 1, 0.95, 0.9, 1   # jasne, kremowe tło
+    MDScreen:
+        md_bg_color: 0.98, 0.95, 0.92, 1
 
-        # pasek nagłówka
         MDBoxLayout:
-            orientation: "horizontal"
-            size_hint_y: None
-            height: "120dp"
-            md_bg_color: 1, 0.4, 0.2, 1   # intensywny burgerowy pomarańcz
-            padding: dp(20)
-
-            MDLabel:
-                text: "🍔 Rejestracja"
-                font_style: "Title"
-                halign: "center"
-                theme_text_color: "Custom"
-                text_color: 1,1,1,1
-
-        # formularz w karcie
-        MDCard:
             orientation: "vertical"
-            size_hint: .9, None
-            height: self.minimum_height
-            pos_hint: {"center_x": .5, "center_y": .5}
-            padding: dp(25)
-            spacing: dp(20)
-            radius: [20, 20, 20, 20]
-            md_bg_color: 1,1,1,1
-            elevation: 8
+            padding: dp(20)
+            spacing: dp(16)
 
-            MDLabel:
-                text: "Utwórz konto"
-                halign: "center"
-                font_style: "Title"
-                theme_text_color: "Primary"
+            Widget:
+                size_hint_y: 0.08
 
-            MDTextField:
-                id: email
-                hint_text: "Email"
-                mode: "filled"
-                fill_color: 1, 0.95, 0.9, 1
-                icon_right: "email"
+            MDCard:
+                orientation: "vertical"
+                size_hint: None, None
+                size: dp(320), dp(500)
+                pos_hint: {"center_x": 0.5}
+                padding: dp(24)
+                spacing: dp(16)
+                radius: [22, 22, 22, 22]
+                elevation: 0
+                md_bg_color: 0.93, 0.93, 0.96, 1
 
-            MDTextField:
-                id: phone
-                hint_text: "Numer telefonu"
-                input_filter: "int"
-                mode: "filled"
-                fill_color: 1, 0.95, 0.9, 1
-                icon_right: "phone"
+                MDLabel:
+                    text: "Rejestracja"
+                    halign: "center"
+                    bold: True
+                    font_style: "Headline"
+                    size_hint_y: None
+                    height: self.texture_size[1]
 
-            MDTextField:
-                id: password
-                hint_text: "Hasło"
-                password: True
-                mode: "filled"
-                fill_color: 1, 0.95, 0.9, 1
-                icon_right: "lock"
+                MDTextField:
+                    id: email
+                    mode: "outlined"
 
-            MDButton:
-                text: "Zarejestruj"
-                md_bg_color: 1, 0.5, 0, 1
-                text_color: 1, 1, 1, 1
-                on_release: app.register()
+                    MDTextFieldHintText:
+                        text: "Email"
 
-            MDButton:
-                text: "Zaloguj przez Google"
-                md_bg_color: 1, 0, 0, 1  # czerwony Google
-                text_color: 1, 1, 1, 1
-                on_release: app.google_login()
+                    MDTextFieldTrailingIcon:
+                        icon: "email-outline"
+
+                MDTextField:
+                    id: phone
+                    mode: "outlined"
+
+                    MDTextFieldHintText:
+                        text: "Telefon"
+
+                    MDTextFieldTrailingIcon:
+                        icon: "phone-outline"
+
+                MDTextField:
+                    id: password
+                    mode: "outlined"
+                    password: True
+
+                    MDTextFieldHintText:
+                        text: "Hasło"
+
+                    MDTextFieldTrailingIcon:
+                        icon: "lock-outline"
+
+                Widget:
+                    size_hint_y: None
+                    height: dp(4)
+
+                MDButton:
+                    style: "filled"
+                    pos_hint: {"center_x": 0.5}
+                    on_release: app.register()
+
+                    MDButtonText:
+                        text: "Załóż konto"
+
+                MDButton:
+                    style: "text"
+                    pos_hint: {"center_x": 0.5}
+                    on_release: app.switch_to_login()
+
+                    MDButtonText:
+                        text: "Masz już konto? Zaloguj się"
+
+                Widget:
+                    size_hint_y: None
+                    height: dp(8)
+
+            Widget:
+                size_hint_y: 0.12
 
 
 <LoginScreen>:
     name: "login"
 
-    MDFloatLayout:
-        md_bg_color: 1, 0.95, 0.9, 1   # jasne tło w ciepłym odcieniu
+    MDScreen:
+        md_bg_color: 0.98, 0.95, 0.92, 1
 
-        # pasek u góry
         MDBoxLayout:
-            orientation: "horizontal"
-            size_hint_y: None
-            height: "120dp"
-            md_bg_color: 1, 0.4, 0.2, 1
-            padding: dp(20)
-
-            MDLabel:
-                text: "🍟 FastFoodApp"
-                font_style: "Title"
-                halign: "center"
-                theme_text_color: "Custom"
-                text_color: 1,1,1,1
-
-        # formularz
-        MDCard:
             orientation: "vertical"
-            size_hint: .9, None
-            height: self.minimum_height
-            pos_hint: {"center_x": .5, "center_y": .5}
-            padding: dp(25)
-            spacing: dp(20)
-            radius: [20, 20, 20, 20]
-            md_bg_color: 1,1,1,1
-            elevation: 8
+            padding: dp(20)
+            spacing: dp(16)
 
-            MDLabel:
-                text: "Logowanie"
-                halign: "center"
-                font_style: "Title"
-                theme_text_color: "Primary"
+            Widget:
+                size_hint_y: 0.12
 
-            MDTextField:
-                id: email
-                hint_text: "Email"
-                mode: "filled"
-                fill_color: 1, 0.95, 0.9, 1
-                icon_right: "email"
-
-            MDTextField:
-                id: password
-                hint_text: "Hasło"
-                password: True
-                mode: "filled"
-                fill_color: 1, 0.95, 0.9, 1
-                icon_right: "lock"
-
-            MDButton:
-                text: "Zaloguj"
-                md_bg_color: 1, 0.5, 0, 1
-                text_color: 1, 1, 1, 1
-                elevation: 0
-                on_release: app.login()
-                size_hint_y: None
-                height: "52dp"
-                font_size: "26sp"
-                bold: True
-
-            MDButton:
-                text: "Nie masz konta? Zarejestruj się"
-                style: "text"
-                on_release: app.switch_to_register()
-
-            MDCircularProgressIndicator:
-                id: login_spinner
+            MDCard:
+                orientation: "vertical"
                 size_hint: None, None
-                size: dp(46), dp(46)
-                active: False
-                pos_hint: {"center_x": .5}
+                size: dp(320), dp(520)
+                pos_hint: {"center_x": 0.5}
+                padding: dp(24)
+                spacing: dp(16)
+                radius: [22, 22, 22, 22]
+                elevation: 0
+                md_bg_color: 0.93, 0.93, 0.96, 1
 
-            MDButton:
-                text: "Zaloguj przez Google"
-                md_bg_color: 1, 0, 0, 1
-                text_color: 1, 1, 1, 1
-                on_release: app.google_login()
+                MDLabel:
+                    text: "Logowanie"
+                    halign: "center"
+                    font_style: "Headline"
+                    role: "small"
+                    bold: True
+                    size_hint_y: None
+                    height: self.texture_size[1]
+
+                MDTextField:
+                    id: email
+                    mode: "outlined"
+
+                    MDTextFieldHintText:
+                        text: "Email"
+
+                    MDTextFieldTrailingIcon:
+                        icon: "email-outline"
+
+                MDTextField:
+                    id: password
+                    mode: "outlined"
+                    password: True
+
+                    MDTextFieldHintText:
+                        text: "Hasło"
+
+                    MDTextFieldTrailingIcon:
+                        icon: "lock-outline"
+
+                MDButton:
+                    style: "filled"
+                    pos_hint: {"center_x": 0.5}
+                    on_release: app.login()
+
+                    MDButtonText:
+                        text: "Zaloguj"
+
+                MDButton:
+                    style: "text"
+                    pos_hint: {"center_x": 0.5}
+                    on_release: app.switch_to_register()
+
+                    MDButtonText:
+                        text: "Nie masz konta? Zarejestruj się"
+
+                MDCircularProgressIndicator:
+                    id: login_spinner
+                    size_hint: None, None
+                    size: dp(36), dp(36)
+                    pos_hint: {"center_x": 0.5}
+                    active: False
+
+                MDButton:
+                    style: "outlined"
+                    pos_hint: {"center_x": 0.5}
+                    on_release: app.google_login()
+
+                    MDButtonText:
+                        text: "Zaloguj przez Google"
+
+            Widget:
+                size_hint_y: 0.12
+
 
 
 <CartScreen>:

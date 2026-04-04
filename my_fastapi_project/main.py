@@ -1,17 +1,35 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, HTTPException
+from sqlalchemy.orm import Session, joinedload
+
+from db import get_db
 from router import routes
 
-from sqlalchemy.orm import Session
-from models import Base, OrderDB, OrderSchema, UserDB, UserSchema
-from fastapi import HTTPException
-from db import get_db
-from models import DeliveryOrderDB, KitchenUpdateDB, KitchenUpdateCreate, MenuPositionDB, DeliveryOrderIn, SessionsDB, UserAddress, AddressCreate, AddressUpdate
-from models import UserDB, DeliveryOrderOut, DeliveryOrderIn, OrderUpdate, OrderItemUpdate
-from models import OrderCreate, OrderUpdate, OrderDB, OrderItemCreate, OrderItemDB, OrderItemUpdate, AddressCreate
+from models import (
+    AddressCreate,
+    AddressUpdate,
+    DeliveryOrderDB,
+    DeliveryOrderIn,
+    DeliveryOrderOut,
+    KitchenUpdateCreate,
+    KitchenUpdateDB,
+    MenuPositionDB,
+    OrderCreate,
+    OrderDB,
+    OrderItemCreate,
+    OrderItemDB,
+    OrderItemSchema,
+    OrderSchema,
+    OrderUpdate,
+    OrderItemUpdate,
+    SessionsDB,
+    UserAddress,
+    UserCreate,
+    UserDB,
+    UserSchema,
+)
 import bcrypt
 import jwt
 import uuid
-import base64
 
 SECRET_KEY = "supersecret"
 ALGORITHM = "HS256"
@@ -35,7 +53,8 @@ class UserService:
         self.db = db
     
     def check_user(self, user_id: int):
-        user = self.db.query(UsersDB).filter(UsersDB.user_id == user_id).first()
+        user = self.db.query(UserDB).filter(UserDB.user_id == user_id).first()
+        print(user)
         if not user:
             return None
         else: 
@@ -46,7 +65,7 @@ class UserService:
         hashed_pwd = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
         # utwórz encję
-        new_user = UsersDB(email=email, phone=telephone_number, password=hashed_pwd, role="client")
+        new_user = UserDB(email=email, phone=telephone_number, password=hashed_pwd, role="client")
 
         # zapisz w DB
         self.db.add(new_user)
@@ -58,7 +77,8 @@ class UserService:
     # NA RAZIE na sztywno – np. user 1
         return 1
     def get_user(self, email: str):
-        user = self.db.query(UsersDB).filter(UsersDB.email == email).first()
+        user = self.db.query(UserDB).filter(UserDB.email == email).first()
+        print(user)
         if not user:
             return None
         user_json = UserSchema.model_validate(user).dict()
@@ -136,15 +156,16 @@ class UserService:
         db.delete(addr)
         db.commit()
         return True
+    
     def login(self, email: str, password: str):
 
-        user = self.db.query(UsersDB).filter(UsersDB.email == email).first()
+        user = self.db.query(UserDB).filter(UserDB.email == email).first()
+        print(user, password)
         if not user:
-            return None
+            raise HTTPException(status_code=404, detail="User not found")
         
-
         if not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
-            return {"error": "Invalid credentials"}
+            raise HTTPException(status_code=401, detail="Invalid credentials")
         
         jwt_token = jwt.encode({"sub": str(user.user_id)}, SECRET_KEY, algorithm=ALGORITHM)
         session_token = str(uuid.uuid4())

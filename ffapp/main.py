@@ -42,6 +42,11 @@ from kivymd.app import MDApp
 from kivymd.uix.appbar import MDTopAppBar
 from kivymd.uix.screen import MDScreen
 
+
+Window.size = (600, 980)
+Window.minimum_width = 600
+Window.minimum_height = 980
+
 class PositionTile(ButtonBehavior, BoxLayout):
     pass
 
@@ -60,6 +65,50 @@ class LoginScreen(MDScreen):
 
 class DashboardScreen(MDScreen):
     pass
+from kivymd.uix.screen import MDScreen
+from kivy.lang import Builder
+import httpx
+
+
+class DashboardScreen(MDScreen):
+
+    def on_enter(self):
+        self.load_products()
+
+    def load_products(self):
+        try:
+            resp = httpx.get("http://127.0.0.1:8000/positions")
+
+            if resp.status_code == 200:
+                products = resp.json()
+                self.show_products(products)
+            else:
+                print("Błąd pobierania pozycji:", resp.status_code, resp.text)
+
+        except Exception as e:
+            print("Błąd ładowania produktów:", e)
+
+    def show_products(self, products):
+        grid = self.ids.products_grid
+        grid.clear_widgets()
+
+        for p in products:
+            card = ProductCard(
+                title=str(p.get("name", "")),
+                desc=str(p.get("description", "")),
+                image=str(p.get("image_url", "")),
+            )
+            grid.add_widget(card)
+
+from kivy.properties import StringProperty
+from kivymd.uix.card import MDCard
+from kivymd.uix.screen import MDScreen
+import httpx
+
+class ProductCard(MDCard):
+    title = StringProperty("")
+    desc = StringProperty("")
+    image = StringProperty("")
 
 class DeliveryScreen(MDScreen):
     pass
