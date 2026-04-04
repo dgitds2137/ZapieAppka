@@ -73,70 +73,120 @@ ScreenManager:
             on_release: app.add_to_cart(root.position)
 
 
+<ProductCard>:
+    size_hint: None, None
+    size: dp(260), dp(230)
+    radius: [22, 22, 22, 22]
+    elevation: 0
+    md_bg_color: 0.10, 0.10, 0.10, 0.96
+    padding: dp(12)
+    ripple_behavior: True
+
+    BoxLayout:
+        orientation: "vertical"
+        spacing: dp(8)
+
+        RelativeLayout:
+            size_hint_y: None
+            height: dp(130)
+
+            AsyncImage:
+                source: root.image
+                allow_stretch: True
+                keep_ratio: False
+
+            MDIconButton:
+                icon: "cart-outline"
+                theme_icon_color: "Custom"
+                icon_color: 1, 1, 1, 1
+                pos_hint: {"x": 0.0, "top": 1}
+
+            MDIconButton:
+                icon: "heart-outline"
+                theme_icon_color: "Custom"
+                icon_color: 1, 1, 1, 1
+                pos_hint: {"right": 1, "top": 1}
+
+            MDLabel:
+                text: root.prep_time
+                theme_text_color: "Custom"
+                text_color: 1, 1, 1, 1
+                halign: "right"
+                pos_hint: {"right": 0.98, "y": 0.0}
+
+        MDLabel:
+            text: root.title
+            bold: True
+            theme_text_color: "Custom"
+            text_color: 1, 1, 1, 1
+            adaptive_height: True
+
+        MDLabel:
+            text: root.desc
+            theme_text_color: "Custom"
+            text_color: 0.85, 0.85, 0.85, 1
+            size_hint_y: None
+            height: dp(38)
+            text_size: self.width, None
+            shorten: True
+            shorten_from: "right"
+            max_lines: 2
+
+        MDLabel:
+            text: root.calories
+            theme_text_color: "Custom"
+            text_color: 0.65, 0.65, 0.65, 1
+            halign: "right"
+
+
 <DashboardScreen>:
     name: "dashboard"
 
-    MDScreen:
-        md_bg_color: 0, 0, 0, 1
+    FloatLayout:
+        canvas.before:
+            Color:
+                rgba: 0, 0, 0, 1
+            Rectangle:
+                pos: self.pos
+                size: self.size
 
         ScrollView:
             do_scroll_x: False
+            do_scroll_y: True
+            size_hint: 1, 1
 
-            MDBoxLayout:
+            BoxLayout:
                 orientation: "vertical"
-                adaptive_height: True
-                padding: dp(16)
+                size_hint_y: None
+                height: self.minimum_height
                 spacing: dp(20)
+                padding: dp(12), dp(20), dp(12), dp(120)
 
                 MDLabel:
                     text: "Popularne"
                     bold: True
-                    font_size: "28sp"
                     theme_text_color: "Custom"
                     text_color: 1, 1, 1, 1
                     size_hint_y: None
                     height: self.texture_size[1]
 
-                MDGridLayout:
-                    id: products_grid
-                    cols: 2
-                    adaptive_height: True
-                    spacing: dp(12)
+                ScrollView:
+                    size_hint_y: None
+                    height: dp(240)
+                    do_scroll_y: False
+                    do_scroll_x: True
+                    bar_width: 0
 
-<ProductCard>:
-    orientation: "vertical"
-    size_hint_y: None
-    height: dp(220)
-    radius: [18, 18, 18, 18]
-    elevation: 0
-    padding: dp(8)
-    spacing: dp(8)
-    md_bg_color: 0.12, 0.12, 0.12, 1
+                    BoxLayout:
+                        id: popular_box
+                        orientation: "horizontal"
+                        size_hint_x: None
+                        width: self.minimum_width
+                        spacing: dp(14)
+                        padding: dp(2), dp(2)
 
-    AsyncImage:
-        source: root.image
-        size_hint_y: None
-        height: dp(120)
-        allow_stretch: True
-        keep_ratio: False
-
-    MDLabel:
-        text: root.title
-        bold: True
-        theme_text_color: "Custom"
-        text_color: 1, 1, 1, 1
-        font_size: "18sp"
-        size_hint_y: None
-        height: self.texture_size[1]
-
-    MDLabel:
-        text: root.desc
-        theme_text_color: "Custom"
-        text_color: 0.75, 0.75, 0.75, 1
-        font_size: "13sp"
-        text_size: self.width, None
-        size_hint_y: None
-        height: self.texture_size[1]
+                # tutaj zostawiasz swoje obecne dolne sekcje z ekranu:
+                # ostatnio zamawiane / ulubione / kategorie / bottom bar / FAB
 
 <DeliveryScreen>:
     name: "delivery"
