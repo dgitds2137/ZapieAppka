@@ -1,5 +1,6 @@
 #:import dp kivy.metrics.dp
 #:import FitImage kivymd.uix.fitimage.fitimage.FitImage
+#:import sp kivy.metrics.sp
 
 ScreenManager:
     RegisterScreen:
@@ -195,12 +196,11 @@ ScreenManager:
                 padding: dp(12), dp(20), dp(12), dp(120)
 
                 MDLabel:
-                    font_name: "fonts/Poppins-Bold.ttf"
-                    font_size: dp(48)
+                    id: popular_label
                     text: "Popularne"
-                    bold: True
+                    font_name: "fonts/Poppins-Bold.ttf"
                     theme_text_color: "Custom"
-                    text_color: 1, 1, 1, 1
+                    text_color: 1, 0, 0, 1
                     size_hint_y: None
                     height: self.texture_size[1]
 

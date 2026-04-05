@@ -48,6 +48,7 @@ from kivymd.uix.card import MDCard
 import requests
 
 API = "http://127.0.0.1:8000"
+from kivy.metrics import sp
 
 
 from kivy.uix.behaviors import ButtonBehavior
@@ -64,6 +65,7 @@ class ProductCard(ButtonBehavior, BoxLayout):
 
 class DashboardScreen(MDScreen):
     def on_pre_enter(self, *args):
+        self.ids.popular_label.font_size = sp(48)
         self.load_products()
 
     def load_products(self):
@@ -205,7 +207,7 @@ class FastFoodApp(MDApp):
     def build(self):
         token = self.load_token()
         print("token", token)
-
+        self.theme_cls.font_styles["H1"] = ["Poppins", 32, False, 0.15]
         if token:
             self.root.current = "dashboard"
         else:
