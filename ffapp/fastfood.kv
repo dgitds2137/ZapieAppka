@@ -55,7 +55,8 @@ ScreenManager:
         MDLabel:
             id: pos_title
             text: ""
-            font_style: "Title"
+            font_name: "fonts/Inter-Regular.ttf"
+            font_size: dp(12)
             halign: "center"
             size_hint_y: None
             height: dp(40)
@@ -63,6 +64,8 @@ ScreenManager:
         MDLabel:
             id: pos_desc
             text: ""
+            font_name: "fonts/Inter-Medium.ttf"
+            font_size: dp(11)            
             halign: "center"
             theme_text_color: "Secondary"
             size_hint_y: None
@@ -82,7 +85,7 @@ ScreenManager:
 <ProductCard>:
     orientation: "vertical"
     size_hint: None, None
-    size: dp(280), dp(330)
+    size: dp(280), dp(345)
     padding: dp(10)
     spacing: dp(10)
 
@@ -94,9 +97,13 @@ ScreenManager:
             size: self.size
             radius: [24, 24, 24, 24]
 
+    Widget:
+        size_hint_y: None
+        height: dp(18)
+
     FloatLayout:
         size_hint_y: None
-        height: dp(155)
+        height: dp(140)
 
         MDCard:
             size_hint: 1, 1
@@ -116,13 +123,13 @@ ScreenManager:
             icon: "cart-outline"
             theme_icon_color: "Custom"
             icon_color: 1, 1, 1, 1
-            pos_hint: {"x": 0.0, "top": 0.98}
+            pos_hint: {"x": 0.0, "top": 0.96}
 
         MDIconButton:
             icon: "heart-outline"
             theme_icon_color: "Custom"
             icon_color: 1, 1, 1, 1
-            pos_hint: {"right": 1, "top": 0.98}
+            pos_hint: {"right": 1, "top": 0.96}
 
         MDLabel:
             text: root.prep_time
@@ -169,8 +176,9 @@ ScreenManager:
     FloatLayout:
         canvas.before:
             Color:
-                rgba: 0, 0, 0, 1
+                rgba: 1, 1, 1, 1
             Rectangle:
+                source: "background_big_ingredients.png"
                 pos: self.pos
                 size: self.size
 
@@ -187,6 +195,8 @@ ScreenManager:
                 padding: dp(12), dp(20), dp(12), dp(120)
 
                 MDLabel:
+                    font_name: "fonts/Poppins-Bold.ttf"
+                    font_size: dp(48)
                     text: "Popularne"
                     bold: True
                     theme_text_color: "Custom"
