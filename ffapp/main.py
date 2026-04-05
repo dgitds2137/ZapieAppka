@@ -1,4 +1,5 @@
 from kivymd.app import MDApp
+from kivy.app import App
 from kivy.core.window import Window
 import httpx
 import os
@@ -45,12 +46,17 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.properties import BooleanProperty, NumericProperty
 
 
-
-
+from kivy.uix.boxlayout import BoxLayout
+from kivymd.uix.card import MDCard
+from kivymd.uix.fitimage import FitImage
+from kivy.uix.floatlayout import FloatLayout
 from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivymd.uix.card import MDCard
-
+from kivy.animation import Animation
 from kivymd.uix.snackbar import MDSnackbar, MDSnackbarText
+
+from kivymd.uix.button import MDIconButton
+from kivymd.uix.label import MDLabel
 
 class ProductCard(BoxLayout):
     title = StringProperty("")
@@ -58,6 +64,7 @@ class ProductCard(BoxLayout):
     image = StringProperty("")
     calories = StringProperty("")
     prep_time = StringProperty("15 min")
+    price = StringProperty("0.00")
     position_id = NumericProperty(0)
     is_liked = BooleanProperty(False)
 
@@ -72,6 +79,7 @@ class ProductCard(BoxLayout):
         else:
             print(f"DELETE /favorites -> remove {self.position_id}")
 
+    
     def add_to_cart(self):
         app = App.get_running_app()
         screen = app.root.get_screen("dashboard")
@@ -105,24 +113,96 @@ class DashboardScreen(MDScreen):
         self.cart_items = []
     def on_pre_enter(self, *args):
         self.load_products()
-    def add_product_to_cart(self, product):
-        self.cart_items.append(product)
-        self.cart_visible = True
-        self.cart_count = len(self.cart_items)
 
-        self.cart_title = product["title"]
-        self.cart_image = product["image"]
-        self.cart_eta = product.get("prep_time", "15 min")
 
-        total = 0.0
+    def remove_cart_item(self, product, widget):
+        if product in self.cart_items:
+            self.cart_items.remove(product)
+
+        # usuń z UI
+        self.ids.cart_items_box.remove_widget(widget)
+
+        # update total
+        total = 0
         for item in self.cart_items:
             try:
-                total += float(str(item.get("price", "0")).replace("PLN", "").strip())
-            except Exception:
+                total += float(item["price"])
+            except:
                 pass
 
         self.cart_total = f"{total:.2f}"
-        print(f"[CART] items={self.cart_count}, total={self.cart_total}")
+
+        # jeśli pusty koszyk → schowaj pasek
+        if not self.cart_items:
+            self.cart_visible = False
+
+
+    def add_cart_item_widget(self, product):
+        box = self.ids.cart_items_box
+
+        container = FloatLayout(
+            size_hint=(None, 1),   # 🔥 pełna wysokość paska
+            width=100,             # tylko szerokość stała
+        )
+
+        # 🔥 tło (image card)
+        card = MDCard(
+            size_hint=(1, 1),
+            pos_hint={"x": 0, "y": 0},
+            radius=[12, 12, 12, 12],
+            md_bg_color=(0, 0, 0, 1),
+            elevation=0,
+            line_color=(0, 0, 0, 0),
+        )
+
+        img = FitImage(
+            source=product["image"],
+            radius=[12, 12, 12, 12],
+        )
+
+        card.add_widget(img)
+        container.add_widget(card)
+
+        # ❌ przycisk usuwania
+        remove_btn = MDIconButton(
+            icon="close",  # 🔥 mniejsze
+            theme_icon_color="Custom",
+            icon_color=(1, 1, 1, 1),
+            pos_hint={"right": 1, "top": 1},
+        )
+
+        remove_btn.bind(on_release=lambda x, p=product, w=container: self.remove_cart_item(p, w))
+        container.add_widget(remove_btn)
+
+        # 💰 cena na dole
+        price_label = MDLabel(
+            text=f"PLN {product['price']}",
+            theme_text_color="Custom",
+            text_color=(1, 1, 1, 1),
+            pos_hint={"x": 0.05, "y": 0.0},
+            size_hint=(None, None),
+        )
+        price_label.font_size = "10sp"
+        price_label.padding = (0, 2)
+        container.add_widget(price_label)
+
+        box.add_widget(container)
+    def add_product_to_cart(self, product):
+        self.cart_items.append(product)
+        self.cart_visible = True
+
+        # 🔥 update total
+        total = 0
+        for item in self.cart_items:
+            try:
+                total += float(item["price"])
+            except:
+                pass
+
+        self.cart_total = f"{total:.2f}"
+
+        # 🔥 dodaj mini element do UI
+        self.add_cart_item_widget(product)
 
     def hide_cart_bar(self):
         self.cart_visible = False
@@ -141,16 +221,17 @@ class DashboardScreen(MDScreen):
         box = self.ids.popular_box
         box.clear_widgets()
 
-        for p in products:
+        for product in products:
             card = ProductCard(
-                title=str(p.get("name", "")),
-                desc=str(p.get("description", "")),
-                image=str(p.get("photo_url", "")),
-                calories=f"kcal: {p.get('calories', 0)}" if p.get("calories") is not None else "",
+                title=product["name"],
+                desc=product["description"],
+                image=product["photo_url"],
+                calories=f"kcal: {product['calories']}",
                 prep_time="15 min",
-                position_id=int(p.get("position_id", 0) or 0),
+                price=str(product["price"]),
+                position_id=product["position_id"],
             )
-            card.bind(on_release=lambda inst, pos=p: App.get_running_app().open_position(pos))
+            card.bind(on_release=lambda inst, pos=product: App.get_running_app().open_position(pos))
             box.add_widget(card)
 
     def open_product(self, pos):

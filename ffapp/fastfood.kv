@@ -184,71 +184,65 @@ ScreenManager:
                     size_hint_y: None
                     height: dp(20)
 
-        MDCard:
+        BoxLayout:
             id: cart_bar
+            orientation: "horizontal"
             size_hint: 0.94, None
-            height: dp(86)
+            height: dp(150)
             pos_hint: {"center_x": 0.5}
-            y: dp(70) if root.cart_visible else -dp(120)
+            y: -dp(120)
             opacity: 1 if root.cart_visible else 0
             disabled: not root.cart_visible
-            radius: [18, 18, 18, 18]
-            elevation: 0
-            md_bg_color: 0.17, 0.17, 0.17, 0.98
+            spacing: dp(10)
+            padding: dp(10)
+
+            canvas.before:
+                Color:
+                    rgba: 0.08, 0.08, 0.08, 0.98
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [18, 18, 18, 18]
             line_color: 0, 0, 0, 0
 
             BoxLayout:
-                padding: dp(10)
                 spacing: dp(10)
+                padding: dp(10)
 
-                MDCard:
-                    size_hint: None, None
-                    size: dp(64), dp(64)
-                    radius: [12, 12, 12, 12]
-                    elevation: 0
-                    md_bg_color: 0, 0, 0, 1
-                    line_color: 0, 0, 0, 0
-
-                    FitImage:
-                        source: root.cart_image
-                        radius: [12, 12, 12, 12]
-
+                # 🔥 LEWA CZĘŚĆ (70%) — produkty
                 BoxLayout:
-                    orientation: "vertical"
-                    spacing: dp(4)
+                    size_hint_x: 0.7
 
-                    Label:
-                        text: root.cart_title if root.cart_title else "Koszyk"
-                        font_name: "fonts/Poppins-Bold.ttf"
-                        font_size: "13sp"
-                        color: 1, 1, 1, 1
-                        text_size: self.width, None
-                        halign: "left"
-                        valign: "middle"
-                        shorten: True
+                    ScrollView:
+                        do_scroll_y: False
+                        do_scroll_x: True
+                        bar_width: 0
 
-                    Label:
-                        text: f"{root.cart_count} szt."
-                        font_name: "fonts/Poppins-Bold.ttf"
-                        font_size: "11sp"
-                        color: 0.8, 0.8, 0.8, 1
-                        text_size: self.width, None
-                        halign: "left"
-                        valign: "middle"
+                        BoxLayout:
+                            id: cart_items_box
+                            orientation: "horizontal"
+                            size_hint_x: None
+                            width: self.minimum_width
+                            height: self.minimum_height
+                            size_hint_y: 1
+                            spacing: dp(10)
 
-                    Label:
-                        text: f"PLN {root.cart_total}"
-                        font_name: "fonts/Poppins-Bold.ttf"
-                        font_size: "12sp"
-                        color: 1, 1, 1, 1
-                        text_size: self.width, None
-                        halign: "left"
-                        valign: "middle"
-
-                BoxLayout:
-                    orientation: "vertical"
+                # 🔥 SEPARATOR
+                Widget:
                     size_hint_x: None
-                    width: dp(120)
+                    width: dp(1)
+
+                    canvas:
+                        Color:
+                            rgba: 0.3, 0.3, 0.3, 1
+                        Rectangle:
+                            pos: self.center_x - dp(0.5), self.y + dp(10)
+                            size: dp(1), self.height - dp(20)
+
+                # 🔥 PRAWA CZĘŚĆ (30%) — akcje
+                BoxLayout:
+                    orientation: "vertical"
+                    size_hint_x: 0.3
                     spacing: dp(6)
 
                     Label:
@@ -260,15 +254,26 @@ ScreenManager:
                         valign: "middle"
                         text_size: self.size
 
+                    Label:
+                        text: f"PLN {root.cart_total}"
+                        font_name: "fonts/Poppins-Bold.ttf"
+                        font_size: "12sp"
+                        color: 0.8, 0.8, 0.8, 1
+                        halign: "center"
+                        valign: "middle"
+                        text_size: self.size
+                        text_color: 1, 1, 1, 0.9
+
                     Button:
                         text: "DALEJ"
                         font_name: "fonts/Poppins-Bold.ttf"
-                        font_size: "16sp"
+                        font_size: "14sp"
                         bold: True
                         background_normal: ""
                         background_down: ""
                         background_color: 0.93, 0.50, 0.13, 1
                         color: 1, 1, 1, 1
+
 <DeliveryScreen>:
     name: "delivery"
 
@@ -489,80 +494,6 @@ ScreenManager:
                 size_hint_y: 0.12
 
 
-
-<CartScreen>:
-    name: "cart"
-
-    MDBoxLayout:
-        orientation: "vertical"
-        spacing: dp(10)
-        padding: dp(10)
-
-        MDLabel:
-            text: "Twój koszyk"
-            font_style: "Title"
-            halign: "center"
-            size_hint_y: None
-            height: dp(40)
-
-        ScrollView:
-            MDBoxLayout:
-                id: cart_box
-                orientation: "vertical"
-                adaptive_height: True
-                spacing: dp(10)
-
-        # --- pole na uwagi ---
-        MDTextField:
-            id: notes_field
-            hint_text: "Uwagi do zamówienia"
-            multiline: True
-            size_hint_y: None
-            height: dp(100)
-
-        # --- metoda dostawy ---
-        MDLabel:
-            text: "Metoda dostawy"
-            font_style: "Body"
-            halign: "left"
-            size_hint_y: None
-            height: dp(30)
-
-        MDBoxLayout:
-            orientation: "horizontal"
-            size_hint_y: None
-            height: dp(40)
-            spacing: dp(10)
-
-            MDCheckbox:
-                group: "delivery"
-                active: True
-                on_active: app.set_delivery("local")
-
-            MDLabel:
-                text: "Na miejscu"
-                halign: "left"
-
-        MDBoxLayout:
-            orientation: "horizontal"
-            size_hint_y: None
-            height: dp(40)
-            spacing: dp(10)
-
-            MDCheckbox:
-                group: "delivery"
-                on_active: app.set_delivery("delivery")
-
-            MDLabel:
-                text: "Dostawa"
-                halign: "left"
-
-        # --- przycisk potwierdzenia ---
-        MDButton:
-            text: "Potwierdź zamówienie"
-            size_hint_x: 0.8
-            pos_hint: {"center_x": 0.5}
-            on_release: app.confirm_order()
 
 
 <OrderSummaryScreen>:
