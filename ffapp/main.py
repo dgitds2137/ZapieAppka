@@ -50,6 +50,7 @@ from kivy.properties import BooleanProperty, NumericProperty
 from kivy.properties import StringProperty, NumericProperty, BooleanProperty
 from kivymd.uix.card import MDCard
 
+from kivymd.uix.snackbar import MDSnackbar, MDSnackbarText
 
 class ProductCard(BoxLayout):
     title = StringProperty("")
@@ -71,10 +72,60 @@ class ProductCard(BoxLayout):
         else:
             print(f"DELETE /favorites -> remove {self.position_id}")
 
+    def add_to_cart(self):
+        app = App.get_running_app()
+        screen = app.root.get_screen("dashboard")
+        screen.add_product_to_cart({
+            "position_id": self.position_id,
+            "title": self.title,
+            "image": self.image,
+            "price": self.price,
+            "prep_time": self.prep_time,
+        })
+        print(f"[CART] Added product {self.position_id} - {self.title}")
+
+        MDSnackbar(
+            MDSnackbarText(
+                text=f"Dodano do koszyka: {self.title}",
+            ),
+            pos_hint={"center_x": 0.5, "y": 0.1},
+            size_hint_x=0.8,
+            duration=1.5,
+        ).open()
+
 class DashboardScreen(MDScreen):
+    cart_visible = BooleanProperty(False)
+    cart_title = StringProperty("")
+    cart_image = StringProperty("")
+    cart_total = StringProperty("0.00")
+    cart_eta = StringProperty("15 min")
+    cart_count = NumericProperty(0)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cart_items = []
     def on_pre_enter(self, *args):
         self.load_products()
+    def add_product_to_cart(self, product):
+        self.cart_items.append(product)
+        self.cart_visible = True
+        self.cart_count = len(self.cart_items)
 
+        self.cart_title = product["title"]
+        self.cart_image = product["image"]
+        self.cart_eta = product.get("prep_time", "15 min")
+
+        total = 0.0
+        for item in self.cart_items:
+            try:
+                total += float(str(item.get("price", "0")).replace("PLN", "").strip())
+            except Exception:
+                pass
+
+        self.cart_total = f"{total:.2f}"
+        print(f"[CART] items={self.cart_count}, total={self.cart_total}")
+
+    def hide_cart_bar(self):
+        self.cart_visible = False
     def load_products(self):
         try:
             resp = httpx.get("http://127.0.0.1:8000/positions", timeout=8)
@@ -115,12 +166,13 @@ class DashboardScreen(MDScreen):
 
         for p in products:
             card = ProductCard(
-                title=str(p.get("name", "")),
-                desc=str(p.get("description", "")),
-                image=str(p.get("photo_url", "")),
-                calories=f"kcal: {p.get('calories', 0)}" if p.get("calories") is not None else "",
+                title=product["name"],
+                desc=product["description"],
+                image=product["photo_url"],
+                calories=f"kcal: {product['calories']}",
                 prep_time="15 min",
-                position_id=int(p.get("position_id", 0) or 0),
+                position_id=product["position_id"],
+                price=str(product["price"]),
             )
             card.bind(on_release=lambda inst, pos=p: self.open_product(pos))
             box.add_widget(card)
@@ -131,7 +183,13 @@ class DashboardScreen(MDScreen):
             app.open_position(pos)
         else:
             print("Kliknięto produkt:", pos.get("name"))
+    def on_cart_visible(self, instance, value):
+        if "cart_bar" not in self.ids:
+            return
 
+        target_y = 70 if value else -120
+        Animation.cancel_all(self.ids.cart_bar, "y")
+        Animation(y=target_y, d=0.2).start(self.ids.cart_bar)
 Window.size = (600, 980)
 Window.minimum_width = 600
 Window.minimum_height = 980
