@@ -1,7 +1,0 @@
-var obj = document.getElementById("settings").value;
-var envSettings = JSON.parse(obj.replace(/'/g, '"'));
-obj = document.getElementById("loggedInUser").value;
-var loggedInUser = JSON.parse(obj);
-obj = document.getElementById("browserLinks");
-
-if (obj !== null) var browserLinks = JSON.parse(objvalue.replace(/'/g, '"'));

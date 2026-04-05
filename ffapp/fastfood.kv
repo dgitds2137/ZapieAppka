@@ -53,24 +53,33 @@ ScreenManager:
             height: dp(250)
             pos_hint: {"center_x": 0.5}
 
-        MDLabel:
-            id: pos_title
-            text: ""
-            font_name: "fonts/Inter-Regular.ttf"
-            font_size: dp(12)
-            halign: "center"
-            size_hint_y: None
-            height: dp(40)
-
-        MDLabel:
+        Label:
             id: pos_desc
             text: ""
-            font_name: "fonts/Inter-Medium.ttf"
-            font_size: dp(11)            
+            font_name: "fonts/Inter-Regular.ttf"
+            font_size: "12sp"
+            color: 0.72, 0.72, 0.72, 1
+
             halign: "center"
-            theme_text_color: "Secondary"
+            valign: "top"
+            text_size: self.width, None
+
             size_hint_y: None
-            height: dp(80)
+            height: self.texture_size[1]
+
+        Label:
+            id: pos_title
+            text: ""
+            font_name: "fonts/Inter-Medium.ttf"
+            font_size: "14sp"
+            color: 1, 1, 1, 1
+
+            halign: "center"
+            valign: "middle"
+            text_size: self.width, None
+
+            size_hint_y: None
+            height: self.texture_size[1]
 
         MDButton:
             id: add_to
@@ -86,7 +95,7 @@ ScreenManager:
 <ProductCard>:
     orientation: "vertical"
     size_hint: None, None
-    size: dp(280), dp(345)
+    size: dp(280), dp(300)
     padding: dp(10)
     spacing: dp(10)
 
@@ -104,7 +113,7 @@ ScreenManager:
 
     FloatLayout:
         size_hint_y: None
-        height: dp(140)
+        height: dp(160)
 
         MDCard:
             size_hint: 1, 1
@@ -141,25 +150,36 @@ ScreenManager:
             size: dp(80), dp(24)
             pos_hint: {"right": 0.97, "y": 0.02}
 
-    MDLabel:
+
+    Label:
         text: root.title
-        bold: True
-        theme_text_color: "Custom"
-        text_color: 1, 1, 1, 1
+        font_name: "fonts/Inter-Italic-VariableFont_opsz,wght.ttf"
+        font_size: "14sp"
+        color: 1, 1, 1, 1
+
         size_hint_y: None
         height: self.texture_size[1]
 
-    MDLabel:
+        text_size: self.width, None
+        halign: "left"
+        valign: "middle"
+
+    Label:
         text: root.desc
-        theme_text_color: "Custom"
-        text_color: 0.72, 0.72, 0.72, 1
+        font_name: "fonts/Inter-Italic-VariableFont_opsz,wght.ttf"
+        font_size: "12sp"
+        color: 0.72, 0.72, 0.72, 1
+
         text_size: self.width, None
         halign: "left"
         valign: "top"
+
         size_hint_y: None
-        line_height: 1.1
+        line_height: 1.2
         max_lines: 4
-        height: dp(84)
+        height: self.texture_size[1]
+
+
 
     Widget
 
@@ -195,14 +215,18 @@ ScreenManager:
                 spacing: dp(20)
                 padding: dp(12), dp(20), dp(12), dp(120)
 
-                MDLabel:
-                    id: popular_label
+                Label:
                     text: "Popularne"
                     font_name: "fonts/Poppins-Bold.ttf"
-                    theme_text_color: "Custom"
-                    text_color: 1, 0, 0, 1
+                    font_size: "24sp"
+                    color: 0.95, 0.95, 0.95, 1
+
                     size_hint_y: None
                     height: self.texture_size[1]
+
+                    text_size: self.width, None
+                    halign: "left"
+                    valign: "middle"
 
                 ScrollView:
                     size_hint_y: None

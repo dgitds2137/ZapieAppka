@@ -1,4 +1,3 @@
-from kivy.lang import Builder
 from kivymd.app import MDApp
 from kivy.core.window import Window
 import httpx
@@ -10,48 +9,34 @@ from kivy.utils import platform
 from kivymd.uix.menu import MDDropdownMenu
 import base64
 import requests
-from kivy.uix.image import AsyncImage
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
 from kivy.metrics import dp
-from kivy.uix.relativelayout import RelativeLayout
-from kivymd.uix.button import MDIconButton
 from kivy.metrics import dp
-from kivy.uix.floatlayout import FloatLayout
+
 from kivy.metrics import dp
 # Kivy podstawowe layouty i widgety
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.floatlayout import FloatLayout   # jeśli używasz overlay na obrazku
-from kivy.uix.label import Label
-from kivy.uix.image import AsyncImage
+
 import json, os
 from kivy.utils import platform
-# Kivy narzędzia
 from kivy.metrics import dp
-from kivy.graphics import Color, Line
 import jwt
-# KivyMD (serduszko, styl Material Design)
-from kivymd.uix.button import MDIconButton
-from kivy.graphics import Color, RoundedRectangle
 from kivy.uix.behaviors import ButtonBehavior
 from google_auth_oauthlib.flow import InstalledAppFlow
 from kivy.properties import ObjectProperty
 from kivymd.uix.screen import MDScreen
 from kivy.core.window import Window
 from kivymd.app import MDApp
-from kivymd.uix.appbar import MDTopAppBar
 from kivymd.uix.screen import MDScreen
 
 from kivy.properties import StringProperty, NumericProperty
 from kivymd.uix.screen import MDScreen
-from kivymd.uix.card import MDCard
 import requests
 
 API = "http://127.0.0.1:8000"
 from kivy.metrics import sp
 
 
-from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 
 class ProductCard(ButtonBehavior, BoxLayout):
@@ -65,7 +50,6 @@ class ProductCard(ButtonBehavior, BoxLayout):
 
 class DashboardScreen(MDScreen):
     def on_pre_enter(self, *args):
-        self.ids.popular_label.font_size = sp(48)
         self.load_products()
 
     def load_products(self):
@@ -207,7 +191,7 @@ class FastFoodApp(MDApp):
     def build(self):
         token = self.load_token()
         print("token", token)
-        self.theme_cls.font_styles["H1"] = ["Poppins", 32, False, 0.15]
+
         if token:
             self.root.current = "dashboard"
         else:
