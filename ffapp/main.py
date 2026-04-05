@@ -19,7 +19,7 @@ from kivy.uix.boxlayout import BoxLayout
 
 import json, os
 from kivy.utils import platform
-from kivy.metrics import dp
+from kivy.metrics import dp # type: ignore
 import jwt
 from kivy.uix.behaviors import ButtonBehavior
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -28,10 +28,12 @@ from kivymd.uix.screen import MDScreen
 from kivy.core.window import Window
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
-
+from kivymd.uix.card import MDCard
 from kivy.properties import StringProperty, NumericProperty
 from kivymd.uix.screen import MDScreen
 import requests
+
+from kivy.properties import BooleanProperty, NumericProperty
 
 API = "http://127.0.0.1:8000"
 from kivy.metrics import sp
@@ -39,14 +41,35 @@ from kivy.metrics import sp
 
 from kivy.uix.boxlayout import BoxLayout
 
-class ProductCard(ButtonBehavior, BoxLayout):
+
+from kivy.properties import BooleanProperty, NumericProperty
+
+
+
+
+from kivy.properties import StringProperty, NumericProperty, BooleanProperty
+from kivymd.uix.card import MDCard
+
+
+class ProductCard(BoxLayout):
     title = StringProperty("")
     desc = StringProperty("")
     image = StringProperty("")
     calories = StringProperty("")
     prep_time = StringProperty("15 min")
     position_id = NumericProperty(0)
+    is_liked = BooleanProperty(False)
 
+    def toggle_like(self):
+        self.is_liked = not self.is_liked
+        print(f"[LIKE] Product {self.position_id} -> {self.is_liked}")
+        self.send_like_request()
+
+    def send_like_request(self):
+        if self.is_liked:
+            print(f"POST /favorites -> add {self.position_id}")
+        else:
+            print(f"DELETE /favorites -> remove {self.position_id}")
 
 class DashboardScreen(MDScreen):
     def on_pre_enter(self, *args):
