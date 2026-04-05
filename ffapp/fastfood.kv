@@ -97,7 +97,7 @@ ScreenManager:
     size_hint: None, None
     size: dp(280), dp(300)
     padding: dp(10)
-    spacing: dp(10)
+    spacing: dp(0)
 
     canvas.before:
         Color:
@@ -150,46 +150,53 @@ ScreenManager:
             size: dp(80), dp(24)
             pos_hint: {"right": 0.97, "y": 0.02}
 
-
-    Label:
-        text: root.title
-        font_name: "fonts/Inter-Italic-VariableFont_opsz,wght.ttf"
-        font_size: "14sp"
-        color: 1, 1, 1, 1
-
+    Widget:
         size_hint_y: None
-        height: self.texture_size[1]
+        height: dp(10)
 
-        text_size: self.width, None
-        halign: "left"
-        valign: "middle"
-
-    Label:
-        text: root.desc
-        font_name: "fonts/Inter-Italic-VariableFont_opsz,wght.ttf"
-        font_size: "12sp"
-        color: 0.72, 0.72, 0.72, 1
-
-        text_size: self.width, None
-        halign: "left"
-        valign: "top"
-
+    BoxLayout:
+        orientation: "vertical"
         size_hint_y: None
-        line_height: 1.2
-        max_lines: 4
-        height: self.texture_size[1]
+        height: dp(108)
+        spacing: dp(4)
 
+        Label:
+            text: root.title
+            font_name: "fonts/Inter-Italic-VariableFont_opsz,wght.ttf"
+            font_size: "14sp"
+            color: 1, 1, 1, 1
+            size_hint_y: None
+            height: dp(22)
+            text_size: self.width, None
+            halign: "left"
+            valign: "middle"
+            shorten: True
+            shorten_from: "right"
 
+        Label:
+            text: root.desc
+            font_name: "fonts/Inter-Italic-VariableFont_opsz,wght.ttf"
+            font_size: "12sp"
+            color: 0.72, 0.72, 0.72, 1
+            size_hint_y: None
+            height: dp(58)
+            text_size: self.width, None
+            halign: "left"
+            valign: "top"
+            line_height: 1.2
 
-    Widget
+        Widget
 
-    MDLabel:
-        text: root.calories
-        theme_text_color: "Custom"
-        text_color: 0.62, 0.62, 0.62, 1
-        halign: "right"
-        size_hint_y: None
-        height: self.texture_size[1]
+        Label:
+            text: root.calories
+            font_name: "fonts/Inter-Italic-VariableFont_opsz,wght.ttf"
+            font_size: "10sp"
+            color: 0.72, 0.72, 0.72, 1
+            size_hint_y: None
+            height: dp(20)
+            text_size: self.width, None
+            halign: "right"
+            valign: "top"
 
 <DashboardScreen>:
     name: "dashboard"
