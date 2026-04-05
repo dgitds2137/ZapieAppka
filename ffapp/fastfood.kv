@@ -150,17 +150,15 @@ ScreenManager:
                 size_hint_y: None
                 height: self.minimum_height
                 spacing: dp(20)
-                padding: dp(16), dp(8), dp(16), dp(8)
+                padding: dp(16), dp(8), dp(16), dp(120)
 
                 Label:
                     text: "Popularne"
                     font_name: "fonts/Poppins-Bold.ttf"
                     font_size: "24sp"
                     color: 0.95, 0.95, 0.95, 1
-
                     size_hint_y: None
                     height: self.texture_size[1]
-
                     text_size: self.width, None
                     halign: "left"
                     valign: "middle"
@@ -185,91 +183,92 @@ ScreenManager:
                 Widget:
                     size_hint_y: None
                     height: dp(20)
-    MDCard:
-        id: cart_bar
-        size_hint_x: 0.94
-        height: dp(86)
-        pos_hint: {"center_x": 0.5}
-        y: dp(70) if root.cart_visible else -dp(120)
 
-        radius: [18, 18, 18, 18]
-        elevation: 0
-        md_bg_color: 0.17, 0.17, 0.17, 0.98
-        line_color: 0, 0, 0, 0
+        MDCard:
+            id: cart_bar
+            size_hint: 0.94, None
+            height: dp(86)
+            pos_hint: {"center_x": 0.5}
+            y: dp(70) if root.cart_visible else -dp(120)
+            opacity: 1 if root.cart_visible else 0
+            disabled: not root.cart_visible
+            radius: [18, 18, 18, 18]
+            elevation: 0
+            md_bg_color: 0.17, 0.17, 0.17, 0.98
+            line_color: 0, 0, 0, 0
 
-        BoxLayout:
-            padding: dp(10)
-            spacing: dp(10)
+            BoxLayout:
+                padding: dp(10)
+                spacing: dp(10)
 
-            MDCard:
-                size_hint: None, None
-                size: dp(64), dp(64)
-                radius: [12, 12, 12, 12]
-                elevation: 0
-                md_bg_color: 0, 0, 0, 1
-                line_color: 0, 0, 0, 0
-
-                FitImage:
-                    source: root.cart_image
+                MDCard:
+                    size_hint: None, None
+                    size: dp(64), dp(64)
                     radius: [12, 12, 12, 12]
+                    elevation: 0
+                    md_bg_color: 0, 0, 0, 1
+                    line_color: 0, 0, 0, 0
 
-            BoxLayout:
-                orientation: "vertical"
-                spacing: dp(4)
+                    FitImage:
+                        source: root.cart_image
+                        radius: [12, 12, 12, 12]
 
-                Label:
-                    text: root.cart_title if root.cart_title else "Koszyk"
-                    font_name: "fonts/Poppins-Bold.ttf"
-                    font_size: "13sp"
-                    color: 1, 1, 1, 1
-                    text_size: self.width, None
-                    halign: "left"
-                    valign: "middle"
-                    shorten: True
+                BoxLayout:
+                    orientation: "vertical"
+                    spacing: dp(4)
 
-                Label:
-                    text: f"{root.cart_count} szt."
-                    font_name: "fonts/Poppins-Bold.ttf"
-                    font_size: "11sp"
-                    color: 0.8, 0.8, 0.8, 1
-                    text_size: self.width, None
-                    halign: "left"
-                    valign: "middle"
+                    Label:
+                        text: root.cart_title if root.cart_title else "Koszyk"
+                        font_name: "fonts/Poppins-Bold.ttf"
+                        font_size: "13sp"
+                        color: 1, 1, 1, 1
+                        text_size: self.width, None
+                        halign: "left"
+                        valign: "middle"
+                        shorten: True
 
-                Label:
-                    text: f"PLN {root.cart_total}"
-                    font_name: "fonts/Poppins-Bold.ttf"
-                    font_size: "12sp"
-                    color: 1, 1, 1, 1
-                    text_size: self.width, None
-                    halign: "left"
-                    valign: "middle"
+                    Label:
+                        text: f"{root.cart_count} szt."
+                        font_name: "fonts/Poppins-Bold.ttf"
+                        font_size: "11sp"
+                        color: 0.8, 0.8, 0.8, 1
+                        text_size: self.width, None
+                        halign: "left"
+                        valign: "middle"
 
-            BoxLayout:
-                orientation: "vertical"
-                size_hint_x: None
-                width: dp(120)
-                spacing: dp(6)
+                    Label:
+                        text: f"PLN {root.cart_total}"
+                        font_name: "fonts/Poppins-Bold.ttf"
+                        font_size: "12sp"
+                        color: 1, 1, 1, 1
+                        text_size: self.width, None
+                        halign: "left"
+                        valign: "middle"
 
-                Label:
-                    text: root.cart_eta
-                    font_name: "fonts/Poppins-Bold.ttf"
-                    font_size: "12sp"
-                    color: 1, 1, 1, 1
-                    halign: "center"
-                    valign: "middle"
-                    text_size: self.size
+                BoxLayout:
+                    orientation: "vertical"
+                    size_hint_x: None
+                    width: dp(120)
+                    spacing: dp(6)
 
-                Button:
-                    text: "DALEJ"
-                    font_name: "fonts/Poppins-Bold.ttf"
-                    font_size: "16sp"
-                    bold: True
-                    background_normal: ""
-                    background_down: ""
-                    background_color: 0.93, 0.50, 0.13, 1
-                    color: 1, 1, 1, 1
+                    Label:
+                        text: root.cart_eta
+                        font_name: "fonts/Poppins-Bold.ttf"
+                        font_size: "12sp"
+                        color: 1, 1, 1, 1
+                        halign: "center"
+                        valign: "middle"
+                        text_size: self.size
 
+                    Button:
+                        text: "DALEJ"
+                        font_name: "fonts/Poppins-Bold.ttf"
+                        font_size: "16sp"
+                        bold: True
+                        background_normal: ""
+                        background_down: ""
+                        background_color: 0.93, 0.50, 0.13, 1
+                        color: 1, 1, 1, 1
 <DeliveryScreen>:
     name: "delivery"
 
