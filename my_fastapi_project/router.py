@@ -1,6 +1,4 @@
-from http.client import HTTPException
-
-from fastapi import APIRouter, Depends, Form
+from fastapi import APIRouter, Depends, Form, HTTPException
 from sqlalchemy.orm import Session
 from models import (
     UserSchema,
@@ -15,6 +13,8 @@ from models import (
     AddressUpdate,
     OrderUpdate,
     OrderItemUpdate,
+    CheckoutVerificationIn,
+    CheckoutVerificationOut,
 )
 
 import base64
@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 SECRET_KEY = "supersecret"
 ALGORITHM = "HS256"
 
-def routes(OrderService, KitchenService, MenuService, UserService, get_db):
+def routes(OrderService, KitchenService, MenuService, UserService, CheckoutService, get_db):
     r = APIRouter()
     def create_jwt(data: dict, expires_delta: timedelta = timedelta(hours=1)):
         to_encode = data.copy()
@@ -189,5 +189,12 @@ def routes(OrderService, KitchenService, MenuService, UserService, get_db):
     @r.get("/kitchen/status")
     def kitchen_status(db: Session = Depends(get_db)):
         return KitchenService(db).get_kitchen_status()
+
+    @r.post("/checkout/verification", response_model=CheckoutVerificationOut)
+    def create_checkout_verification(
+        payload: CheckoutVerificationIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).create_checkout_verification(payload)
     
     return r

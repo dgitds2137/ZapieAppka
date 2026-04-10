@@ -103,6 +103,57 @@ class UserAddressDB(Base):
     user = relationship("UserDB", back_populates="addresses")
 
 
+class CheckoutOrderDB(Base):
+    __tablename__ = "CheckoutOrders"
+
+    checkout_order_id = Column(Integer, primary_key=True, index=True)
+    verification_id = Column(String(32), nullable=False, unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("Users.user_id"), nullable=True, index=True)
+    status = Column(String(50), nullable=False)
+    verification_stage = Column(String(50), nullable=False)
+    payment_method = Column(String(50), nullable=False)
+    currency = Column(String(10), nullable=False)
+    total_amount = Column(Numeric(10, 2), nullable=False)
+    eta_minutes = Column(Integer, nullable=False)
+    fulfillment_method = Column(String(80), nullable=False)
+    fulfillment_option_index = Column(Integer, nullable=False)
+    address_option_index = Column(Integer, nullable=False)
+    address_title = Column(String(200), nullable=False)
+    address_subtitle = Column(String(255), nullable=False)
+    address_eta_label = Column(String(50), nullable=False)
+    notes = Column(Text, nullable=True)
+    client_created_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    items = relationship(
+        "CheckoutOrderItemDB",
+        back_populates="checkout_order",
+        cascade="all, delete-orphan",
+    )
+
+
+class CheckoutOrderItemDB(Base):
+    __tablename__ = "CheckoutOrderItems"
+
+    checkout_order_item_id = Column(Integer, primary_key=True, index=True)
+    checkout_order_id = Column(
+        Integer,
+        ForeignKey("CheckoutOrders.checkout_order_id"),
+        nullable=False,
+        index=True,
+    )
+    cart_entry_id = Column(Integer, nullable=False)
+    position_id = Column(Integer, nullable=True)
+    name = Column(String(120), nullable=False)
+    description = Column(Text, nullable=True)
+    photo_url = Column(String(500), nullable=True)
+    calories = Column(Integer, nullable=True)
+    price = Column(Numeric(10, 2), nullable=True)
+    quantity = Column(Integer, nullable=False, default=1)
+
+    checkout_order = relationship("CheckoutOrderDB", back_populates="items")
+
+
 # =========================
 # Pydantic schemas
 # =========================
@@ -216,6 +267,47 @@ class OrderItemUpdate(BaseModel):
     product_name: str | None = None
     quantity: int | None = None
     price: float | None = None
+
+
+class CheckoutItemPayload(BaseModel):
+    cart_entry_id: int
+    position_id: int | None = None
+    name: str
+    description: str | None = None
+    photo_url: str | None = None
+    calories: int | None = None
+    price: float | None = None
+
+
+class CheckoutAddressPayload(BaseModel):
+    title: str
+    subtitle: str
+    eta_label: str
+
+
+class CheckoutVerificationIn(BaseModel):
+    created_at: datetime
+    currency: str
+    total_amount: float
+    eta_minutes: int
+    payment_method: str
+    fulfillment_method: str
+    fulfillment_option_index: int
+    address_option_index: int
+    address: CheckoutAddressPayload
+    items: list[CheckoutItemPayload]
+    notes: str | None = None
+
+
+class CheckoutVerificationOut(BaseModel):
+    verification_id: str
+    saved_order_id: int
+    status: str
+    payment_method: str
+    verification_stage: str
+    message: str
+    created_at: datetime
+    received_order: CheckoutVerificationIn
 
 class SessionsDB(Base):
     __tablename__ = "Sessions"

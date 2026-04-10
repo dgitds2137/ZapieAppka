@@ -1,7 +1,9 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, joinedload
 
 from db import get_db
+from checkout_service import CheckoutService
 from router import routes
 
 from models import (
@@ -35,6 +37,14 @@ SECRET_KEY = "supersecret"
 ALGORITHM = "HS256"
 
 app = FastAPI(title="Order & Kitchen Service API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 class MenuService:
     def __init__(self, db: Session):
         self.db = db
@@ -385,4 +395,13 @@ class KitchenService:
         return update
 
 # Podpinamy router z orderami
-app.include_router(routes(OrderService, KitchenService, MenuService, UserService, get_db))
+app.include_router(
+    routes(
+        OrderService,
+        KitchenService,
+        MenuService,
+        UserService,
+        CheckoutService,
+        get_db,
+    )
+)

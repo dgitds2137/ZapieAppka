@@ -240,40 +240,39 @@ ScreenManager:
                             size: dp(1), self.height - dp(20)
 
                 # 🔥 PRAWA CZĘŚĆ (30%) — akcje
-                BoxLayout:
-                    orientation: "vertical"
+                FloatLayout:
                     size_hint_x: 0.3
-                    spacing: dp(6)
-                    padding: dp(8), dp(8), dp(8), dp(8)
 
                     Label:
                         text: f"PLN {root.cart_total}"
                         font_name: "fonts/Poppins-Bold.ttf"
                         font_size: "12sp"
-                        color: 1, 1, 1, 0.9
-                        size_hint_y: None
-                        height: self.texture_size[1]
+                        color: 1, 1, 1, 0.95
+                        size_hint: 1, None
+                        height: dp(20)
+                        pos_hint: {"x": 0, "top": 0.92}
                         halign: "left"
-                        valign: "top"
-                        text_size: self.width, self.height
+                        valign: "middle"
+                        text_size: self.width - dp(12), self.height
+                        padding: dp(10), 0
 
                     Label:
                         text: root.cart_eta
                         font_name: "fonts/Poppins-Bold.ttf"
                         font_size: "12sp"
                         color: 1, 1, 1, 1
-                        size_hint_y: None
-                        height: self.texture_size[1]
-                        halign: "left"
+                        size_hint: 1, None
+                        height: dp(20)
+                        pos_hint: {"x": 0, "top": 0.50}
+                        halign: "center"
                         valign: "middle"
-                        text_size: self.width, self.height
-
-                    Widget:
+                        text_size: self.size
 
                     Button:
                         text: "DALEJ"
-                        size_hint_y: None
+                        size_hint: 0.82, None
                         height: dp(42)
+                        pos_hint: {"center_x": 0.5, "y": 0.12}
                         font_name: "fonts/Poppins-Bold.ttf"
                         font_size: "14sp"
                         bold: True
@@ -281,7 +280,6 @@ ScreenManager:
                         background_down: ""
                         background_color: 0.93, 0.50, 0.13, 1
                         color: 1, 1, 1, 1
-
 <DeliveryScreen>:
     name: "delivery"
 
