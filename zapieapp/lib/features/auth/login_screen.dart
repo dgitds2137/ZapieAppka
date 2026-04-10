@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../../data/models/auth_session.dart';
 import '../../router/app_router.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -116,11 +117,17 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    Navigator.pushReplacementNamed(context, AppRoutes.dashboard, arguments: {
-      'email': emailController.text.trim(),
-      'jwt': result.jwt,
-      'sessionToken': result.sessionToken,
-    });
+    final authSession = AuthSession(
+      email: emailController.text.trim(),
+      jwt: result.jwt,
+      sessionToken: result.sessionToken,
+    );
+
+    Navigator.pushReplacementNamed(
+      context,
+      AppRoutes.dashboard,
+      arguments: authSession.toRouteArgs(),
+    );
   }
 
   void fillDemoCredentials() {

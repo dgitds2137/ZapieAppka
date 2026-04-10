@@ -78,6 +78,8 @@ class CheckoutVerificationRequest {
     required this.addressOptionIndex,
     required this.address,
     required this.items,
+    this.sessionToken,
+    this.userEmail,
     this.notes,
   });
 
@@ -91,6 +93,8 @@ class CheckoutVerificationRequest {
   final int addressOptionIndex;
   final CheckoutVerificationAddress address;
   final List<CheckoutVerificationItem> items;
+  final String? sessionToken;
+  final String? userEmail;
   final String? notes;
 
   Map<String, dynamic> toJson() => {
@@ -104,6 +108,8 @@ class CheckoutVerificationRequest {
         'address_option_index': addressOptionIndex,
         'address': address.toJson(),
         'items': items.map((item) => item.toJson()).toList(growable: false),
+        'session_token': sessionToken,
+        'user_email': userEmail,
         'notes': notes,
       };
 
@@ -129,6 +135,8 @@ class CheckoutVerificationRequest {
               .map((item) => CheckoutVerificationItem.fromJson(Map<String, dynamic>.from(item)))
               .toList(growable: false)
           : const [],
+      sessionToken: json['session_token']?.toString(),
+      userEmail: json['user_email']?.toString(),
       notes: json['notes']?.toString(),
     );
   }
@@ -143,6 +151,8 @@ class CheckoutVerificationResponse {
     required this.verificationStage,
     required this.message,
     required this.createdAt,
+    this.activeUntil,
+    this.remainingEtaMinutes,
     required this.receivedOrder,
   });
 
@@ -153,6 +163,8 @@ class CheckoutVerificationResponse {
   final String verificationStage;
   final String message;
   final DateTime createdAt;
+  final DateTime? activeUntil;
+  final int? remainingEtaMinutes;
   final CheckoutVerificationRequest receivedOrder;
 
   Map<String, dynamic> toJson() => {
@@ -163,6 +175,8 @@ class CheckoutVerificationResponse {
         'verification_stage': verificationStage,
         'message': message,
         'created_at': createdAt.toUtc().toIso8601String(),
+        'active_until': activeUntil?.toUtc().toIso8601String(),
+        'remaining_eta_minutes': remainingEtaMinutes,
         'received_order': receivedOrder.toJson(),
       };
 
@@ -177,6 +191,8 @@ class CheckoutVerificationResponse {
       verificationStage: json['verification_stage']?.toString() ?? '',
       message: json['message']?.toString() ?? '',
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ?? DateTime.now().toUtc(),
+      activeUntil: DateTime.tryParse(json['active_until']?.toString() ?? ''),
+      remainingEtaMinutes: _asInt(json['remaining_eta_minutes']),
       receivedOrder: receivedOrderJson is Map<String, dynamic>
           ? CheckoutVerificationRequest.fromJson(receivedOrderJson)
           : CheckoutVerificationRequest(
@@ -190,6 +206,8 @@ class CheckoutVerificationResponse {
               addressOptionIndex: 0,
               address: const CheckoutVerificationAddress(title: '', subtitle: '', etaLabel: ''),
               items: const [],
+              sessionToken: null,
+              userEmail: null,
             ),
     );
   }

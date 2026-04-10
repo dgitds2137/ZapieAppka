@@ -4,6 +4,10 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../../data/models/auth_session.dart';
+import '../../data/models/checkout_verification.dart';
+import '../../data/repositories/checkout_repository.dart';
+import '../orders/order_tracking_screen.dart';
 import '../../router/app_router.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -19,10 +23,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     'API_BASE_URL',
     defaultValue: 'http://127.0.0.1:8000',
   );
+  static final CheckoutRepository _checkoutRepository = HttpCheckoutRepository(
+    apiBaseUrl: _apiBaseUrl,
+  );
 
   late Future<List<Map<String, dynamic>>> _positionsFuture;
+  AuthSession _authSession = const AuthSession();
+  String? _authSessionKey;
   Map<String, dynamic>? _selectedPosition;
   final List<_CartEntry> _cart = [];
+  CheckoutVerificationResponse? _activeCheckout;
+  bool _isLoadingActiveCheckout = false;
   int _nextCartEntryId = 1;
   int _activeFooterIndex = 1;
 
@@ -30,6 +41,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _positionsFuture = _fetchPositions();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncAuthSessionFromRoute();
   }
 
   Future<List<Map<String, dynamic>>> _fetchPositions() async {
@@ -55,6 +72,86 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _positionsFuture = _fetchPositions();
     });
+    _loadActiveCheckout();
+  }
+
+  void _syncAuthSessionFromRoute() {
+    final authSession = AuthSession.fromRouteArgs(
+      ModalRoute.of(context)?.settings.arguments,
+    );
+    final sessionKey =
+        '${authSession.email ?? ''}|${authSession.sessionToken ?? ''}|${authSession.jwt ?? ''}';
+
+    if (_authSessionKey == sessionKey) {
+      return;
+    }
+
+    _authSession = authSession;
+    _authSessionKey = sessionKey;
+    _loadActiveCheckout();
+  }
+
+  Future<void> _loadActiveCheckout() async {
+    if (!_authSession.hasIdentity) {
+      if (mounted) {
+        setState(() {
+          _activeCheckout = null;
+          _isLoadingActiveCheckout = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoadingActiveCheckout = true;
+      });
+    }
+
+    try {
+      final activeCheckout = await _checkoutRepository.fetchActiveCheckout(
+        sessionToken: _authSession.sessionToken,
+        email: _authSession.email,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _activeCheckout = activeCheckout;
+        _isLoadingActiveCheckout = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _activeCheckout = null;
+        _isLoadingActiveCheckout = false;
+      });
+    }
+  }
+
+  Future<void> _openActiveOrder() async {
+    final activeCheckout = _activeCheckout;
+    if (activeCheckout == null) {
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrderTrackingScreen(
+          checkout: activeCheckout,
+          authSession: _authSession,
+        ),
+      ),
+    );
+
+    if (mounted) {
+      _loadActiveCheckout();
+    }
   }
 
   void _selectPosition(Map<String, dynamic> position) {
@@ -100,7 +197,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _openCartSummary() {
-    if (_cart.isEmpty) {
+    if (_cart.isEmpty || _activeCheckout != null) {
       return;
     }
 
@@ -109,6 +206,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => _CartSummaryScreen(
           initialEntries: _resolvedCartEntries(const <Map<String, dynamic>>[]),
           onCartChanged: _replaceCart,
+          authSession: _authSession,
         ),
       ),
     );
@@ -166,6 +264,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final positions = snapshot.data ?? const <Map<String, dynamic>>[];
         final selected = _resolveSelected(positions);
         final cartEntries = _resolvedCartEntries(positions);
+        final hasBottomModule =
+            _activeCheckout != null ||
+            cartEntries.isNotEmpty ||
+            (_isLoadingActiveCheckout && cartEntries.isEmpty);
 
         Widget body;
         if (snapshot.connectionState != ConnectionState.done) {
@@ -195,7 +297,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               },
               child: ListView(
                 physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-                padding: EdgeInsets.fromLTRB(14, 12, 14, cartEntries.isEmpty ? 110 : 206),
+                padding: EdgeInsets.fromLTRB(14, 12, 14, hasBottomModule ? 206 : 110),
                 children: [
                   _TopBar(
                     onReload: _reload,
@@ -229,10 +331,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           body: _Background(child: body),
           bottomNavigationBar: _BottomChrome(
             cartEntries: cartEntries,
+            activeCheckout: _activeCheckout,
+            isLoadingActiveCheckout: _isLoadingActiveCheckout,
             activeFooterIndex: _activeFooterIndex,
             onSelect: _selectPosition,
             onRemove: _removeFromCart,
             onContinue: _openCartSummary,
+            onOpenActiveOrder: _openActiveOrder,
             onFooterTap: (index, label) {
               setState(() => _activeFooterIndex = index);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -528,18 +633,24 @@ class _CategoryTile extends StatelessWidget {
 class _BottomChrome extends StatelessWidget {
   const _BottomChrome({
     required this.cartEntries,
+    required this.activeCheckout,
+    required this.isLoadingActiveCheckout,
     required this.activeFooterIndex,
     required this.onSelect,
     required this.onRemove,
     required this.onContinue,
+    required this.onOpenActiveOrder,
     required this.onFooterTap,
   });
 
   final List<_CartEntry> cartEntries;
+  final CheckoutVerificationResponse? activeCheckout;
+  final bool isLoadingActiveCheckout;
   final int activeFooterIndex;
   final ValueChanged<Map<String, dynamic>> onSelect;
   final ValueChanged<int> onRemove;
   final VoidCallback onContinue;
+  final VoidCallback onOpenActiveOrder;
   final void Function(int index, String label) onFooterTap;
 
   @override
@@ -557,7 +668,43 @@ class _BottomChrome extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (cartEntries.isNotEmpty)
+            if (activeCheckout != null)
+              _ActiveOrderBar(
+                checkout: activeCheckout!,
+                onTap: onOpenActiveOrder,
+              )
+            else if (isLoadingActiveCheckout && cartEntries.isEmpty)
+              Container(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                decoration: BoxDecoration(
+                  color: const Color(0xE2272220),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0x2BFFFFFF)),
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: Color(0xFF48D77C),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Sprawdzamy, czy masz aktywne zamowienie...',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: const Color(0xFFF2E6DD),
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (cartEntries.isNotEmpty)
               ClipRRect(
                 borderRadius: BorderRadius.circular(14),
                 child: BackdropFilter(
@@ -650,14 +797,161 @@ class _BottomChrome extends StatelessWidget {
   }
 }
 
+class _ActiveOrderBar extends StatelessWidget {
+  const _ActiveOrderBar({
+    required this.checkout,
+    required this.onTap,
+  });
+
+  final CheckoutVerificationResponse checkout;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalEta = checkout.receivedOrder.etaMinutes <= 0
+        ? 1
+        : checkout.receivedOrder.etaMinutes;
+    final remainingEta = checkout.remainingEtaMinutes ?? totalEta;
+    final progress =
+        (1 - (remainingEta / totalEta)).clamp(0.0, 1.0).toDouble();
+    final itemCount = checkout.receivedOrder.items.length;
+    final leadItem = itemCount == 0
+        ? 'Aktywne zamowienie'
+        : checkout.receivedOrder.items.first.name;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          decoration: BoxDecoration(
+            color: const Color(0xED2A231E),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0x2BFFFFFF)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x341D0E07),
+                blurRadius: 22,
+                offset: Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    height: 42,
+                    width: 42,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF37B766), Color(0xFF27894D)],
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.delivery_dining_rounded,
+                      color: Color(0xFFF7FFF9),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Trwa realizacja zamowienia #${checkout.savedOrderId}',
+                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                                color: const Color(0xFFF8EEE6),
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          leadItem,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFFDCC9BD),
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '${remainingEta.clamp(0, 999)} min',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: const Color(0xFFF8F3EE),
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Dotknij, aby otworzyc',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: const Color(0xFF8FE0AE),
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                  minHeight: 10,
+                  value: progress,
+                  backgroundColor: const Color(0xFF473C35),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF3BC977)),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text(
+                    'Etap 1/2 aktywny',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: const Color(0xFFEEDDD0),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    '$itemCount ${itemCount == 1 ? 'pozycja' : 'pozycje'}',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: const Color(0xFFEEDDD0),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CartSummaryScreen extends StatefulWidget {
   const _CartSummaryScreen({
     required this.initialEntries,
     required this.onCartChanged,
+    required this.authSession,
   });
 
   final List<_CartEntry> initialEntries;
   final ValueChanged<List<_CartEntry>> onCartChanged;
+  final AuthSession authSession;
 
   @override
   State<_CartSummaryScreen> createState() => _CartSummaryScreenState();
@@ -721,46 +1015,50 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
         MaterialPageRoute<void>(
           builder: (_) => _PaymentVerificationScreen(
             paymentMethod: method,
+            checkoutRepository: _DashboardScreenState._checkoutRepository,
             requestPayload: payload,
+            authSession: widget.authSession,
           ),
         ),
       );
     }
   }
 
-  Map<String, dynamic> _buildOrderPayload(String paymentMethod) {
+  CheckoutVerificationRequest _buildOrderPayload(String paymentMethod) {
     final selectedAddress = _addresses[_addressIndex];
     final total = _entries.fold<double>(0, (sum, entry) => sum + (_price(entry.position) ?? 0));
 
-    return {
-      'created_at': DateTime.now().toUtc().toIso8601String(),
-      'currency': 'PLN',
-      'total_amount': total,
-      'eta_minutes': 15,
-      'payment_method': paymentMethod,
-      'fulfillment_method': _fulfillmentOptions[_fulfillmentIndex].label,
-      'fulfillment_option_index': _fulfillmentIndex,
-      'address_option_index': _addressIndex,
-      'address': {
-        'title': selectedAddress.title,
-        'subtitle': selectedAddress.subtitle,
-        'eta_label': _addressIndex == 0 ? '~25 min.' : '~40 min.',
-      },
-      'items': _entries
+    return CheckoutVerificationRequest(
+      createdAt: DateTime.now().toUtc(),
+      currency: 'PLN',
+      totalAmount: total,
+      etaMinutes: 15,
+      paymentMethod: paymentMethod,
+      fulfillmentMethod: _fulfillmentOptions[_fulfillmentIndex].label,
+      fulfillmentOptionIndex: _fulfillmentIndex,
+      addressOptionIndex: _addressIndex,
+      address: CheckoutVerificationAddress(
+        title: selectedAddress.title,
+        subtitle: selectedAddress.subtitle,
+        etaLabel: _addressIndex == 0 ? '~25 min.' : '~40 min.',
+      ),
+      items: _entries
           .map(
-            (entry) => {
-              'cart_entry_id': entry.id,
-              'position_id': _positionId(entry.position),
-              'name': _title(entry.position, 0),
-              'description': _description(entry.position),
-              'photo_url': _photo(entry.position),
-              'calories': _positionCalories(entry.position),
-              'price': _price(entry.position),
-            },
+            (entry) => CheckoutVerificationItem(
+              cartEntryId: entry.id,
+              positionId: _positionId(entry.position),
+              name: _title(entry.position, 0),
+              description: _description(entry.position),
+              photoUrl: _photo(entry.position),
+              calories: _positionCalories(entry.position),
+              price: _price(entry.position),
+            ),
           )
           .toList(growable: false),
-      'notes': 'Wstepna weryfikacja checkout z aplikacji mobilnej',
-    };
+      sessionToken: widget.authSession.sessionToken,
+      userEmail: widget.authSession.email,
+      notes: 'Wstepna weryfikacja checkout z aplikacji mobilnej',
+    );
   }
 
   @override
@@ -970,47 +1268,80 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
 class _PaymentVerificationScreen extends StatefulWidget {
   const _PaymentVerificationScreen({
     required this.paymentMethod,
+    required this.checkoutRepository,
     required this.requestPayload,
+    required this.authSession,
   });
 
   final String paymentMethod;
-  final Map<String, dynamic> requestPayload;
+  final CheckoutRepository checkoutRepository;
+  final CheckoutVerificationRequest requestPayload;
+  final AuthSession authSession;
 
   @override
   State<_PaymentVerificationScreen> createState() => _PaymentVerificationScreenState();
 }
 
 class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> {
-  late Future<Map<String, dynamic>> _verificationFuture;
+  CheckoutVerificationResponse? _verificationResponse;
+  Object? _verificationError;
+  bool _isSubmitting = true;
+  bool _didNavigateToTracking = false;
 
   @override
   void initState() {
     super.initState();
-    _verificationFuture = _sendVerificationRequest();
+    _runVerificationFlow();
   }
 
-  Future<Map<String, dynamic>> _sendVerificationRequest() async {
-    final response = await http
-        .post(
-          Uri.parse('${_DashboardScreenState._apiBaseUrl}/checkout/verification'),
-          headers: const {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          body: jsonEncode(widget.requestPayload),
-        )
-        .timeout(const Duration(seconds: 10));
+  Future<void> _runVerificationFlow() async {
+    try {
+      final response = await widget.checkoutRepository.submitCheckoutVerification(
+        widget.requestPayload,
+      );
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Backend zwrocil ${response.statusCode}: ${response.body}');
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _verificationResponse = response;
+        _verificationError = null;
+        _isSubmitting = false;
+      });
+
+      await Future<void>.delayed(const Duration(milliseconds: 650));
+      if (!mounted) {
+        return;
+      }
+
+      _openTrackingScreen(response);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _verificationError = error;
+        _isSubmitting = false;
+      });
+    }
+  }
+
+  void _openTrackingScreen(CheckoutVerificationResponse checkout) {
+    if (_didNavigateToTracking || !mounted) {
+      return;
     }
 
-    final decoded = jsonDecode(response.body);
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-
-    throw Exception('Nieoczekiwany format odpowiedzi z /checkout/verification.');
+    _didNavigateToTracking = true;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => OrderTrackingScreen(
+          checkout: checkout,
+          authSession: widget.authSession,
+        ),
+      ),
+    );
   }
 
   @override
@@ -1019,26 +1350,26 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
       body: _Background(
         child: SafeArea(
           bottom: false,
-          child: FutureBuilder<Map<String, dynamic>>(
-            future: _verificationFuture,
-            builder: (context, snapshot) {
+          child: Builder(
+            builder: (context) {
               final theme = Theme.of(context);
-              final isLoading = snapshot.connectionState != ConnectionState.done;
-              final hasError = snapshot.hasError;
-              final responseData = snapshot.data;
+              final isLoading = _isSubmitting;
+              final hasError = _verificationError != null;
+              final successfulCheckout = _verificationResponse;
+
               final jsonToShow = hasError
                   ? <String, dynamic>{
-                      'request_payload': widget.requestPayload,
-                      'error': snapshot.error.toString(),
+                      'request_payload': widget.requestPayload.toJson(),
+                      'error': _verificationError.toString(),
                     }
-                  : responseData == null
+                  : successfulCheckout == null
                       ? <String, dynamic>{
-                          'request_payload': widget.requestPayload,
+                          'request_payload': widget.requestPayload.toJson(),
                           'status': 'sending',
                         }
                       : <String, dynamic>{
-                          'request_payload': widget.requestPayload,
-                          'backend_response': responseData,
+                          'request_payload': widget.requestPayload.toJson(),
+                          'backend_response': successfulCheckout.toJson(),
                         };
 
               return ListView(
@@ -1096,8 +1427,12 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
                                         ),
                                       )
                                     : Icon(
-                                        hasError ? Icons.error_outline_rounded : Icons.verified_outlined,
-                                        color: hasError ? const Color(0xFFFF8975) : const Color(0xFFFFB15B),
+                                        hasError
+                                            ? Icons.error_outline_rounded
+                                            : Icons.check_circle_rounded,
+                                        color: hasError
+                                            ? const Color(0xFFFF8975)
+                                            : const Color(0xFF3BC977),
                                       ),
                               ),
                               const SizedBox(width: 12),
@@ -1118,12 +1453,24 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
                                           ? 'Wysylamy szczegoly zamowienia do backendu i przygotowujemy etap wstepnej weryfikacji.'
                                           : hasError
                                               ? 'Nie udalo sie wyslac zamowienia do backendu.'
-                                              : (responseData?['message']?.toString() ?? 'Backend przyjal dane do wstepnej weryfikacji.'),
+                                              : (successfulCheckout?.message ??
+                                                  'Backend przyjal dane do wstepnej weryfikacji.'),
                                       style: theme.textTheme.bodyMedium?.copyWith(
                                         color: const Color(0xFFD9C6B9),
                                         height: 1.35,
                                       ),
                                     ),
+                                    if (successfulCheckout != null) ...[
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Symulacja platnosci zakonczyla sie sukcesem. Otwieramy widok trwajacego zamowienia.',
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: const Color(0xFF73DCA2),
+                                          fontWeight: FontWeight.w700,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -1131,8 +1478,25 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
                           ),
                         ),
                         const SizedBox(height: 14),
+                        if (successfulCheckout != null) ...[
+                          FilledButton(
+                            onPressed: () => _openTrackingScreen(successfulCheckout),
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(54),
+                              backgroundColor: const Color(0xFF2E8F57),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Text(
+                              'Przejdz do trwajacego zamowienia',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                        ],
                         _SummarySection(
-                          title: 'JSON zamowienia',
+                          title: 'Payload i odpowiedz',
                           child: SizedBox(
                             height: 320,
                             child: SingleChildScrollView(
