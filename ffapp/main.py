@@ -316,7 +316,6 @@ class OrderSummaryScreen(MDScreen):
     pass
 
 class FastFoodApp(MDApp):
-    SECRET_KEY = "supersecret"   # ten sam klucz co w backendzie
     ALGORITHM = "HS256"
     CART = []
     LAST_ORDERS = []
@@ -352,7 +351,6 @@ class FastFoodApp(MDApp):
 
     def build(self):
         token = self.load_token()
-        print("token", token)
 
         if token:
             self.root.current = "dashboard"
@@ -828,7 +826,6 @@ class FastFoodApp(MDApp):
         try:
             # dekodowanie JWT (bez weryfikacji podpisu)
             decoded = jwt.decode(token, options={"verify_signature": False})
-            print("Dekodowany JWT:", decoded)
             return decoded
         except Exception as e:
             print("Błąd dekodowania JWT:", e)

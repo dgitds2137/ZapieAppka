@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../../core/config/app_config.dart';
+import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
 import '../../router/app_router.dart';
 
@@ -16,10 +18,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   static const _backgroundAsset =
       'assets/images/background_big_ingredients_darker.png';
-  static const _apiBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://127.0.0.1:8000',
-  );
+  static const _apiBaseUrl = AppConfig.apiBaseUrl;
 
   final _formKey = GlobalKey<FormState>();
   final emailController = TextEditingController();
@@ -43,18 +42,16 @@ class _LoginScreenState extends State<LoginScreen> {
     final encodedPassword = base64Encode(utf8.encode(password));
 
     try {
-      final response = await http
-          .post(
-            uri,
-            headers: const {
-              'Accept': 'application/json',
-            },
-            body: {
-              'email': email,
-              'password': encodedPassword,
-            },
-          )
-          .timeout(const Duration(seconds: 10));
+      final response = await http.post(
+        uri,
+        headers: const {
+          'Accept': 'application/json',
+        },
+        body: {
+          'email': email,
+          'password': encodedPassword,
+        },
+      ).timeout(const Duration(seconds: 10));
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final body = response.body.isEmpty
@@ -64,6 +61,8 @@ class _LoginScreenState extends State<LoginScreen> {
         return _LoginResult.success(
           jwt: body['jwt']?.toString(),
           sessionToken: body['session_token']?.toString(),
+          role: body['role']?.toString(),
+          loyaltyPoints: _asInt(body['loyalty_points']) ?? 0,
         );
       }
 
@@ -83,7 +82,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return _LoginResult.failure(message);
     } catch (_) {
       return const _LoginResult.failure(
-        'Brak polaczenia z backendem. Sprawdz czy FastAPI dziala pod http://127.0.0.1:8000.',
+          'Brak polaczenia z backendem. Sprawdz czy FastAPI dziala pod ${AppConfig.apiBaseUrl}.',
       );
     }
   }
@@ -121,7 +120,11 @@ class _LoginScreenState extends State<LoginScreen> {
       email: emailController.text.trim(),
       jwt: result.jwt,
       sessionToken: result.sessionToken,
+      role: result.role,
+      loyaltyPoints: result.loyaltyPoints ?? 0,
     );
+
+    await SessionPersistence.saveAuthSession(authSession);
 
     Navigator.pushReplacementNamed(
       context,
@@ -133,6 +136,16 @@ class _LoginScreenState extends State<LoginScreen> {
   void fillDemoCredentials() {
     emailController.text = 'demo@zapieapp.pl';
     passwordController.text = 'Haslo123!';
+  }
+
+  void fillAdminCredentials() {
+    emailController.text = 'admin@zapieapp.pl';
+    passwordController.text = 'Admin123!';
+  }
+
+  void fillEmployeeCredentials() {
+    emailController.text = 'employee@zapieapp.pl';
+    passwordController.text = 'Employee123!';
   }
 
   @override
@@ -210,7 +223,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                 if (email.isEmpty) {
                                   return 'Podaj adres e-mail.';
                                 }
-                                if (!email.contains('@') || !email.contains('.')) {
+                                if (!email.contains('@') ||
+                                    !email.contains('.')) {
                                   return 'Podaj poprawny adres e-mail.';
                                 }
                                 return null;
@@ -268,9 +282,36 @@ class _LoginScreenState extends State<LoginScreen> {
                               onPressed: loading ? null : fillDemoCredentials,
                               child: const Text('Wypelnij dane demo'),
                             ),
+                            const SizedBox(height: 12),
+                            OutlinedButton(
+                              onPressed: loading ? null : fillAdminCredentials,
+                              child: const Text('Wypelnij konto admina'),
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton(
+                              onPressed:
+                                  loading ? null : fillEmployeeCredentials,
+                              child: const Text('Wypelnij konto pracownika'),
+                            ),
                             const SizedBox(height: 16),
                             Text(
-                              'Dane testowe: demo@zapieapp.pl / Haslo123!',
+                              'Demo user: demo@zapieapp.pl / Haslo123!',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFFD6C4B8),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Admin: admin@zapieapp.pl / Admin123!',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFFD6C4B8),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Pracownik: employee@zapieapp.pl / Employee123!',
                               textAlign: TextAlign.center,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: const Color(0xFFD6C4B8),
@@ -295,16 +336,35 @@ class _LoginResult {
   const _LoginResult.success({
     this.jwt,
     this.sessionToken,
+    this.role,
+    this.loyaltyPoints,
   })  : isSuccess = true,
         message = null;
 
   const _LoginResult.failure(this.message)
       : isSuccess = false,
         jwt = null,
-        sessionToken = null;
+        sessionToken = null,
+        role = null,
+        loyaltyPoints = null;
 
   final bool isSuccess;
   final String? message;
   final String? jwt;
   final String? sessionToken;
+  final String? role;
+  final int? loyaltyPoints;
+}
+
+int? _asInt(Object? value) {
+  if (value is int) {
+    return value;
+  }
+  if (value is num) {
+    return value.toInt();
+  }
+  if (value is String) {
+    return int.tryParse(value);
+  }
+  return null;
 }

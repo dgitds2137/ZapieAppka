@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, Form, HTTPException
 from sqlalchemy.orm import Session
+import os
 from models import (
     UserSchema,
     UserCreate,
+    MenuAddonSchema,
     OrderCreate,
     OrderSchema,
     OrderItemCreate,
@@ -15,12 +17,26 @@ from models import (
     OrderItemUpdate,
     CheckoutVerificationIn,
     CheckoutVerificationOut,
+    CheckoutReceiptConfirmationIn,
+    CheckoutOrderMessageCreateIn,
+    CheckoutOrderMessageOut,
+    CheckoutOrderMessagesReadIn,
+    CheckoutOrderMessagesReadOut,
+    AdminCatalogAddonOut,
+    AdminCatalogItemUpdateIn,
+    AdminCatalogOut,
+    AdminCatalogPositionOut,
+    AdminDashboardOut,
+    AdminDashboardOrderOut,
+    AdminOrderStatusUpdateIn,
+    PrepTimeSettingOut,
+    PrepTimeSettingUpdateIn,
 )
 
 import base64
 from datetime import datetime, timedelta
 
-SECRET_KEY = "supersecret"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-local-jwt-secret")
 ALGORITHM = "HS256"
 
 def routes(OrderService, KitchenService, MenuService, UserService, CheckoutService, get_db):
@@ -130,6 +146,10 @@ def routes(OrderService, KitchenService, MenuService, UserService, CheckoutServi
     @r.get("/position/{position_id}")
     def get_position(position_id: int, db: Session = Depends(get_db)):
         return MenuService(db).get_position(position_id)
+
+    @r.get("/position/{position_id}/addons", response_model=list[MenuAddonSchema])
+    def get_position_addons(position_id: int, db: Session = Depends(get_db)):
+        return MenuService(db).get_position_addons(position_id)
     
       # -----------------------------
     # ORDERS
@@ -196,5 +216,156 @@ def routes(OrderService, KitchenService, MenuService, UserService, CheckoutServi
         db: Session = Depends(get_db),
     ):
         return CheckoutService(db).create_checkout_verification(payload)
+
+    @r.get("/checkout/active", response_model=CheckoutVerificationOut | None)
+    def get_active_checkout(
+        session_token: str | None = None,
+        email: str | None = None,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).get_active_checkout(
+            session_token=session_token,
+            user_email=email,
+        )
+
+    @r.post("/checkout/confirm-receipt", response_model=CheckoutVerificationOut)
+    def confirm_checkout_receipt(
+        payload: CheckoutReceiptConfirmationIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).confirm_receipt(payload)
+
+    @r.get(
+        "/checkout/orders/{checkout_order_id}/messages",
+        response_model=list[CheckoutOrderMessageOut],
+    )
+    def get_checkout_order_messages(
+        checkout_order_id: int,
+        session_token: str | None = None,
+        email: str | None = None,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).get_order_messages(
+            checkout_order_id=checkout_order_id,
+            session_token=session_token,
+            user_email=email,
+        )
+
+    @r.post(
+        "/checkout/orders/{checkout_order_id}/messages",
+        response_model=CheckoutOrderMessageOut,
+    )
+    def create_checkout_order_message(
+        checkout_order_id: int,
+        payload: CheckoutOrderMessageCreateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).create_order_message(
+            checkout_order_id=checkout_order_id,
+            payload=payload,
+        )
+
+    @r.post(
+        "/checkout/orders/{checkout_order_id}/messages/read",
+        response_model=CheckoutOrderMessagesReadOut,
+    )
+    def mark_checkout_order_messages_read(
+        checkout_order_id: int,
+        payload: CheckoutOrderMessagesReadIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).mark_order_messages_read(
+            checkout_order_id=checkout_order_id,
+            payload=payload,
+        )
+
+    @r.get("/admin/dashboard", response_model=AdminDashboardOut)
+    def get_admin_dashboard(
+        session_token: str | None = None,
+        email: str | None = None,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).get_admin_dashboard(
+            session_token=session_token,
+            user_email=email,
+        )
+
+    @r.get("/admin/catalog", response_model=AdminCatalogOut)
+    def get_admin_catalog(
+        session_token: str | None = None,
+        email: str | None = None,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).get_admin_catalog(
+            session_token=session_token,
+            user_email=email,
+        )
+
+    @r.patch(
+        "/admin/catalog/positions/{position_id}",
+        response_model=AdminCatalogPositionOut,
+    )
+    def update_admin_catalog_position(
+        position_id: int,
+        payload: AdminCatalogItemUpdateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).update_admin_catalog_position(
+            position_id=position_id,
+            payload=payload,
+        )
+
+    @r.patch(
+        "/admin/catalog/addons/{addon_id}",
+        response_model=AdminCatalogAddonOut,
+    )
+    def update_admin_catalog_addon(
+        addon_id: int,
+        payload: AdminCatalogItemUpdateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).update_admin_catalog_addon(
+            addon_id=addon_id,
+            payload=payload,
+        )
+
+    @r.get("/admin/prep-time-settings", response_model=list[PrepTimeSettingOut])
+    def get_admin_prep_time_settings(
+        session_token: str | None = None,
+        email: str | None = None,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).get_prep_time_settings(
+            session_token=session_token,
+            user_email=email,
+        )
+
+    @r.patch(
+        "/admin/prep-time-settings/{group_key}",
+        response_model=PrepTimeSettingOut,
+    )
+    def update_admin_prep_time_setting(
+        group_key: str,
+        payload: PrepTimeSettingUpdateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).update_prep_time_setting(
+            group_key=group_key,
+            payload=payload,
+        )
+
+    @r.patch(
+        "/admin/orders/{checkout_order_id}/processing-status",
+        response_model=AdminDashboardOrderOut,
+    )
+    def update_admin_order_processing_status(
+        checkout_order_id: int,
+        payload: AdminOrderStatusUpdateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).update_admin_order_status(
+            checkout_order_id=checkout_order_id,
+            payload=payload,
+        )
     
     return r

@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+import 'core/config/app_config.dart';
 import 'core/theme/app_theme.dart';
 import 'router/app_router.dart';
 
@@ -13,6 +14,7 @@ class ZapieApp extends StatelessWidget {
     return MaterialApp(
       title: 'Zapie Appka',
       debugShowCheckedModeBanner: false,
+      showPerformanceOverlay: AppConfig.showPerformanceOverlay,
       theme: buildAppTheme(),
       scrollBehavior: const _AppScrollBehavior(),
       initialRoute: AppRoutes.login,

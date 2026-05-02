@@ -1,12 +1,16 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../../core/config/app_config.dart';
+import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
 import '../../data/models/checkout_verification.dart';
 import '../../data/repositories/checkout_repository.dart';
+import '../admin/admin_dashboard_screen.dart';
 import '../orders/order_tracking_screen.dart';
 import '../../router/app_router.dart';
 
@@ -18,11 +22,9 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  static const _backgroundAsset = 'assets/images/background_big_ingredients_darker.png';
-  static const _apiBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: 'http://127.0.0.1:8000',
-  );
+  static const _backgroundAsset =
+      'assets/images/background_big_ingredients_darker.png';
+  static const _apiBaseUrl = AppConfig.apiBaseUrl;
   static final CheckoutRepository _checkoutRepository = HttpCheckoutRepository(
     apiBaseUrl: _apiBaseUrl,
   );
@@ -36,11 +38,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLoadingActiveCheckout = false;
   int _nextCartEntryId = 1;
   int _activeFooterIndex = 1;
+  int _loyaltyPoints = 0;
 
   @override
   void initState() {
     super.initState();
     _positionsFuture = _fetchPositions();
+    final storedAuthSession = SessionPersistence.loadAuthSessionSync();
+    final storedCheckout = SessionPersistence.loadActiveCheckoutSync();
+    final cachedCheckout = _checkoutRepository.cachedActiveCheckout;
+
+    if (storedAuthSession?.hasIdentity == true) {
+      _authSession = storedAuthSession!;
+      _authSessionKey = _authSessionStorageKey(_authSession);
+      _loyaltyPoints = _authSession.loyaltyPoints;
+    }
+
+    final initialCheckout = storedCheckout ?? cachedCheckout;
+    if (_isCheckoutStillActive(initialCheckout)) {
+      _activeCheckout = initialCheckout;
+      _checkoutRepository.rememberActiveCheckout(initialCheckout);
+    }
+
+    if (_authSession.hasIdentity) {
+      _loadActiveCheckout();
+      _loadLoyaltyPoints();
+    }
   }
 
   @override
@@ -50,12 +73,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _fetchPositions() async {
-    final response = await http
-        .get(Uri.parse('$_apiBaseUrl/positions'), headers: const {'Accept': 'application/json'})
-        .timeout(const Duration(seconds: 10));
+    final response = await http.get(Uri.parse('$_apiBaseUrl/positions'),
+        headers: const {
+          'Accept': 'application/json'
+        }).timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Backend zwrocil ${response.statusCode}: ${response.body}');
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
     }
 
     final decoded = jsonDecode(response.body);
@@ -64,7 +89,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     return decoded
-        .map((item) => item is Map<String, dynamic> ? item : Map<String, dynamic>.from(item as Map))
+        .map((item) => item is Map<String, dynamic>
+            ? item
+            : Map<String, dynamic>.from(item as Map))
         .toList();
   }
 
@@ -73,29 +100,105 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _positionsFuture = _fetchPositions();
     });
     _loadActiveCheckout();
+    _loadLoyaltyPoints();
   }
 
   void _syncAuthSessionFromRoute() {
-    final authSession = AuthSession.fromRouteArgs(
-      ModalRoute.of(context)?.settings.arguments,
-    );
-    final sessionKey =
-        '${authSession.email ?? ''}|${authSession.sessionToken ?? ''}|${authSession.jwt ?? ''}';
+    final routeArgs = ModalRoute.of(context)?.settings.arguments;
+    final authSession = AuthSession.fromRouteArgs(routeArgs);
+    final routedCheckout = _activeCheckoutFromRoute(routeArgs);
+    final sessionKey = _authSessionStorageKey(authSession);
+
+    if (routedCheckout != null && _isCheckoutStillActive(routedCheckout)) {
+      _activeCheckout = routedCheckout;
+      _checkoutRepository.rememberActiveCheckout(routedCheckout);
+      SessionPersistence.saveActiveCheckout(routedCheckout);
+    }
+
+    if (!authSession.hasIdentity && _authSession.hasIdentity) {
+      return;
+    }
 
     if (_authSessionKey == sessionKey) {
+      if (_loyaltyPoints != authSession.loyaltyPoints) {
+        setState(() {
+          _authSession = authSession;
+          _loyaltyPoints = authSession.loyaltyPoints;
+        });
+      }
       return;
     }
 
     _authSession = authSession;
     _authSessionKey = sessionKey;
+    _loyaltyPoints = authSession.loyaltyPoints;
+    if (authSession.hasIdentity) {
+      SessionPersistence.saveAuthSession(authSession);
+    }
     _loadActiveCheckout();
+    _loadLoyaltyPoints();
+  }
+
+  String _authSessionStorageKey(AuthSession authSession) {
+    return '${authSession.email ?? ''}|${authSession.sessionToken ?? ''}|${authSession.jwt ?? ''}|${authSession.loyaltyPoints}';
+  }
+
+  Future<void> _loadLoyaltyPoints() async {
+    final email = _authSession.email?.trim();
+    if (!_authSession.hasIdentity || email == null || email.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _loyaltyPoints = 0;
+      });
+      return;
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse('$_apiBaseUrl/get_user/${Uri.encodeComponent(email)}'),
+        headers: const {
+          'Accept': 'application/json',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return;
+      }
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        return;
+      }
+
+      final loyaltyPoints = _asInt(decoded['loyalty_points']) ?? 0;
+      final updatedSession = _authSession.copyWith(loyaltyPoints: loyaltyPoints);
+      await SessionPersistence.saveAuthSession(updatedSession);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _authSession = updatedSession;
+        _authSessionKey = _authSessionStorageKey(updatedSession);
+        _loyaltyPoints = loyaltyPoints;
+      });
+    } catch (_) {
+      // Keep the locally cached point balance when the backend is temporarily unavailable.
+    }
   }
 
   Future<void> _loadActiveCheckout() async {
     if (!_authSession.hasIdentity) {
+      final existingCheckout =
+          _activeCheckout ?? _checkoutRepository.cachedActiveCheckout;
       if (mounted) {
         setState(() {
-          _activeCheckout = null;
+          _activeCheckout = _isCheckoutStillActive(existingCheckout)
+              ? existingCheckout
+              : null;
           _isLoadingActiveCheckout = false;
         });
       }
@@ -118,20 +221,59 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return;
       }
 
+      final existingCheckout =
+          _activeCheckout ?? _checkoutRepository.cachedActiveCheckout;
+      CheckoutVerificationResponse? resolvedCheckout;
       setState(() {
-        _activeCheckout = activeCheckout;
+        resolvedCheckout = activeCheckout ??
+            (_isCheckoutStillActive(existingCheckout)
+                ? existingCheckout
+                : null);
+        _activeCheckout = resolvedCheckout;
         _isLoadingActiveCheckout = false;
       });
+      SessionPersistence.saveActiveCheckout(resolvedCheckout);
     } catch (_) {
+      final existingCheckout =
+          _activeCheckout ?? _checkoutRepository.cachedActiveCheckout;
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _activeCheckout = null;
+        _activeCheckout =
+            _isCheckoutStillActive(existingCheckout) ? existingCheckout : null;
         _isLoadingActiveCheckout = false;
       });
     }
+  }
+
+  CheckoutVerificationResponse? _activeCheckoutFromRoute(Object? args) {
+    if (args is! Map) {
+      return null;
+    }
+
+    final activeCheckoutJson = args['activeCheckout'];
+    if (activeCheckoutJson is Map<String, dynamic>) {
+      return CheckoutVerificationResponse.fromJson(activeCheckoutJson);
+    }
+    if (activeCheckoutJson is Map) {
+      return CheckoutVerificationResponse.fromJson(
+        Map<String, dynamic>.from(activeCheckoutJson),
+      );
+    }
+    return null;
+  }
+
+  bool _isCheckoutStillActive(CheckoutVerificationResponse? checkout) {
+    final activeUntil = checkout?.activeUntil;
+    if (checkout == null) {
+      return false;
+    }
+    if (activeUntil == null) {
+      return true;
+    }
+    return activeUntil.isAfter(DateTime.now().toUtc());
   }
 
   Future<void> _openActiveOrder() async {
@@ -145,6 +287,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         builder: (_) => OrderTrackingScreen(
           checkout: activeCheckout,
           authSession: _authSession,
+          checkoutRepository: _checkoutRepository,
         ),
       ),
     );
@@ -152,6 +295,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (mounted) {
       _loadActiveCheckout();
     }
+  }
+
+  Future<void> _showRewardsDialog() async {
+    await showDialog<void>(
+      context: context,
+      barrierColor: const Color(0xC4000000),
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF181311),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Nagrody i punkty',
+          style: TextStyle(
+            color: Color(0xFFF8EEE7),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: Text(
+          _loyaltyPoints > 0
+              ? 'Masz obecnie $_loyaltyPoints pkt. Punkty mozesz wykorzystac przy zamowieniu. 10 pkt = 1 PLN, a maksymalnie oplacisz nimi 30% wartosci koszyka.'
+              : 'Punkty mozesz wykorzystac przy zamowieniu. 10 pkt = 1 PLN, a maksymalnie oplacisz nimi 30% wartosci koszyka.',
+          style: Theme.of(dialogContext).textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFFD8C7BA),
+                height: 1.4,
+              ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text(
+              'Zamknij',
+              style: TextStyle(
+                color: Color(0xFFFFA247),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _selectPosition(Map<String, dynamic> position) {
@@ -170,12 +352,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _addToCart(Map<String, dynamic> position) {
+    if (_activeCheckout != null && _isCheckoutStillActive(_activeCheckout)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Masz aktywne zamowienie. Poczekaj na jego zakonczenie, zanim dodasz kolejne pozycje.',
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _selectedPosition = position;
       _cart.add(
         _CartEntry(
           id: _nextCartEntryId++,
           position: position,
+          customization: _initialCustomizationFor(position),
         ),
       );
     });
@@ -192,7 +386,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _cart
         ..clear()
         ..addAll(entries);
-      _nextCartEntryId = _cart.fold<int>(0, (maxId, entry) => entry.id > maxId ? entry.id : maxId) + 1;
+      _nextCartEntryId = _cart.fold<int>(
+              0, (maxId, entry) => entry.id > maxId ? entry.id : maxId) +
+          1;
     });
   }
 
@@ -212,6 +408,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  Future<void> _openCategoryView(
+    _DashboardCategory category,
+    List<Map<String, dynamic>> positions,
+  ) async {
+    final resolvedCartEntries = _resolvedCartEntries(positions);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _CategoryProductsScreen(
+          categories: _buildDashboardCategories(positions),
+          initialCategoryKey: category.key,
+          initialCartEntries: resolvedCartEntries,
+          hasActiveCheckout:
+              _activeCheckout != null && _isCheckoutStillActive(_activeCheckout),
+          onCartChanged: _replaceCart,
+        ),
+      ),
+    );
+  }
+
   Map<String, dynamic>? _resolveSelected(List<Map<String, dynamic>> positions) {
     if (positions.isEmpty) return null;
     if (_selectedPosition == null) return positions.first;
@@ -221,32 +436,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return positions.first;
   }
 
-  List<({String title, List<Map<String, dynamic>> items})> _sections(List<Map<String, dynamic>> positions) {
+  List<({String title, List<Map<String, dynamic>> items})> _sections(
+      List<Map<String, dynamic>> positions) {
     if (positions.isEmpty) return const [];
     return [
       (title: 'Popularne', items: _rotatedTake(positions, 0)),
-      (title: 'Ostatnio zamawiane', items: _rotatedTake(positions.reversed.toList(), 0)),
-      (title: 'Ulubione pozycje', items: _rotatedTake(positions, positions.length > 2 ? 1 : 0)),
+      (
+        title: 'Ostatnio zamawiane',
+        items: _rotatedTake(positions.reversed.toList(), 0)
+      ),
+      (
+        title: 'Ulubione pozycje',
+        items: _rotatedTake(positions, positions.length > 2 ? 1 : 0)
+      ),
     ];
   }
 
   List<_CartEntry> _resolvedCartEntries(List<Map<String, dynamic>> positions) {
-    return _cart
-        .map((entry) {
-          for (final position in positions) {
-            if (_samePosition(entry.position, position)) {
-              return entry.copyWith(position: position);
-            }
-          }
-          return entry;
-        })
-        .toList(growable: false);
+    return _cart.map((entry) {
+      for (final position in positions) {
+        if (_samePosition(entry.position, position)) {
+          return entry.copyWith(position: position);
+        }
+      }
+      return entry;
+    }).toList(growable: false);
   }
 
   int _cartQuantityFor(
     Map<String, dynamic> position,
     List<_CartEntry> cartEntries,
   ) {
+    if (_activeCheckout != null && _isCheckoutStillActive(_activeCheckout)) {
+      return 0;
+    }
+
     var count = 0;
     for (final entry in cartEntries) {
       if (_samePosition(entry.position, position)) {
@@ -258,20 +482,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_authSession.isAdmin || _authSession.isEmployee) {
+      return AdminDashboardScreen(authSession: _authSession);
+    }
+
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _positionsFuture,
       builder: (context, snapshot) {
         final positions = snapshot.data ?? const <Map<String, dynamic>>[];
         final selected = _resolveSelected(positions);
         final cartEntries = _resolvedCartEntries(positions);
-        final hasBottomModule =
-            _activeCheckout != null ||
+        final dashboardCategories = _buildDashboardCategories(positions);
+        final hasBottomModule = _activeCheckout != null ||
             cartEntries.isNotEmpty ||
             (_isLoadingActiveCheckout && cartEntries.isEmpty);
 
         Widget body;
         if (snapshot.connectionState != ConnectionState.done) {
-          body = const Center(child: CircularProgressIndicator(color: Color(0xFFE97F2A)));
+          body = const Center(
+              child: CircularProgressIndicator(color: Color(0xFFE97F2A)));
         } else if (snapshot.hasError) {
           body = _StateCard(
             icon: Icons.wifi_off_rounded,
@@ -284,7 +513,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           body = const _StateCard(
             icon: Icons.fastfood_outlined,
             title: 'Menu jest puste',
-            message: 'Gdy backend zwroci dane z /positions, dashboard automatycznie uzupelni sekcje i koszyk.',
+            message:
+                'Gdy backend zwroci dane z /positions, dashboard automatycznie uzupelni sekcje i koszyk.',
           );
         } else {
           final sections = _sections(positions);
@@ -296,12 +526,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 await _positionsFuture;
               },
               child: ListView(
-                physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
-                padding: EdgeInsets.fromLTRB(14, 12, 14, hasBottomModule ? 206 : 110),
+                physics: const BouncingScrollPhysics(
+                    parent: AlwaysScrollableScrollPhysics()),
+                padding: EdgeInsets.fromLTRB(
+                    14, 12, 14, hasBottomModule ? 206 : 110),
                 children: [
                   _TopBar(
                     onReload: _reload,
-                    onLogout: () => Navigator.pushReplacementNamed(context, AppRoutes.login),
+                    onLogout: () async {
+                      _checkoutRepository.rememberActiveCheckout(null);
+                      await SessionPersistence.clearAll();
+                      if (!context.mounted) {
+                        return;
+                      }
+                      Navigator.pushReplacementNamed(context, AppRoutes.login);
+                    },
                   ),
                   const SizedBox(height: 14),
                   for (final section in sections) ...[
@@ -309,16 +548,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       title: section.title,
                       items: section.items,
                       selected: selected,
-                      cartQuantityFor: (item) => _cartQuantityFor(item, cartEntries),
+                      cartQuantityFor: (item) =>
+                          _cartQuantityFor(item, cartEntries),
                       onSelect: _selectPosition,
                       onAddToCart: _addToCart,
                     ),
                     const SizedBox(height: 16),
                   ],
                   _CategoryBlock(
-                    positions: positions,
+                    categories: dashboardCategories,
                     selected: selected,
-                    onSelect: _selectPosition,
+                    onCategoryTap: (category) =>
+                        _openCategoryView(category, positions),
                   ),
                 ],
               ),
@@ -338,8 +579,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onRemove: _removeFromCart,
             onContinue: _openCartSummary,
             onOpenActiveOrder: _openActiveOrder,
+            loyaltyPoints: _loyaltyPoints,
             onFooterTap: (index, label) {
               setState(() => _activeFooterIndex = index);
+              if (label == 'Nagrody') {
+                _showRewardsDialog();
+                return;
+              }
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('$label jest w przygotowaniu.')),
               );
@@ -360,7 +606,9 @@ class _Background extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        image: DecorationImage(image: AssetImage(_DashboardScreenState._backgroundAsset), fit: BoxFit.cover),
+        image: DecorationImage(
+            image: AssetImage(_DashboardScreenState._backgroundAsset),
+            fit: BoxFit.cover),
       ),
       child: DecoratedBox(
         decoration: const BoxDecoration(
@@ -433,7 +681,9 @@ class _SectionBlock extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: theme.textTheme.titleLarge?.copyWith(color: const Color(0xFFF8EEE7), fontWeight: FontWeight.w800)),
+        Text(title,
+            style: theme.textTheme.titleLarge?.copyWith(
+                color: const Color(0xFFF8EEE7), fontWeight: FontWeight.w800)),
         const SizedBox(height: 10),
         SizedBox(
           height: 252,
@@ -492,8 +742,19 @@ class _MenuCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: const Color(0xE6121111),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: selected ? const Color(0xFFF08B2D) : const Color(0x26FFFFFF), width: selected ? 1.4 : 1),
-            boxShadow: selected ? const [BoxShadow(color: Color(0x40190B03), blurRadius: 18, offset: Offset(0, 10))] : null,
+            border: Border.all(
+                color: selected
+                    ? const Color(0xFFF08B2D)
+                    : const Color(0x26FFFFFF),
+                width: selected ? 1.4 : 1),
+            boxShadow: selected
+                ? const [
+                    BoxShadow(
+                        color: Color(0x40190B03),
+                        blurRadius: 18,
+                        offset: Offset(0, 10))
+                  ]
+                : null,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -503,7 +764,10 @@ class _MenuCard extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    ClipRRect(borderRadius: BorderRadius.circular(10), child: _PositionImage(photoUrl: _photo(position), title: title)),
+                    ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: _PositionImage(
+                            photoUrl: _photo(position), title: title)),
                     Positioned(
                       top: 6,
                       left: 6,
@@ -514,7 +778,12 @@ class _MenuCard extends StatelessWidget {
                         onTap: onAddToCart,
                       ),
                     ),
-                    const Positioned(top: 6, right: 6, child: _TinyBadge(icon: Icons.favorite_border_rounded, active: false)),
+                    const Positioned(
+                        top: 6,
+                        right: 6,
+                        child: _TinyBadge(
+                            icon: Icons.favorite_border_rounded,
+                            active: false)),
                     Positioned(
                       right: 8,
                       bottom: 8,
@@ -524,14 +793,32 @@ class _MenuCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodyMedium?.copyWith(color: const Color(0xFFF7EEE8), fontWeight: FontWeight.w700, height: 1.15)),
+              Text(title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                      color: const Color(0xFFF7EEE8),
+                      fontWeight: FontWeight.w700,
+                      height: 1.15)),
               const SizedBox(height: 4),
-              Text(_description(position), maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall?.copyWith(color: const Color(0xCCCFBBAE), height: 1.2)),
+              Text(_description(position),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: const Color(0xCCCFBBAE), height: 1.2)),
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Expanded(child: Text(_priceLabel(position), maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.labelMedium?.copyWith(color: const Color(0xFFF4D8C6), fontWeight: FontWeight.w700))),
-                  Text(_kcal(position), style: theme.textTheme.labelSmall?.copyWith(color: const Color(0xFF918076))),
+                  Expanded(
+                      child: Text(_priceLabel(position),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                              color: const Color(0xFFF4D8C6),
+                              fontWeight: FontWeight.w700))),
+                  Text(_kcal(position),
+                      style: theme.textTheme.labelSmall
+                          ?.copyWith(color: const Color(0xFF918076))),
                 ],
               ),
             ],
@@ -543,26 +830,26 @@ class _MenuCard extends StatelessWidget {
 }
 
 class _CategoryBlock extends StatelessWidget {
-  const _CategoryBlock({required this.positions, required this.selected, required this.onSelect});
+  const _CategoryBlock({
+    required this.categories,
+    required this.selected,
+    required this.onCategoryTap,
+  });
 
-  final List<Map<String, dynamic>> positions;
+  final List<_DashboardCategory> categories;
   final Map<String, dynamic>? selected;
-  final ValueChanged<Map<String, dynamic>> onSelect;
+  final ValueChanged<_DashboardCategory> onCategoryTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final categories = [
-      ('Zapiekanki', Icons.view_agenda_rounded, const Color(0xFFF28A2A), const Color(0xFFCC5C1F), _pick(positions, 0)),
-      ('Lody', Icons.icecream_rounded, const Color(0xFF3AB6BF), const Color(0xFF207E90), _pick(positions, 1)),
-      ('Napoje', Icons.local_drink_rounded, const Color(0xFFD5442F), const Color(0xFFA61F1B), _pick(positions, 2)),
-      ('Dodatki', Icons.lunch_dining_rounded, const Color(0xFFE1662A), const Color(0xFFB83B18), _pick(positions, 3)),
-    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Kategorie', style: theme.textTheme.titleLarge?.copyWith(color: const Color(0xFFF8EEE7), fontWeight: FontWeight.w800)),
+        Text('Kategorie',
+            style: theme.textTheme.titleLarge?.copyWith(
+                color: const Color(0xFFF8EEE7), fontWeight: FontWeight.w800)),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -570,12 +857,17 @@ class _CategoryBlock extends StatelessWidget {
               if (index > 0) const SizedBox(width: 10),
               Expanded(
                 child: _CategoryTile(
-                  title: categories[index].$1,
-                  icon: categories[index].$2,
-                  startColor: categories[index].$3,
-                  endColor: categories[index].$4,
-                  selected: _samePosition(categories[index].$5, selected),
-                  onTap: categories[index].$5 == null ? null : () => onSelect(categories[index].$5!),
+                  title: categories[index].title,
+                  icon: categories[index].icon,
+                  startColor: categories[index].startColor,
+                  endColor: categories[index].endColor,
+                  selected: selected != null &&
+                      categories[index]
+                          .items
+                          .any((item) => _samePosition(item, selected)),
+                  onTap: categories[index].items.isEmpty
+                      ? null
+                      : () => onCategoryTap(categories[index]),
                 ),
               ),
             ],
@@ -587,7 +879,13 @@ class _CategoryBlock extends StatelessWidget {
 }
 
 class _CategoryTile extends StatelessWidget {
-  const _CategoryTile({required this.title, required this.icon, required this.startColor, required this.endColor, required this.selected, required this.onTap});
+  const _CategoryTile(
+      {required this.title,
+      required this.icon,
+      required this.startColor,
+      required this.endColor,
+      required this.selected,
+      required this.onTap});
 
   final String title;
   final IconData icon;
@@ -608,10 +906,21 @@ class _CategoryTile extends StatelessWidget {
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
           decoration: BoxDecoration(
-            gradient: LinearGradient(colors: [startColor, endColor], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: LinearGradient(
+                colors: [startColor, endColor],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: selected ? const Color(0xFFFBE6D8) : const Color(0x14FFFFFF)),
-            boxShadow: [BoxShadow(color: endColor.withOpacity(0.35), blurRadius: selected ? 18 : 12, offset: const Offset(0, 10))],
+            border: Border.all(
+                color: selected
+                    ? const Color(0xFFFBE6D8)
+                    : const Color(0x14FFFFFF)),
+            boxShadow: [
+              BoxShadow(
+                  color: endColor.withValues(alpha: 0.35),
+                  blurRadius: selected ? 18 : 12,
+                  offset: const Offset(0, 10))
+            ],
           ),
           child: AspectRatio(
             aspectRatio: 0.86,
@@ -620,11 +929,555 @@ class _CategoryTile extends StatelessWidget {
               children: [
                 Icon(icon, color: const Color(0xFFFFECDD), size: 34),
                 const Spacer(),
-                Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleMedium?.copyWith(color: const Color(0xFFFFF5EF), fontWeight: FontWeight.w800, height: 1.05)),
+                Text(title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                        color: const Color(0xFFFFF5EF),
+                        fontWeight: FontWeight.w800,
+                        height: 1.05)),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _CategoryProductsScreen extends StatefulWidget {
+  const _CategoryProductsScreen({
+    required this.categories,
+    required this.initialCategoryKey,
+    required this.initialCartEntries,
+    required this.hasActiveCheckout,
+    required this.onCartChanged,
+  });
+
+  final List<_DashboardCategory> categories;
+  final String initialCategoryKey;
+  final List<_CartEntry> initialCartEntries;
+  final bool hasActiveCheckout;
+  final ValueChanged<List<_CartEntry>> onCartChanged;
+
+  @override
+  State<_CategoryProductsScreen> createState() => _CategoryProductsScreenState();
+}
+
+class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
+  late String _selectedCategoryKey;
+  late List<_CartEntry> _entries;
+  int _nextCartEntryId = 1;
+  int _activeFooterIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedCategoryKey = widget.initialCategoryKey;
+    _entries = List<_CartEntry>.from(widget.initialCartEntries);
+    _nextCartEntryId = _entries.fold<int>(
+          0,
+          (maxId, entry) => entry.id > maxId ? entry.id : maxId,
+        ) +
+        1;
+  }
+
+  _DashboardCategory get _selectedCategory {
+    for (final category in widget.categories) {
+      if (category.key == _selectedCategoryKey) {
+        return category;
+      }
+    }
+    return widget.categories.first;
+  }
+
+  int _quantityFor(Map<String, dynamic> position) {
+    var count = 0;
+    for (final entry in _entries) {
+      if (_samePosition(entry.position, position)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  void _syncCart() {
+    widget.onCartChanged(List<_CartEntry>.from(_entries));
+  }
+
+  void _addToCart(Map<String, dynamic> position) {
+    if (widget.hasActiveCheckout) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Masz aktywne zamowienie. Poczekaj na jego zakonczenie, zanim dodasz kolejne pozycje.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _entries.add(
+        _CartEntry(
+          id: _nextCartEntryId++,
+          position: position,
+          customization: _initialCustomizationFor(position),
+        ),
+      );
+    });
+    _syncCart();
+  }
+
+  void _removeFromCart(Map<String, dynamic> position) {
+    final index = _entries.indexWhere((entry) => _samePosition(entry.position, position));
+    if (index < 0) {
+      return;
+    }
+
+    setState(() {
+      _entries.removeAt(index);
+    });
+    _syncCart();
+  }
+
+  void _openProductPreview(Map<String, dynamic> position) {
+    showDialog<void>(
+      context: context,
+      barrierColor: const Color(0xC4000000),
+      builder: (dialogContext) => _ProductPreviewDialog(
+        position: position,
+        onClose: () => Navigator.of(dialogContext).pop(),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final category = _selectedCategory;
+    final items = category.items;
+
+    return Scaffold(
+      extendBody: true,
+      body: _Background(
+        child: SafeArea(
+          bottom: false,
+          child: ListView(
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 110),
+            children: [
+              Row(
+                children: [
+                  _IconCircle(
+                    icon: Icons.arrow_back_rounded,
+                    onTap: () => Navigator.of(context).pop(),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Kategorie',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: const Color(0xFFF8EEE7),
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    for (var index = 0; index < widget.categories.length; index++) ...[
+                      if (index > 0) const SizedBox(width: 8),
+                      _CategoryViewTab(
+                        category: widget.categories[index],
+                        selected:
+                            widget.categories[index].key == _selectedCategoryKey,
+                        onTap: widget.categories[index].items.isEmpty
+                            ? null
+                            : () {
+                                setState(() {
+                                  _selectedCategoryKey =
+                                      widget.categories[index].key;
+                                });
+                              },
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xD82B2827),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0x1EFFFFFF)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      category.title,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: const Color(0xFFF8EEE7),
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (items.isEmpty)
+                      const _StateCard(
+                        icon: Icons.inventory_2_outlined,
+                        title: 'Brak produktow w tej kategorii',
+                        message:
+                            'Gdy backend zwroci pozycje dla tej kategorii, lista pojawi sie tutaj.',
+                      )
+                    else
+                      for (var index = 0; index < items.length; index++) ...[
+                        _CategoryProductRow(
+                          position: items[index],
+                          quantity: _quantityFor(items[index]),
+                          onTap: () => _openProductPreview(items[index]),
+                          onIncrement: () => _addToCart(items[index]),
+                          onDecrement: () => _removeFromCart(items[index]),
+                          locked: widget.hasActiveCheckout,
+                        ),
+                        if (index < items.length - 1) const SizedBox(height: 10),
+                      ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+          child: _DashboardFooterBar(
+            activeIndex: _activeFooterIndex,
+            onTap: (index, label) {
+              if (index == 0) {
+                Navigator.of(context).pop();
+                return;
+              }
+              setState(() => _activeFooterIndex = index);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('$label jest w przygotowaniu.')),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryViewTab extends StatelessWidget {
+  const _CategoryViewTab({
+    required this.category,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _DashboardCategory category;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? category.startColor : const Color(0xFF2A2522),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected
+                  ? const Color(0x66FFF1E7)
+                  : const Color(0x20FFFFFF),
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: category.endColor.withValues(alpha: 0.26),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            category.title,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: const Color(0xFFFFF4ED),
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryProductRow extends StatelessWidget {
+  const _CategoryProductRow({
+    required this.position,
+    required this.quantity,
+    required this.onTap,
+    required this.onIncrement,
+    required this.onDecrement,
+    required this.locked,
+  });
+
+  final Map<String, dynamic> position;
+  final int quantity;
+  final VoidCallback onTap;
+  final VoidCallback onIncrement;
+  final VoidCallback onDecrement;
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1716),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0x16FFFFFF)),
+          ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 82,
+                  height: 82,
+                  child: _PositionImage(
+                    photoUrl: _photo(position),
+                    title: _title(position, 0),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _title(position, 0),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: const Color(0xFFF7EEE7),
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _description(position),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFFD1C0B5),
+                            height: 1.3,
+                          ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          _kcal(position),
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                color: const Color(0xFFB59E90),
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          _priceLabel(position),
+                          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                color: const Color(0xFFF4DDCE),
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              _CategoryRowStepper(
+                quantity: quantity,
+                locked: locked,
+                onIncrement: onIncrement,
+                onDecrement: onDecrement,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryRowStepper extends StatelessWidget {
+  const _CategoryRowStepper({
+    required this.quantity,
+    required this.locked,
+    required this.onIncrement,
+    required this.onDecrement,
+  });
+
+  final int quantity;
+  final bool locked;
+  final VoidCallback onIncrement;
+  final VoidCallback onDecrement;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF282220),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0x1AFFFFFF)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _CategoryStepperButton(
+            icon: Icons.remove_rounded,
+            onTap: quantity <= 0 || locked ? null : onDecrement,
+          ),
+          SizedBox(
+            width: 26,
+            child: Text(
+              '$quantity',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: const Color(0xFFF8EEE7),
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+          ),
+          _CategoryStepperButton(
+            icon: Icons.add_rounded,
+            onTap: locked ? null : onIncrement,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryStepperButton extends StatelessWidget {
+  const _CategoryStepperButton({
+    required this.icon,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        width: 26,
+        height: 26,
+        decoration: BoxDecoration(
+          color: onTap == null ? const Color(0xFF221D1B) : const Color(0xFF38302C),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(
+          icon,
+          size: 16,
+          color: onTap == null
+              ? const Color(0xFF7B6F68)
+              : const Color(0xFFF7EEE7),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardFooterBar extends StatelessWidget {
+  const _DashboardFooterBar({
+    required this.activeIndex,
+    required this.onTap,
+  });
+
+  final int activeIndex;
+  final void Function(int index, String label) onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    const footer = [
+      (Icons.receipt_long_outlined, 'Menu'),
+      (Icons.emoji_events_outlined, 'Nagrody'),
+      (Icons.person_rounded, 'Profil')
+    ];
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xEE3B3837),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          for (var i = 0; i < footer.length; i++)
+            Expanded(
+              child: InkWell(
+                onTap: () => onTap(i, footer[i].$2),
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        footer[i].$1,
+                        color: activeIndex == i
+                            ? const Color(0xFFFFF0E7)
+                            : const Color(0xFFCEC3BC),
+                        size: 22,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        footer[i].$2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: activeIndex == i
+                                  ? const Color(0xFFFFF0E7)
+                                  : const Color(0xFFCEC3BC),
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -640,6 +1493,7 @@ class _BottomChrome extends StatelessWidget {
     required this.onRemove,
     required this.onContinue,
     required this.onOpenActiveOrder,
+    required this.loyaltyPoints,
     required this.onFooterTap,
   });
 
@@ -647,6 +1501,7 @@ class _BottomChrome extends StatelessWidget {
   final CheckoutVerificationResponse? activeCheckout;
   final bool isLoadingActiveCheckout;
   final int activeFooterIndex;
+  final int loyaltyPoints;
   final ValueChanged<Map<String, dynamic>> onSelect;
   final ValueChanged<int> onRemove;
   final VoidCallback onContinue;
@@ -657,9 +1512,18 @@ class _BottomChrome extends StatelessWidget {
   Widget build(BuildContext context) {
     final total = cartEntries.fold<double>(
       0,
-      (sum, entry) => sum + (_price(entry.position) ?? 0),
+      (sum, entry) => sum + _entryPrice(entry),
     );
-    final footer = [(Icons.receipt_long_outlined, 'Menu'), (Icons.emoji_events_outlined, 'Nagrody'), (Icons.person_rounded, 'Profil')];
+    final estimatedPrepMinutes = cartEntries
+        .map((entry) => _prepMinutes(entry.position))
+        .whereType<int>()
+        .where((minutes) => minutes > 0)
+        .fold<int>(15, math.max);
+    final footer = [
+      (Icons.receipt_long_outlined, 'Menu'),
+      (Icons.emoji_events_outlined, 'Nagrody'),
+      (Icons.person_rounded, 'Profil')
+    ];
 
     return SafeArea(
       top: false,
@@ -711,25 +1575,42 @@ class _BottomChrome extends StatelessWidget {
                   filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
                   child: Container(
                     padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                    decoration: BoxDecoration(color: const Color(0xED2A231E), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0x2BFFFFFF))),
+                    decoration: BoxDecoration(
+                        color: const Color(0xED2A231E),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0x2BFFFFFF))),
                     child: Row(
                       children: [
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(children: [const Icon(Icons.shopping_cart_outlined, size: 16, color: Color(0xFFF0D7C7)), const SizedBox(width: 6), Text('Koszyk', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: const Color(0xFFF7E7DD), fontWeight: FontWeight.w700))]),
+                              Row(children: [
+                                const Icon(Icons.shopping_cart_outlined,
+                                    size: 16, color: Color(0xFFF0D7C7)),
+                                const SizedBox(width: 6),
+                                Text('Koszyk',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelLarge
+                                        ?.copyWith(
+                                            color: const Color(0xFFF7E7DD),
+                                            fontWeight: FontWeight.w700))
+                              ]),
                               const SizedBox(height: 10),
                               SizedBox(
                                 height: 104,
                                 child: ListView.separated(
                                   scrollDirection: Axis.horizontal,
                                   itemCount: cartEntries.length,
-                                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(width: 8),
                                   itemBuilder: (context, index) => _CartThumb(
                                     entry: cartEntries[index],
-                                    onTap: () => onSelect(cartEntries[index].position),
-                                    onRemove: () => onRemove(cartEntries[index].id),
+                                    onTap: () =>
+                                        onSelect(cartEntries[index].position),
+                                    onRemove: () =>
+                                        onRemove(cartEntries[index].id),
                                   ),
                                 ),
                               ),
@@ -745,16 +1626,45 @@ class _BottomChrome extends StatelessWidget {
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Text('PLN ${_fmt(total)}', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: const Color(0xFFFFF3EA), fontWeight: FontWeight.w900)),
+                            Text('PLN ${_fmt(total)}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
+                                        color: const Color(0xFFFFF3EA),
+                                        fontWeight: FontWeight.w900)),
                             const SizedBox(height: 6),
-                            Text('${cartEntries.length} szt.', style: Theme.of(context).textTheme.labelMedium?.copyWith(color: const Color(0xFFF0DDCF), fontWeight: FontWeight.w700)),
+                            Text('${cartEntries.length} szt.',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelMedium
+                                    ?.copyWith(
+                                        color: const Color(0xFFF0DDCF),
+                                        fontWeight: FontWeight.w700)),
                             const SizedBox(height: 4),
-                            Row(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.access_time_rounded, size: 15, color: Color(0xFFEBD7C8)), const SizedBox(width: 4), Text('15 min', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: const Color(0xFFEBD7C8)))]),
+                            Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.access_time_rounded,
+                                  size: 15, color: Color(0xFFEBD7C8)),
+                              const SizedBox(width: 4),
+                              Text('$estimatedPrepMinutes min',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(
+                                          color: const Color(0xFFEBD7C8)))
+                            ]),
                             const SizedBox(height: 10),
                             FilledButton(
                               onPressed: onContinue,
-                              style: FilledButton.styleFrom(minimumSize: const Size(96, 42), backgroundColor: const Color(0xFFDD6B1F), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-                              child: const Text('DALEJ', style: TextStyle(fontWeight: FontWeight.w800)),
+                              style: FilledButton.styleFrom(
+                                  minimumSize: const Size(96, 42),
+                                  backgroundColor: const Color(0xFFDD6B1F),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8))),
+                              child: const Text('DALEJ',
+                                  style:
+                                      TextStyle(fontWeight: FontWeight.w800)),
                             ),
                           ],
                         ),
@@ -766,7 +1676,9 @@ class _BottomChrome extends StatelessWidget {
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              decoration: BoxDecoration(color: const Color(0xEE3B3837), borderRadius: BorderRadius.circular(12)),
+              decoration: BoxDecoration(
+                  color: const Color(0xEE3B3837),
+                  borderRadius: BorderRadius.circular(12)),
               child: Row(
                 children: [
                   for (var i = 0; i < footer.length; i++)
@@ -779,9 +1691,36 @@ class _BottomChrome extends StatelessWidget {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(footer[i].$1, color: activeFooterIndex == i ? const Color(0xFFFFF0E7) : const Color(0xFFCEC3BC), size: 22),
+                              Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  Icon(
+                                    footer[i].$1,
+                                    color: activeFooterIndex == i
+                                        ? const Color(0xFFFFF0E7)
+                                        : const Color(0xFFCEC3BC),
+                                    size: 22,
+                                  ),
+                                  if (i == 1)
+                                    Positioned(
+                                      top: -8,
+                                      right: -18,
+                                      child: _PointsBadge(points: loyaltyPoints),
+                                    ),
+                                ],
+                              ),
                               const SizedBox(height: 4),
-                              Text(footer[i].$2, maxLines: 1, overflow: TextOverflow.ellipsis, style: Theme.of(context).textTheme.labelSmall?.copyWith(color: activeFooterIndex == i ? const Color(0xFFFFF0E7) : const Color(0xFFCEC3BC), fontWeight: FontWeight.w700)),
+                              Text(footer[i].$2,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(
+                                          color: activeFooterIndex == i
+                                              ? const Color(0xFFFFF0E7)
+                                              : const Color(0xFFCEC3BC),
+                                          fontWeight: FontWeight.w700)),
                             ],
                           ),
                         ),
@@ -792,6 +1731,41 @@ class _BottomChrome extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PointsBadge extends StatelessWidget {
+  const _PointsBadge({required this.points});
+
+  final int points;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = points > 999 ? '999+' : '$points';
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF08B2D),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xCC5A2302)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x451D0C02),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: const Color(0xFF2E1304),
+              fontWeight: FontWeight.w900,
+              fontSize: 10,
+            ),
       ),
     );
   }
@@ -812,8 +1786,7 @@ class _ActiveOrderBar extends StatelessWidget {
         ? 1
         : checkout.receivedOrder.etaMinutes;
     final remainingEta = checkout.remainingEtaMinutes ?? totalEta;
-    final progress =
-        (1 - (remainingEta / totalEta)).clamp(0.0, 1.0).toDouble();
+    final progress = (1 - (remainingEta / totalEta)).clamp(0.0, 1.0).toDouble();
     final itemCount = checkout.receivedOrder.items.length;
     final leadItem = itemCount == 0
         ? 'Aktywne zamowienie'
@@ -864,19 +1837,21 @@ class _ActiveOrderBar extends StatelessWidget {
                       children: [
                         Text(
                           'Trwa realizacja zamowienia #${checkout.savedOrderId}',
-                          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                                color: const Color(0xFFF8EEE6),
-                                fontWeight: FontWeight.w800,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.labelLarge?.copyWith(
+                                    color: const Color(0xFFF8EEE6),
+                                    fontWeight: FontWeight.w800,
+                                  ),
                         ),
                         const SizedBox(height: 3),
                         Text(
                           leadItem,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFFDCC9BD),
-                              ),
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: const Color(0xFFDCC9BD),
+                                  ),
                         ),
                       ],
                     ),
@@ -887,10 +1862,11 @@ class _ActiveOrderBar extends StatelessWidget {
                     children: [
                       Text(
                         '${remainingEta.clamp(0, 999)} min',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: const Color(0xFFF8F3EE),
-                              fontWeight: FontWeight.w900,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: const Color(0xFFF8F3EE),
+                                  fontWeight: FontWeight.w900,
+                                ),
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -911,7 +1887,8 @@ class _ActiveOrderBar extends StatelessWidget {
                   minHeight: 10,
                   value: progress,
                   backgroundColor: const Color(0xFF473C35),
-                  valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF3BC977)),
+                  valueColor:
+                      const AlwaysStoppedAnimation<Color>(Color(0xFF3BC977)),
                 ),
               ),
               const SizedBox(height: 8),
@@ -959,9 +1936,12 @@ class _CartSummaryScreen extends StatefulWidget {
 
 class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   late List<_CartEntry> _entries;
+  late final List<({String title, String subtitle})> _addresses;
+  final TextEditingController _noteController = TextEditingController();
   int _fulfillmentIndex = 0;
   int _addressIndex = 0;
   String? _selectedPaymentMethod;
+  int _redeemedPoints = 0;
 
   static const _fulfillmentOptions = <({String label, IconData icon})>[
     (label: 'Dostawa', icon: Icons.delivery_dining_rounded),
@@ -969,7 +1949,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     (label: 'Zaplanuj odbior', icon: Icons.schedule_rounded),
   ];
 
-  static const _addresses = <({String title, String subtitle})>[
+  static const _defaultAddresses = <({String title, String subtitle})>[
     (title: 'Sklotowa 6/9', subtitle: '02-220, Warszawa'),
     (title: 'Mefedronowa 20', subtitle: '02-225, Warszawa'),
   ];
@@ -978,6 +1958,13 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   void initState() {
     super.initState();
     _entries = List<_CartEntry>.from(widget.initialEntries);
+    _addresses = List<({String title, String subtitle})>.from(_defaultAddresses);
+  }
+
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
   }
 
   void _syncEntries() {
@@ -987,8 +1974,164 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   void _removeEntry(int id) {
     setState(() {
       _entries.removeWhere((entry) => entry.id == id);
+      _redeemedPoints = _effectiveRedeemedPoints();
     });
     _syncEntries();
+  }
+
+  Future<void> _openPersonalization(_CartEntry entry) async {
+    final updatedEntry = await Navigator.of(context).push<_CartEntry>(
+      MaterialPageRoute<_CartEntry>(
+        builder: (_) => _CartPersonalizationScreen(entry: entry),
+      ),
+    );
+
+    if (updatedEntry == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      final index = _entries.indexWhere((item) => item.id == updatedEntry.id);
+      if (index >= 0) {
+        _entries[index] = updatedEntry;
+      }
+      _redeemedPoints = _effectiveRedeemedPoints();
+    });
+    _syncEntries();
+  }
+
+  Future<void> _showAddAddressDialog() async {
+    final formKey = GlobalKey<FormState>();
+    final streetController = TextEditingController();
+    final postalController = TextEditingController();
+    final cityController = TextEditingController(text: 'Warszawa');
+
+    ({String title, String subtitle})? newAddress;
+    try {
+      newAddress = await showDialog<({String title, String subtitle})>(
+        context: context,
+        barrierColor: const Color(0xC4000000),
+        builder: (dialogContext) {
+          final theme = Theme.of(dialogContext);
+
+          return AlertDialog(
+            backgroundColor: const Color(0xFF211917),
+            surfaceTintColor: Colors.transparent,
+            title: Text(
+              'Nowy adres dostawy',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: const Color(0xFFF8EEE0),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Form(
+                key: formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: streetController,
+                        autofocus: true,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Ulica i numer',
+                          prefixIcon: Icon(Icons.location_on_outlined),
+                        ),
+                        validator: (value) {
+                          if ((value ?? '').trim().isEmpty) {
+                            return 'Podaj ulice i numer.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: postalController,
+                        keyboardType: TextInputType.text,
+                        textInputAction: TextInputAction.next,
+                        decoration: const InputDecoration(
+                          labelText: 'Kod pocztowy',
+                          prefixIcon: Icon(Icons.local_post_office_outlined),
+                        ),
+                        validator: (value) {
+                          if ((value ?? '').trim().isEmpty) {
+                            return 'Podaj kod pocztowy.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: cityController,
+                        textInputAction: TextInputAction.done,
+                        decoration: const InputDecoration(
+                          labelText: 'Miasto',
+                          prefixIcon: Icon(Icons.location_city_outlined),
+                        ),
+                        validator: (value) {
+                          if ((value ?? '').trim().isEmpty) {
+                            return 'Podaj miasto.';
+                          }
+                          return null;
+                        },
+                        onFieldSubmitted: (_) {
+                          if (formKey.currentState?.validate() != true) {
+                            return;
+                          }
+
+                          Navigator.of(dialogContext).pop((
+                            title: streetController.text.trim(),
+                            subtitle:
+                                '${postalController.text.trim()}, ${cityController.text.trim()}',
+                          ));
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Anuluj'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (formKey.currentState?.validate() != true) {
+                    return;
+                  }
+
+                  Navigator.of(dialogContext).pop((
+                    title: streetController.text.trim(),
+                    subtitle:
+                        '${postalController.text.trim()}, ${cityController.text.trim()}',
+                  ));
+                },
+                child: const Text('Dodaj adres'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      streetController.dispose();
+      postalController.dispose();
+      cityController.dispose();
+    }
+
+    if (newAddress == null || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _addresses.add(newAddress!);
+      _addressIndex = _addresses.length - 1;
+      _fulfillmentIndex = 0;
+    });
   }
 
   Future<void> _showPaymentMethodsDialog() async {
@@ -1018,21 +2161,109 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
             checkoutRepository: _DashboardScreenState._checkoutRepository,
             requestPayload: payload,
             authSession: widget.authSession,
+            onCheckoutConfirmed: () {
+              setState(() {
+                _entries.clear();
+              });
+              widget.onCartChanged(const <_CartEntry>[]);
+            },
           ),
         ),
       );
     }
   }
 
+  int _estimatedPrepMinutes() {
+    final prepMinutes = _entries
+        .map((entry) => _prepMinutes(entry.position))
+        .whereType<int>()
+        .where((minutes) => minutes > 0)
+        .toList(growable: false);
+
+    if (prepMinutes.isEmpty) {
+      return 15;
+    }
+
+    return prepMinutes.reduce(math.max);
+  }
+
+  bool _usesDeliveryBuffer() => _fulfillmentIndex == 0;
+
+  int _deliveryBufferMinutesForAddress(int addressIndex) {
+    return addressIndex == 0 ? 10 : 25;
+  }
+
+  int _summaryEtaMinutes(int prepMinutes) {
+    if (!_usesDeliveryBuffer()) {
+      return prepMinutes;
+    }
+    return prepMinutes + _deliveryBufferMinutesForAddress(_addressIndex);
+  }
+
+  String _summaryEtaLabel(int prepMinutes) {
+    return '${_summaryEtaMinutes(prepMinutes)} min.';
+  }
+
+  String _addressEtaLabel(int prepMinutes) {
+    final addressIndex = _usesDeliveryBuffer() ? _addressIndex : 0;
+    return _addressEtaLabelForIndex(prepMinutes, addressIndex);
+  }
+
+  String _addressEtaLabelForIndex(int prepMinutes, int addressIndex) {
+    final totalMinutes = _usesDeliveryBuffer()
+        ? prepMinutes + _deliveryBufferMinutesForAddress(addressIndex)
+        : prepMinutes;
+    return '~$totalMinutes min.';
+  }
+
+  int _availableLoyaltyPoints() => widget.authSession.loyaltyPoints;
+
+  int _maxRedeemablePoints(double subtotal) {
+    final maxRedeemablePln = subtotal <= 0 ? 0 : (subtotal * 0.3).floor();
+    final normalizedMaxPointsByOrder = maxRedeemablePln * 10;
+    final availablePoints = _availableLoyaltyPoints();
+    final clampedPoints = math.min(availablePoints, normalizedMaxPointsByOrder);
+    return clampedPoints - (clampedPoints % 10);
+  }
+
+  int _effectiveRedeemedPoints() {
+    final subtotal = _entries.fold<double>(
+      0,
+      (sum, entry) => sum + _entryPrice(entry),
+    );
+    final maxRedeemablePoints = _maxRedeemablePoints(subtotal);
+    if (maxRedeemablePoints <= 0) {
+      return 0;
+    }
+
+    final normalizedPoints = _redeemedPoints.clamp(0, maxRedeemablePoints);
+    return normalizedPoints - (normalizedPoints % 10);
+  }
+
+  double _redeemedAmountForPoints(int points) {
+    return points / 10;
+  }
+
   CheckoutVerificationRequest _buildOrderPayload(String paymentMethod) {
     final selectedAddress = _addresses[_addressIndex];
-    final total = _entries.fold<double>(0, (sum, entry) => sum + (_price(entry.position) ?? 0));
+    final subtotal = _entries.fold<double>(
+      0,
+      (sum, entry) => sum + _entryPrice(entry),
+    );
+    final redeemedPoints = _effectiveRedeemedPoints();
+    final redeemedAmount = _redeemedAmountForPoints(redeemedPoints);
+    final double total = math.max(0.0, subtotal - redeemedAmount);
+    final quickNote = _noteController.text.trim();
+    final estimatedPrepMinutes = _estimatedPrepMinutes();
 
     return CheckoutVerificationRequest(
       createdAt: DateTime.now().toUtc(),
       currency: 'PLN',
+      subtotalAmount: subtotal,
       totalAmount: total,
-      etaMinutes: 15,
+      redeemedPoints: redeemedPoints,
+      redeemedAmount: redeemedAmount,
+      etaMinutes: estimatedPrepMinutes,
       paymentMethod: paymentMethod,
       fulfillmentMethod: _fulfillmentOptions[_fulfillmentIndex].label,
       fulfillmentOptionIndex: _fulfillmentIndex,
@@ -1040,7 +2271,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
       address: CheckoutVerificationAddress(
         title: selectedAddress.title,
         subtitle: selectedAddress.subtitle,
-        etaLabel: _addressIndex == 0 ? '~25 min.' : '~40 min.',
+        etaLabel: _addressEtaLabel(estimatedPrepMinutes),
       ),
       items: _entries
           .map(
@@ -1048,22 +2279,30 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
               cartEntryId: entry.id,
               positionId: _positionId(entry.position),
               name: _title(entry.position, 0),
-              description: _description(entry.position),
+              description: _checkoutItemDescription(entry),
               photoUrl: _photo(entry.position),
               calories: _positionCalories(entry.position),
-              price: _price(entry.position),
+              price: _entryPrice(entry),
             ),
           )
           .toList(growable: false),
       sessionToken: widget.authSession.sessionToken,
       userEmail: widget.authSession.email,
-      notes: 'Wstepna weryfikacja checkout z aplikacji mobilnej',
+      notes: quickNote.isEmpty ? null : quickNote,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final total = _entries.fold<double>(0, (sum, entry) => sum + (_price(entry.position) ?? 0));
+    final subtotal = _entries.fold<double>(
+      0,
+      (sum, entry) => sum + _entryPrice(entry),
+    );
+    final redeemedPoints = _effectiveRedeemedPoints();
+    final redeemedAmount = _redeemedAmountForPoints(redeemedPoints);
+    final double total = math.max(0.0, subtotal - redeemedAmount);
+    final maxRedeemablePoints = _maxRedeemablePoints(subtotal);
+    final estimatedPrepMinutes = _estimatedPrepMinutes();
 
     return Scaffold(
       extendBody: true,
@@ -1087,7 +2326,10 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                       children: [
                         Text(
                           'Koszyk',
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineSmall
+                              ?.copyWith(
                                 color: const Color(0xFFF9EEDF),
                                 fontWeight: FontWeight.w900,
                               ),
@@ -1108,20 +2350,29 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                             ? Center(
                                 child: Text(
                                   'Koszyk jest pusty.',
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
                                         color: const Color(0xFFD5C7BA),
                                       ),
                                 ),
                               )
                             : ScrollConfiguration(
-                                behavior: const MaterialScrollBehavior().copyWith(scrollbars: false),
+                                behavior: const MaterialScrollBehavior()
+                                    .copyWith(scrollbars: false),
                                 child: ListView.separated(
                                   physics: const BouncingScrollPhysics(),
                                   itemCount: _entries.length,
-                                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                                  itemBuilder: (context, index) => _SummaryProductTile(
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(height: 10),
+                                  itemBuilder: (context, index) =>
+                                      _SummaryProductTile(
                                     entry: _entries[index],
-                                    onRemove: () => _removeEntry(_entries[index].id),
+                                    onCustomize: () =>
+                                        _openPersonalization(_entries[index]),
+                                    onRemove: () =>
+                                        _removeEntry(_entries[index].id),
                                   ),
                                 ),
                               ),
@@ -1135,14 +2386,17 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                         children: [
                           Row(
                             children: [
-                              for (var index = 0; index < _fulfillmentOptions.length; index++) ...[
+                              for (var index = 0;
+                                  index < _fulfillmentOptions.length;
+                                  index++) ...[
                                 if (index > 0) const SizedBox(width: 8),
                                 Expanded(
                                   child: _FulfillmentTile(
                                     label: _fulfillmentOptions[index].label,
                                     icon: _fulfillmentOptions[index].icon,
                                     isSelected: _fulfillmentIndex == index,
-                                    onTap: () => setState(() => _fulfillmentIndex = index),
+                                    onTap: () => setState(
+                                        () => _fulfillmentIndex = index),
                                   ),
                                 ),
                               ],
@@ -1151,45 +2405,224 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                           const SizedBox(height: 16),
                           Text(
                             'Adres dostawy',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(
                                   color: const Color(0xFFF8EEDF),
                                   fontWeight: FontWeight.w800,
                                 ),
                           ),
                           const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              for (var index = 0; index < _addresses.length; index++) ...[
-                                if (index > 0) const SizedBox(width: 10),
-                                Expanded(
+                          SizedBox(
+                            height: 108,
+                            child: ListView.separated(
+                              scrollDirection: Axis.horizontal,
+                              physics: const BouncingScrollPhysics(),
+                              itemCount: _addresses.length + 1,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(width: 10),
+                              itemBuilder: (context, index) {
+                                if (index == _addresses.length) {
+                                  return Center(
+                                    child: _AddAddressTile(
+                                      onTap: _showAddAddressDialog,
+                                    ),
+                                  );
+                                }
+
+                                return SizedBox(
+                                  width: 204,
                                   child: _AddressTile(
                                     title: _addresses[index].title,
                                     subtitle: _addresses[index].subtitle,
-                                    eta: index == 0 ? '~25 min.' : '~40 min.',
+                                    eta: _addressEtaLabelForIndex(
+                                      estimatedPrepMinutes,
+                                      index,
+                                    ),
                                     isSelected: _addressIndex == index,
-                                    onTap: () => setState(() => _addressIndex = index),
+                                    onTap: () =>
+                                        setState(() => _addressIndex = index),
                                   ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _SummarySection(
+                      title: 'Szybka uwaga do zamowienia',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Np. bez cebuli, dodatkowy sos albo prosba o telefon przy odbiorze.',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: const Color(0xFFD5C7BA),
+                                      height: 1.35,
+                                    ),
+                          ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: _noteController,
+                            minLines: 2,
+                            maxLines: 3,
+                            maxLength: 140,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: const Color(0xFFF8EEE0),
                                 ),
-                              ],
-                              const SizedBox(width: 10),
-                              _AddAddressTile(
-                                onTap: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Dodawanie nowego adresu dodamy dalej.')),
-                                  );
-                                },
+                            decoration: InputDecoration(
+                              hintText: 'Dodaj krotka uwage dla restauracji...',
+                              hintStyle: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFF9E9085),
+                                  ),
+                              filled: true,
+                              fillColor: const Color(0xFF171412),
+                              counterStyle: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color: const Color(0xFF8E8178),
+                                  ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 14),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide:
+                                    const BorderSide(color: Color(0x1FFFFFFF)),
                               ),
-                            ],
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide:
+                                    const BorderSide(color: Color(0x66FFB061)),
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 18),
+                    _SummarySection(
+                      title: 'Nagrody i punkty',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Masz ${_availableLoyaltyPoints()} pkt. Przy tym zamowieniu mozesz wykorzystac maksymalnie $maxRedeemablePoints pkt, czyli PLN ${_fmt(_redeemedAmountForPoints(maxRedeemablePoints))}.',
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      color: const Color(0xFFD5C7BA),
+                                      height: 1.35,
+                                    ),
+                          ),
+                          const SizedBox(height: 12),
+                          if (maxRedeemablePoints > 0) ...[
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: SliderTheme(
+                                    data: SliderTheme.of(context).copyWith(
+                                      activeTrackColor: const Color(0xFFFFA247),
+                                      inactiveTrackColor: const Color(0x33FFFFFF),
+                                      thumbColor: const Color(0xFFFFA247),
+                                      overlayColor:
+                                          const Color(0x33FFA247),
+                                    ),
+                                    child: Slider(
+                                      value: redeemedPoints.toDouble(),
+                                      min: 0,
+                                      max: maxRedeemablePoints.toDouble(),
+                                      divisions: maxRedeemablePoints ~/ 10,
+                                      onChanged: (value) {
+                                        setState(() {
+                                          _redeemedPoints =
+                                              ((value / 10).round() * 10)
+                                                  .clamp(0, maxRedeemablePoints);
+                                        });
+                                      },
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                OutlinedButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      _redeemedPoints =
+                                          redeemedPoints > 0 ? 0 : maxRedeemablePoints;
+                                    });
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    minimumSize: const Size(72, 44),
+                                    foregroundColor:
+                                        const Color(0xFFF7EEE6),
+                                    side: const BorderSide(
+                                      color: Color(0x30FFFFFF),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    redeemedPoints > 0 ? 'Wyczysc' : 'Max',
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    'Wykorzystasz: $redeemedPoints pkt',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelLarge
+                                        ?.copyWith(
+                                          color: const Color(0xFFF8EEE0),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                  ),
+                                ),
+                                Text(
+                                  '- PLN ${_fmt(redeemedAmount)}',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(
+                                        color: const Color(0xFFFFB66A),
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ] else
+                            Text(
+                              'Zbieraj dalej punkty. Przy tym koszyku limit wykorzystania wynosi 30% wartosci zamowienia.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFFD5C7BA),
+                                    height: 1.35,
+                                  ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     Row(
                       children: [
                         Text(
                           'TOTAL',
-                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineMedium
+                              ?.copyWith(
                                 color: const Color(0xFFF8F0E8),
                                 fontWeight: FontWeight.w900,
                               ),
@@ -1198,9 +2631,14 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                         Expanded(
                           child: _SummaryMetricPill(
                             child: Text(
-                              'PLN ${_fmt(total)}',
+                              redeemedAmount > 0
+                                  ? 'PLN ${_fmt(total)}'
+                                  : 'PLN ${_fmt(subtotal)}',
                               textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
                                     color: const Color(0xFFF9EEDF),
                                     fontWeight: FontWeight.w900,
                                   ),
@@ -1213,11 +2651,15 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(Icons.access_time_rounded, color: Color(0xFFF0DDD0)),
+                                const Icon(Icons.access_time_rounded,
+                                    color: Color(0xFFF0DDD0)),
                                 const SizedBox(width: 8),
                                 Text(
-                                  '15 min.',
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  _summaryEtaLabel(estimatedPrepMinutes),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(
                                         color: const Color(0xFFF0DDD0),
                                         fontWeight: FontWeight.w700,
                                       ),
@@ -1228,11 +2670,38 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                         ),
                       ],
                     ),
+                    if (redeemedAmount > 0) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Suma przed punktami: PLN ${_fmt(subtotal)}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFFD5C7BA),
+                                  ),
+                            ),
+                          ),
+                          Text(
+                            'Punkty: - PLN ${_fmt(redeemedAmount)}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: const Color(0xFFFFB66A),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     FilledButton(
-                      onPressed: _entries.isEmpty
-                          ? null
-                          : _showPaymentMethodsDialog,
+                      onPressed:
+                          _entries.isEmpty ? null : _showPaymentMethodsDialog,
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(56),
                         backgroundColor: const Color(0xFFFF8B00),
@@ -1244,7 +2713,8 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                         _selectedPaymentMethod == null
                             ? 'Wybierz metode platnosci'
                             : 'Metoda platnosci: $_selectedPaymentMethod',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w800),
                       ),
                     ),
                   ],
@@ -1271,18 +2741,22 @@ class _PaymentVerificationScreen extends StatefulWidget {
     required this.checkoutRepository,
     required this.requestPayload,
     required this.authSession,
+    required this.onCheckoutConfirmed,
   });
 
   final String paymentMethod;
   final CheckoutRepository checkoutRepository;
   final CheckoutVerificationRequest requestPayload;
   final AuthSession authSession;
+  final VoidCallback onCheckoutConfirmed;
 
   @override
-  State<_PaymentVerificationScreen> createState() => _PaymentVerificationScreenState();
+  State<_PaymentVerificationScreen> createState() =>
+      _PaymentVerificationScreenState();
 }
 
-class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> {
+class _PaymentVerificationScreenState
+    extends State<_PaymentVerificationScreen> {
   CheckoutVerificationResponse? _verificationResponse;
   Object? _verificationError;
   bool _isSubmitting = true;
@@ -1296,14 +2770,20 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
 
   Future<void> _runVerificationFlow() async {
     try {
-      final response = await widget.checkoutRepository.submitCheckoutVerification(
+      final response =
+          await widget.checkoutRepository.submitCheckoutVerification(
         widget.requestPayload,
       );
+      final updatedAuthSession = widget.authSession.copyWith(
+        loyaltyPoints: response.userPointsBalance,
+      );
+      await SessionPersistence.saveAuthSession(updatedAuthSession);
 
       if (!mounted) {
         return;
       }
 
+      widget.onCheckoutConfirmed();
       setState(() {
         _verificationResponse = response;
         _verificationError = null;
@@ -1315,7 +2795,7 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
         return;
       }
 
-      _openTrackingScreen(response);
+      _openTrackingScreen(response, updatedAuthSession);
     } catch (error) {
       if (!mounted) {
         return;
@@ -1328,7 +2808,10 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
     }
   }
 
-  void _openTrackingScreen(CheckoutVerificationResponse checkout) {
+  void _openTrackingScreen(
+    CheckoutVerificationResponse checkout,
+    AuthSession authSession,
+  ) {
     if (_didNavigateToTracking || !mounted) {
       return;
     }
@@ -1338,7 +2821,8 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
       MaterialPageRoute<void>(
         builder: (_) => OrderTrackingScreen(
           checkout: checkout,
-          authSession: widget.authSession,
+          authSession: authSession,
+          checkoutRepository: widget.checkoutRepository,
         ),
       ),
     );
@@ -1442,7 +2926,8 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
                                   children: [
                                     Text(
                                       widget.paymentMethod,
-                                      style: theme.textTheme.titleLarge?.copyWith(
+                                      style:
+                                          theme.textTheme.titleLarge?.copyWith(
                                         color: const Color(0xFFF8EEE7),
                                         fontWeight: FontWeight.w800,
                                       ),
@@ -1455,7 +2940,8 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
                                               ? 'Nie udalo sie wyslac zamowienia do backendu.'
                                               : (successfulCheckout?.message ??
                                                   'Backend przyjal dane do wstepnej weryfikacji.'),
-                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                      style:
+                                          theme.textTheme.bodyMedium?.copyWith(
                                         color: const Color(0xFFD9C6B9),
                                         height: 1.35,
                                       ),
@@ -1464,7 +2950,8 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
                                       const SizedBox(height: 8),
                                       Text(
                                         'Symulacja platnosci zakonczyla sie sukcesem. Otwieramy widok trwajacego zamowienia.',
-                                        style: theme.textTheme.bodySmall?.copyWith(
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
                                           color: const Color(0xFF73DCA2),
                                           fontWeight: FontWeight.w700,
                                           height: 1.35,
@@ -1480,7 +2967,11 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
                         const SizedBox(height: 14),
                         if (successfulCheckout != null) ...[
                           FilledButton(
-                            onPressed: () => _openTrackingScreen(successfulCheckout),
+                            onPressed: () =>
+                                _openTrackingScreen(
+                              successfulCheckout,
+                              widget.authSession,
+                            ),
                             style: FilledButton.styleFrom(
                               minimumSize: const Size.fromHeight(54),
                               backgroundColor: const Color(0xFF2E8F57),
@@ -1502,7 +2993,8 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
                             child: SingleChildScrollView(
                               physics: const BouncingScrollPhysics(),
                               child: SelectableText(
-                                const JsonEncoder.withIndent('  ').convert(jsonToShow),
+                                const JsonEncoder.withIndent('  ')
+                                    .convert(jsonToShow),
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: const Color(0xFFF0DED2),
                                   height: 1.45,
@@ -1533,7 +3025,12 @@ class _PaymentVerificationScreenState extends State<_PaymentVerificationScreen> 
 }
 
 class _StateCard extends StatelessWidget {
-  const _StateCard({required this.icon, required this.title, required this.message, this.buttonLabel, this.onPressed});
+  const _StateCard(
+      {required this.icon,
+      required this.title,
+      required this.message,
+      this.buttonLabel,
+      this.onPressed});
 
   final IconData icon;
   final String title;
@@ -1557,12 +3054,20 @@ class _StateCard extends StatelessWidget {
                 children: [
                   Icon(icon, size: 54, color: const Color(0xFFE98736)),
                   const SizedBox(height: 16),
-                  Text(title, textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: const Color(0xFFF8EEE7), fontWeight: FontWeight.w800)),
+                  Text(title,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: const Color(0xFFF8EEE7),
+                          fontWeight: FontWeight.w800)),
                   const SizedBox(height: 12),
-                  Text(message, textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: const Color(0xFFD8C5B8), height: 1.4)),
+                  Text(message,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFFD8C5B8), height: 1.4)),
                   if (buttonLabel != null && onPressed != null) ...[
                     const SizedBox(height: 18),
-                    FilledButton(onPressed: onPressed, child: Text(buttonLabel!)),
+                    FilledButton(
+                        onPressed: onPressed, child: Text(buttonLabel!)),
                   ],
                 ],
               ),
@@ -1613,7 +3118,8 @@ class _ProductPreviewDialog extends StatelessWidget {
             Stack(
               children: [
                 ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius:
+                      const BorderRadius.vertical(top: Radius.circular(24)),
                   child: SizedBox(
                     height: 250,
                     width: double.infinity,
@@ -1719,16 +3225,17 @@ class _SummarySection extends StatelessWidget {
 class _SummaryProductTile extends StatelessWidget {
   const _SummaryProductTile({
     required this.entry,
+    required this.onCustomize,
     required this.onRemove,
   });
 
   final _CartEntry entry;
+  final VoidCallback onCustomize;
   final VoidCallback onRemove;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 86,
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: const Color(0xFF1E1A18),
@@ -1736,15 +3243,28 @@ class _SummaryProductTile extends StatelessWidget {
       ),
       child: Row(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: SizedBox(
-              width: 82,
-              height: double.infinity,
-              child: _PositionImage(
-                photoUrl: _photo(entry.position),
-                title: _title(entry.position, 0),
-              ),
+          SizedBox(
+            width: 82,
+            height: 82,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: _PositionImage(
+                      photoUrl: _photo(entry.position),
+                      title: _title(entry.position, 0),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: _PersonalizeThumbButton(
+                    onTap: onCustomize,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(width: 10),
@@ -1772,6 +3292,37 @@ class _SummaryProductTile extends StatelessWidget {
                         height: 1.2,
                       ),
                 ),
+                if (entry.customization.hasSelections) ...[
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _personalizationEmojiBadges(entry.customization)
+                        .map(
+                          (label) => Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2E2824),
+                              borderRadius: BorderRadius.circular(999),
+                              border:
+                                  Border.all(color: const Color(0x22FFFFFF)),
+                            ),
+                            child: Text(
+                              label,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color: const Color(0xFFFFD8B3),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                            ),
+                          ),
+                        )
+                        .toList(growable: false),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1790,7 +3341,8 @@ class _SummaryProductTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   alignment: Alignment.center,
-                  child: _SummaryActionIcon(icon: Icons.delete_outline_rounded, onTap: onRemove),
+                  child: _SummaryActionIcon(
+                      icon: Icons.delete_outline_rounded, onTap: onRemove),
                 ),
                 const SizedBox(height: 10),
                 Padding(
@@ -1798,7 +3350,7 @@ class _SummaryProductTile extends StatelessWidget {
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      _priceLabel(entry.position),
+                      _entryPriceLabel(entry),
                       style: Theme.of(context).textTheme.labelLarge?.copyWith(
                             color: const Color(0xFFF5E6D7),
                             fontWeight: FontWeight.w800,
@@ -1814,6 +3366,966 @@ class _SummaryProductTile extends StatelessWidget {
     );
   }
 }
+
+class _CartPersonalizationScreen extends StatefulWidget {
+  const _CartPersonalizationScreen({
+    required this.entry,
+  });
+
+  final _CartEntry entry;
+
+  @override
+  State<_CartPersonalizationScreen> createState() =>
+      _CartPersonalizationScreenState();
+}
+
+class _CartPersonalizationScreenState
+    extends State<_CartPersonalizationScreen> {
+  late _CartCustomization _customization;
+  List<_PersonalizationOption> _options = const <_PersonalizationOption>[];
+  bool _isLoadingOptions = true;
+  Object? _optionsError;
+
+  @override
+  void initState() {
+    super.initState();
+    _customization = widget.entry.customization;
+    _loadOptions();
+  }
+
+  Future<void> _loadOptions() async {
+    if (mounted) {
+      setState(() {
+        _isLoadingOptions = true;
+        _optionsError = null;
+      });
+    }
+
+    try {
+      final options =
+          await _fetchPersonalizationOptions(widget.entry.position);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _options = options;
+        _customization = _customization.normalizedForOptions(options);
+        _isLoadingOptions = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _optionsError = error;
+        _isLoadingOptions = false;
+      });
+    }
+  }
+
+  void _changeExtra(String label, int delta) {
+    final current = _customization.extras[label] ?? 0;
+    final next = current + delta;
+    setState(() {
+      _customization = _customization.copyWithExtra(
+        label,
+        next < 0 ? 0 : next,
+      );
+    });
+  }
+
+  void _setCutOption(_CutOption option) {
+    setState(() {
+      _customization = _customization.copyWith(cutOption: option);
+    });
+  }
+
+  void _setPackagingOption(_PackagingOption option) {
+    setState(() {
+      _customization = _customization.copyWith(packagingOption: option);
+    });
+  }
+
+  void _close() {
+    Navigator.of(context).pop(
+      widget.entry.copyWith(customization: _customization),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final title = _title(widget.entry.position, 0);
+    final description = _description(widget.entry.position);
+    final isZapiekanka =
+        _supportsZapiekankaServingOptions(widget.entry.position);
+    final selectedExtras = _personalizationChips(_customization);
+    final extrasPriceTotal = _extrasPriceTotal(_customization);
+    final hasAddonOptions = _options.isNotEmpty;
+
+    Widget addonsContent;
+    if (_isLoadingOptions) {
+      addonsContent = const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 24),
+          child: CircularProgressIndicator(color: Color(0xFFE98B38)),
+        ),
+      );
+    } else if (_optionsError != null) {
+      addonsContent = Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Nie udalo sie pobrac dodatkow dla tej pozycji.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: const Color(0xFFF8EEE7),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _optionsError.toString(),
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFD4C1B5),
+                  height: 1.3,
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: _loadOptions,
+                child: const Text('Sprobuj ponownie'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else if (!hasAddonOptions) {
+      addonsContent = Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Text(
+            'Dla tej pozycji nie ma aktywnych dodatkow do personalizacji.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: const Color(0xFFD6C4B7),
+              height: 1.35,
+            ),
+          ),
+        ),
+      );
+    } else {
+      addonsContent = SizedBox(
+        height: 220,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          itemCount: _options.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 12),
+          itemBuilder: (context, index) {
+            final option = _options[index];
+            return _CustomizationOptionTile(
+              label: option.label,
+              subtitle: option.subtitle,
+              assetPath: option.assetPath,
+              emoji: option.emoji,
+              count: _customization.extras[option.label] ?? 0,
+              onDecrement: () => _changeExtra(option.label, -1),
+              onIncrement: () => _changeExtra(option.label, 1),
+            );
+          },
+        ),
+      );
+    }
+
+    return Scaffold(
+      extendBody: true,
+      body: _Background(
+        child: SafeArea(
+          bottom: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(12, 20, 12, 120),
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xEE090909),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: const Color(0x33FFF2E8)),
+                ),
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Personalizacja',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              color: const Color(0xFFF9EEDF),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        _IconCircle(
+                          icon: Icons.close_rounded,
+                          onTap: _close,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _SummarySection(
+                      title: 'Wybrana pozycja',
+                      child: Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: SizedBox(
+                              width: 164,
+                              height: 96,
+                              child: _PositionImage(
+                                photoUrl: _photo(widget.entry.position),
+                                title: title,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    color: const Color(0xFFF8EEE7),
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  description,
+                                  maxLines: 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: const Color(0xFFD6C4B7),
+                                    height: 1.35,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                _PricePill(
+                                    label: _priceLabel(widget.entry.position)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    _SummarySection(
+                      title: 'Dodatki',
+                      child: addonsContent,
+                    ),
+                    if (isZapiekanka) ...[
+                      const SizedBox(height: 14),
+                      _SummarySection(
+                        title: 'Sposob podania',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Wybierz, czy zapiekanka ma byc cieta na pol oraz w jakim opakowaniu ma trafic do wydania.',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFFD7C5B8),
+                                height: 1.35,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            _ChoiceGroup(
+                              title: 'Krojenie',
+                              options: [
+                                _ChoiceItem(
+                                  title: 'Calosc',
+                                  subtitle: 'Bez krojenia, pelna zapiekanka.',
+                                  selected: _customization.cutOption ==
+                                      _CutOption.whole,
+                                  onTap: () => _setCutOption(_CutOption.whole),
+                                  assetPath:
+                                      'assets/images/productWhole.png',
+                                  assetScale: 1.64,
+                                ),
+                                _ChoiceItem(
+                                  title: 'Na pol',
+                                  subtitle: 'Przekrojona na dwie czesci.',
+                                  selected: _customization.cutOption ==
+                                      _CutOption.cutInHalf,
+                                  onTap: () =>
+                                      _setCutOption(_CutOption.cutInHalf),
+                                  assetPath:
+                                      'assets/images/productHalfed.png',
+                                  assetScale: 1.64,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            _ChoiceGroup(
+                              title: 'Opakowanie',
+                              options: [
+                                _ChoiceItem(
+                                  title: 'Tacka papierowa',
+                                  subtitle:
+                                      'Standardowe podanie na papierowej tacce.',
+                                  selected: _customization.packagingOption ==
+                                      _PackagingOption.paperTray,
+                                  onTap: () => _setPackagingOption(
+                                    _PackagingOption.paperTray,
+                                  ),
+                                  assetPath:
+                                      'assets/images/paperLongPlate.png',
+                                  assetScale: 0.91,
+                                ),
+                                _ChoiceItem(
+                                  title: 'Pudelko',
+                                  subtitle:
+                                      'Wygodniejsze opakowanie do transportu.',
+                                  selected: _customization.packagingOption ==
+                                      _PackagingOption.box,
+                                  onTap: () => _setPackagingOption(
+                                    _PackagingOption.box,
+                                  ),
+                                  assetPath: 'assets/images/paperBox.png',
+                                  assetScale: 0.91,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    _SummarySection(
+                      title: 'Podglad',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            selectedExtras.isEmpty
+                                ? hasAddonOptions
+                                    ? 'Brak dodatkow. Mozesz zostawic pozycje w wersji podstawowej albo dodac aktywne opcje.'
+                                    : 'Ta pozycja nie ma teraz aktywnych dodatkow.'
+                                : 'Wybrane dodatki zostana przypiete do tej pozycji w koszyku.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: const Color(0xFFD7C5B8),
+                              height: 1.35,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1E1A18),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (selectedExtras.isEmpty)
+                                  Text(
+                                    isZapiekanka
+                                        ? 'Wybrane zostana ustawienia krojenia i opakowania.'
+                                        : 'Pozycja bez personalizacji',
+                                    style:
+                                        theme.textTheme.titleMedium?.copyWith(
+                                      color: const Color(0xFFF4E4D7),
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  )
+                                else
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: selectedExtras
+                                        .map(
+                                          (label) => Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 12, vertical: 8),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF201A16),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                              border: Border.all(
+                                                  color:
+                                                      const Color(0x2AFFFFFF)),
+                                            ),
+                                            child: Text(
+                                              label,
+                                              style: theme.textTheme.labelLarge
+                                                  ?.copyWith(
+                                                color: const Color(0xFFFFD8B5),
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                        .toList(growable: false),
+                                  ),
+                                const SizedBox(height: 12),
+                                Align(
+                                  alignment: Alignment.bottomRight,
+                                  child: Text(
+                                    'PLN ${_fmt(extrasPriceTotal)}',
+                                    style:
+                                        theme.textTheme.titleMedium?.copyWith(
+                                      color: const Color(0xFFFFFFFF),
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _SummaryMetricPill(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  '${isZapiekanka ? _customization.totalSelections : _customization.totalExtras}',
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    color: const Color(0xFFF8EEE0),
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                Text(
+                                  isZapiekanka ? 'wyborow' : 'dodatkow',
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: const Color(0xFFDCCABE),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: _close,
+                            style: FilledButton.styleFrom(
+                              minimumSize: const Size.fromHeight(56),
+                              backgroundColor: const Color(0xFFFF8B00),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: const Text(
+                              'Gotowe',
+                              style: TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: const SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(10, 0, 10, 10),
+          child: _StaticFooterBar(),
+        ),
+      ),
+    );
+  }
+}
+
+class _CustomizationOptionTile extends StatelessWidget {
+  const _CustomizationOptionTile({
+    required this.label,
+    required this.subtitle,
+    required this.assetPath,
+    required this.emoji,
+    required this.count,
+    required this.onDecrement,
+    required this.onIncrement,
+  });
+
+  final String label;
+  final String subtitle;
+  final String? assetPath;
+  final String emoji;
+  final int count;
+  final VoidCallback onDecrement;
+  final VoidCallback onIncrement;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: 176,
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1816),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: count > 0 ? const Color(0x33FFB15D) : const Color(0x14FFFFFF),
+        ),
+        boxShadow: count > 0
+            ? const [
+                BoxShadow(
+                  color: Color(0x26000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 10),
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            height: 86,
+            decoration: BoxDecoration(
+              color: const Color(0xFF261F1B),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0x22FFFFFF)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _ImageSideStepper(
+                  icon: Icons.remove_rounded,
+                  tooltip: 'Zmniejsz liczbe dodatkow',
+                  onTap: onDecrement,
+                  side: _StepperSide.left,
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(6),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0x26FFFFFF)),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: _AddonImageFrame(
+                        assetPath: assetPath,
+                        emoji: emoji,
+                        title: label,
+                      ),
+                    ),
+                  ),
+                ),
+                _ImageSideStepper(
+                  icon: Icons.add_rounded,
+                  tooltip: 'Zwieksz liczbe dodatkow',
+                  onTap: onIncrement,
+                  side: _StepperSide.right,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: const Color(0xFFF8ECE0),
+              fontWeight: FontWeight.w800,
+              fontSize: 16,
+              height: 1.05,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Text(
+                subtitle,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFD1BDB1),
+                  height: 1.2,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF29221D),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: const Color(0x18FFFFFF)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  '$count',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: const Color(0xFFF7EADB),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 17,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ChoiceItem {
+  const _ChoiceItem({
+    required this.title,
+    required this.subtitle,
+    required this.selected,
+    required this.onTap,
+    this.assetPath,
+    this.assetScale = 1,
+  });
+
+  final String title;
+  final String subtitle;
+  final bool selected;
+  final VoidCallback onTap;
+  final String? assetPath;
+  final double assetScale;
+}
+
+class _ChoiceGroup extends StatelessWidget {
+  const _ChoiceGroup({
+    required this.title,
+    required this.options,
+  });
+
+  final String title;
+  final List<_ChoiceItem> options;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: const Color(0xFFF7EEE7),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Column(
+          children: options
+              .map(
+                (option) => Padding(
+                  padding: EdgeInsets.only(
+                    bottom: option == options.last ? 0 : 8,
+                  ),
+                  child: _ChoiceTile(option: option),
+                ),
+              )
+              .toList(growable: false),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChoiceTile extends StatelessWidget {
+  const _ChoiceTile({
+    required this.option,
+  });
+
+  final _ChoiceItem option;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasAsset = option.assetPath != null && option.assetPath!.isNotEmpty;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: option.onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: option.selected
+                ? const Color(0xFF2A241F)
+                : const Color(0xFF191614),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: option.selected
+                  ? const Color(0x55FFB15D)
+                  : const Color(0x1FFFFFFF),
+            ),
+          ),
+          child: Row(
+            children: [
+              if (hasAsset) ...[
+                Container(
+                  width: 86,
+                  height: 86,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF141414),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0x18FFFFFF)),
+                  ),
+                  child: Center(
+                    child: OverflowBox(
+                      minWidth: 0,
+                      minHeight: 0,
+                      maxWidth: 220,
+                      maxHeight: 220,
+                      child: Transform.scale(
+                        scale: option.assetScale,
+                        child: Image.asset(
+                          option.assetPath!,
+                          width: 86,
+                          height: 86,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      option.title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: const Color(0xFFF8EEE7),
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      option.subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFFD3C2B6),
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                height: 24,
+                width: 24,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: option.selected
+                      ? const Color(0xFFFF9D3C)
+                      : Colors.transparent,
+                  border: Border.all(
+                    color: option.selected
+                        ? const Color(0xFFFFC78D)
+                        : const Color(0x55FFFFFF),
+                  ),
+                ),
+                child: option.selected
+                    ? const Icon(
+                        Icons.check_rounded,
+                        size: 16,
+                        color: Colors.white,
+                      )
+                    : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ImageSideStepper extends StatelessWidget {
+  const _ImageSideStepper({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    required this.side,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  final _StepperSide side;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.only(
+            topLeft: side == _StepperSide.left
+                ? const Radius.circular(14)
+                : const Radius.circular(0),
+            bottomLeft: side == _StepperSide.left
+                ? const Radius.circular(14)
+                : const Radius.circular(0),
+            topRight: side == _StepperSide.right
+                ? const Radius.circular(14)
+                : const Radius.circular(0),
+            bottomRight: side == _StepperSide.right
+                ? const Radius.circular(14)
+                : const Radius.circular(0),
+          ),
+          child: Container(
+            width: 38,
+            height: double.infinity,
+            decoration: BoxDecoration(
+              color: const Color(0xFF2A221D),
+              borderRadius: BorderRadius.only(
+                topLeft: side == _StepperSide.left
+                    ? const Radius.circular(14)
+                    : const Radius.circular(0),
+                bottomLeft: side == _StepperSide.left
+                    ? const Radius.circular(14)
+                    : const Radius.circular(0),
+                topRight: side == _StepperSide.right
+                    ? const Radius.circular(14)
+                    : const Radius.circular(0),
+                bottomRight: side == _StepperSide.right
+                    ? const Radius.circular(14)
+                    : const Radius.circular(0),
+              ),
+              border: Border(
+                top: const BorderSide(color: Color(0x18FFFFFF)),
+                bottom: const BorderSide(color: Color(0x18FFFFFF)),
+                left: side == _StepperSide.left
+                    ? const BorderSide(color: Color(0x18FFFFFF))
+                    : BorderSide.none,
+                right: side == _StepperSide.right
+                    ? const BorderSide(color: Color(0x18FFFFFF))
+                    : BorderSide.none,
+              ),
+            ),
+            child: Icon(
+              icon,
+              color: const Color(0xFFFFEAD9),
+              size: 20,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AddonImageFrame extends StatelessWidget {
+  const _AddonImageFrame({
+    required this.assetPath,
+    required this.emoji,
+    required this.title,
+  });
+
+  final String? assetPath;
+  final String emoji;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedAssetPath = assetPath?.trim();
+    if (resolvedAssetPath != null && resolvedAssetPath.isNotEmpty) {
+      if (_isBundledAssetPhoto(resolvedAssetPath)) {
+        return Image.asset(
+          _normalizeBundledAssetPhoto(resolvedAssetPath),
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _fallback(context),
+        );
+      }
+      return Image.network(
+        resolvedAssetPath,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _fallback(context),
+      );
+    }
+    return _fallback(context);
+  }
+
+  Widget _fallback(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF31251E), Color(0xFF5B4137)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                emoji,
+                style: const TextStyle(fontSize: 26),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: const Color(0xFFFFF0E6),
+                      fontWeight: FontWeight.w800,
+                      height: 1.05,
+                    ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _StepperSide { left, right }
 
 class _SummaryActionIcon extends StatelessWidget {
   const _SummaryActionIcon({
@@ -1867,7 +4379,8 @@ class _FulfillmentTile extends StatelessWidget {
           color: isSelected ? const Color(0xFF38332E) : const Color(0xFF24211F),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? const Color(0x40FFB061) : const Color(0x10FFFFFF),
+            color:
+                isSelected ? const Color(0x40FFB061) : const Color(0x10FFFFFF),
           ),
         ),
         child: Column(
@@ -1917,7 +4430,8 @@ class _AddressTile extends StatelessWidget {
           color: isSelected ? const Color(0xFF141313) : const Color(0xFF1E1A18),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? const Color(0x33FFD199) : const Color(0x12FFFFFF),
+            color:
+                isSelected ? const Color(0x33FFD199) : const Color(0x12FFFFFF),
           ),
         ),
         child: Column(
@@ -1944,7 +4458,8 @@ class _AddressTile extends StatelessWidget {
             const Spacer(),
             Row(
               children: [
-                const Icon(Icons.access_time_rounded, size: 14, color: Color(0xFFF0DDD0)),
+                const Icon(Icons.access_time_rounded,
+                    size: 14, color: Color(0xFFF0DDD0)),
                 const SizedBox(width: 4),
                 Text(
                   eta,
@@ -1979,7 +4494,8 @@ class _AddAddressTile extends StatelessWidget {
           color: Color(0xFF1D1B19),
           shape: BoxShape.circle,
         ),
-        child: const Icon(Icons.add_rounded, color: Color(0xFFF6E8D9), size: 34),
+        child:
+            const Icon(Icons.add_rounded, color: Color(0xFFF6E8D9), size: 34),
       ),
     );
   }
@@ -2009,7 +4525,11 @@ class _StaticFooterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const footer = [(Icons.receipt_long_outlined, 'Menu'), (Icons.emoji_events_outlined, 'Nagrody'), (Icons.person_rounded, 'Profil')];
+    const footer = [
+      (Icons.receipt_long_outlined, 'Menu'),
+      (Icons.emoji_events_outlined, 'Nagrody'),
+      (Icons.person_rounded, 'Profil')
+    ];
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
@@ -2026,7 +4546,8 @@ class _StaticFooterBar extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(footer[i].$1, color: const Color(0xFFCEC3BC), size: 22),
+                    Icon(footer[i].$1,
+                        color: const Color(0xFFCEC3BC), size: 22),
                     const SizedBox(height: 4),
                     Text(
                       footer[i].$2,
@@ -2112,7 +4633,10 @@ class _IconCircle extends StatelessWidget {
       child: Container(
         height: 42,
         width: 42,
-        decoration: BoxDecoration(color: const Color(0x1CFFFFFF), borderRadius: BorderRadius.circular(999), border: Border.all(color: const Color(0x2CFFFFFF))),
+        decoration: BoxDecoration(
+            color: const Color(0x1CFFFFFF),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: const Color(0x2CFFFFFF))),
         child: Icon(icon, color: const Color(0xFFF4E5DB), size: 20),
       ),
     );
@@ -2149,7 +4673,9 @@ class _TinyBadge extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 11, color: active ? Colors.white : const Color(0xFFF5E6D9)),
+              Icon(icon,
+                  size: 11,
+                  color: active ? Colors.white : const Color(0xFFF5E6D9)),
               if (label != null) ...[
                 const SizedBox(width: 3),
                 Text(
@@ -2305,7 +4831,8 @@ class _PaymentMethodTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = isSelected ? const Color(0xFFFFA247) : const Color(0xFF615852);
+    final accent =
+        isSelected ? const Color(0xFFFFA247) : const Color(0xFF615852);
 
     return InkWell(
       onTap: onTap,
@@ -2317,7 +4844,7 @@ class _PaymentMethodTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFF3A332E) : const Color(0xFF2A2623),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: accent.withOpacity(0.55)),
+          border: Border.all(color: accent.withValues(alpha: 0.55)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2350,6 +4877,46 @@ class _PaymentMethodTile extends StatelessWidget {
   }
 }
 
+class _ThumbActionButton extends StatelessWidget {
+  const _ThumbActionButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            height: 22,
+            width: 22,
+            decoration: BoxDecoration(
+              color: const Color(0xE81B1512),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: const Color(0x33FFFFFF)),
+            ),
+            child: Icon(
+              icon,
+              size: 13,
+              color: const Color(0xFFFFE9DA),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RemoveThumbButton extends StatelessWidget {
   const _RemoveThumbButton({required this.onTap});
 
@@ -2357,26 +4924,25 @@ class _RemoveThumbButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
-        child: Container(
-          height: 22,
-          width: 22,
-          decoration: BoxDecoration(
-            color: const Color(0xE81B1512),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: const Color(0x33FFFFFF)),
-          ),
-          child: const Icon(
-            Icons.close_rounded,
-            size: 13,
-            color: Color(0xFFFFE9DA),
-          ),
-        ),
-      ),
+    return _ThumbActionButton(
+      icon: Icons.close_rounded,
+      tooltip: 'Zamknij',
+      onTap: onTap,
+    );
+  }
+}
+
+class _PersonalizeThumbButton extends StatelessWidget {
+  const _PersonalizeThumbButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return _ThumbActionButton(
+      icon: Icons.brush_rounded,
+      tooltip: 'Personalizuj pozycje',
+      onTap: onTap,
     );
   }
 }
@@ -2393,7 +4959,9 @@ class _Glow extends StatelessWidget {
       child: Container(
         height: size,
         width: size,
-        decoration: BoxDecoration(shape: BoxShape.circle, gradient: RadialGradient(colors: [color, Colors.transparent])),
+        decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(colors: [color, Colors.transparent])),
       ),
     );
   }
@@ -2408,83 +4976,607 @@ class _PositionImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (photoUrl != null && photoUrl!.trim().isNotEmpty) {
-      return Image.network(photoUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fallback(context));
+      final resolvedPhotoUrl = photoUrl!.trim();
+      if (_isBundledAssetPhoto(resolvedPhotoUrl)) {
+        return Container(
+          color: const Color(0xFF1B1715),
+          padding: const EdgeInsets.all(6),
+          child: Image.asset(
+            _normalizeBundledAssetPhoto(resolvedPhotoUrl),
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => _fallback(context),
+          ),
+        );
+      }
+      return Image.network(resolvedPhotoUrl,
+          fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fallback(context));
     }
     return Container(
-      decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF2D1C16), Color(0xFF594036)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
+      decoration: const BoxDecoration(
+          gradient: LinearGradient(
+              colors: [Color(0xFF2D1C16), Color(0xFF594036)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight)),
       child: _fallback(context),
     );
   }
 
   Widget _fallback(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.fastfood_rounded, size: 26, color: Color(0xFFFFE9D9)),
-            const SizedBox(height: 6),
-            Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: Theme.of(context).textTheme.labelMedium?.copyWith(color: const Color(0xFFFFF0E6), fontWeight: FontWeight.w700)),
-          ],
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact =
+            constraints.maxHeight <= 64 || constraints.maxWidth <= 64;
+        return Center(
+          child: Padding(
+            padding: EdgeInsets.all(isCompact ? 4 : 10),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.fastfood_rounded,
+                  size: isCompact ? 20 : 26,
+                  color: const Color(0xFFFFE9D9),
+                ),
+                if (!isCompact) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: const Color(0xFFFFF0E6),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
+}
+
+class _DashboardCategory {
+  const _DashboardCategory({
+    required this.key,
+    required this.title,
+    required this.icon,
+    required this.startColor,
+    required this.endColor,
+    required this.items,
+  });
+
+  final String key;
+  final String title;
+  final IconData icon;
+  final Color startColor;
+  final Color endColor;
+  final List<Map<String, dynamic>> items;
 }
 
 class _CartEntry {
   const _CartEntry({
     required this.id,
     required this.position,
+    this.customization = const _CartCustomization(),
   });
 
   final int id;
   final Map<String, dynamic> position;
+  final _CartCustomization customization;
 
   _CartEntry copyWith({
     int? id,
     Map<String, dynamic>? position,
+    _CartCustomization? customization,
   }) {
     return _CartEntry(
       id: id ?? this.id,
       position: position ?? this.position,
+      customization: customization ?? this.customization,
     );
   }
 }
 
-List<Map<String, dynamic>> _rotatedTake(List<Map<String, dynamic>> positions, int offset) {
+class _CartCustomization {
+  const _CartCustomization({
+    this.extras = const <String, int>{},
+    this.extraUnitPrices = const <String, double>{},
+    this.defaultExtras = const <String, int>{},
+    this.extraEmojis = const <String, String>{},
+    this.servingOptionsEnabled = false,
+    this.cutOption = _CutOption.whole,
+    this.packagingOption = _PackagingOption.paperTray,
+  });
+
+  final Map<String, int> extras;
+  final Map<String, double> extraUnitPrices;
+  final Map<String, int> defaultExtras;
+  final Map<String, String> extraEmojis;
+  final bool servingOptionsEnabled;
+  final _CutOption cutOption;
+  final _PackagingOption packagingOption;
+
+  bool get hasSelections =>
+      extras.values.any((count) => count > 0) ||
+      (servingOptionsEnabled && cutOption != _CutOption.whole) ||
+      (servingOptionsEnabled && packagingOption != _PackagingOption.paperTray);
+
+  int get totalExtras => extras.values.fold(0, (sum, count) => sum + count);
+  int get totalSelections => totalExtras + (servingOptionsEnabled ? 2 : 0);
+
+  _CartCustomization copyWith({
+    Map<String, int>? extras,
+    Map<String, double>? extraUnitPrices,
+    Map<String, int>? defaultExtras,
+    Map<String, String>? extraEmojis,
+    bool? servingOptionsEnabled,
+    _CutOption? cutOption,
+    _PackagingOption? packagingOption,
+  }) {
+    return _CartCustomization(
+      extras: extras ?? this.extras,
+      extraUnitPrices: extraUnitPrices ?? this.extraUnitPrices,
+      defaultExtras: defaultExtras ?? this.defaultExtras,
+      extraEmojis: extraEmojis ?? this.extraEmojis,
+      servingOptionsEnabled:
+          servingOptionsEnabled ?? this.servingOptionsEnabled,
+      cutOption: cutOption ?? this.cutOption,
+      packagingOption: packagingOption ?? this.packagingOption,
+    );
+  }
+
+  _CartCustomization copyWithExtra(String label, int count) {
+    final nextExtras = Map<String, int>.from(extras);
+    if (count <= 0) {
+      nextExtras.remove(label);
+    } else {
+      nextExtras[label] = count;
+    }
+    return copyWith(extras: nextExtras);
+  }
+
+  _CartCustomization normalizedForOptions(
+    List<_PersonalizationOption> options,
+  ) {
+    final hasResolvedMetadata = defaultExtras.isNotEmpty ||
+        extraUnitPrices.isNotEmpty ||
+        extraEmojis.isNotEmpty;
+    final nextExtras = <String, int>{};
+    final nextPrices = <String, double>{};
+    final nextDefaults = <String, int>{};
+    final nextEmojis = <String, String>{};
+
+    for (final option in options) {
+      nextPrices[option.label] = option.price;
+      nextDefaults[option.label] = option.defaultQuantity;
+      nextEmojis[option.label] = option.emoji;
+
+      final currentCount = extras.containsKey(option.label)
+          ? extras[option.label] ?? 0
+          : (hasResolvedMetadata ? 0 : option.defaultQuantity);
+      if (currentCount > 0) {
+        nextExtras[option.label] = currentCount;
+      }
+    }
+
+    return copyWith(
+      extras: nextExtras,
+      extraUnitPrices: nextPrices,
+      defaultExtras: nextDefaults,
+      extraEmojis: nextEmojis,
+    );
+  }
+}
+
+enum _CutOption {
+  whole,
+  cutInHalf,
+}
+
+enum _PackagingOption {
+  paperTray,
+  box,
+}
+
+class _PersonalizationOption {
+  const _PersonalizationOption({
+    required this.label,
+    required this.subtitle,
+    required this.emoji,
+    required this.price,
+    this.defaultQuantity = 0,
+    this.assetPath,
+  });
+
+  final String label;
+  final String subtitle;
+  final String emoji;
+  final double price;
+  final int defaultQuantity;
+  final String? assetPath;
+}
+
+const _knownPersonalizationOptions = <_PersonalizationOption>[
+  _PersonalizationOption(
+    label: 'Pomidory',
+    subtitle: 'Swieze plasterki pomidora do klasycznej zapiekanki.',
+    emoji: '🍅',
+    price: 3,
+    assetPath: 'assets/images/tomatos.png',
+  ),
+  _PersonalizationOption(
+    label: 'Oliwki',
+    subtitle: 'Lekko slone oliwki, ktore podbijaja smak sera i pieczywa.',
+    emoji: '🫒',
+    price: 3,
+  ),
+  _PersonalizationOption(
+    label: 'Prazona cebulka',
+    subtitle: 'Chrupiaca cebulka dla dodatkowej tekstury i aromatu.',
+    emoji: '🧅',
+    price: 2.5,
+    assetPath: 'assets/images/crispyOnions.png',
+  ),
+  _PersonalizationOption(
+    label: 'Sos BBQ',
+    subtitle: 'Dymny sos do mocniejszego, bardziej grillowego profilu.',
+    emoji: '🍖',
+    price: 2,
+    assetPath: 'assets/images/bbqSauce.png',
+  ),
+  _PersonalizationOption(
+    label: 'Surowka kolorowa',
+    subtitle: 'Swieza salatka jako lekki, chrupiacy kontrast.',
+    emoji: '🥗',
+    price: 4,
+    assetPath: 'assets/images/colorSalad.png',
+  ),
+  _PersonalizationOption(
+    label: 'Ketchup',
+    subtitle: 'Klasyczny dodatek dla bardziej znanego, pomidorowego smaku.',
+    emoji: '🍅',
+    price: 1.5,
+    assetPath: 'assets/images/ketchup.png',
+  ),
+  _PersonalizationOption(
+    label: 'Sos tysiaca wysp',
+    subtitle: 'Lagodniejszy, kremowy sos do bogatszej kompozycji.',
+    emoji: '🥫',
+    price: 2.5,
+    assetPath: 'assets/images/thousandIslandsSauce.png',
+  ),
+];
+
+final Map<String, _PersonalizationOption> _knownPersonalizationOptionsByLabel = {
+  for (final option in _knownPersonalizationOptions)
+    option.label.trim().toLowerCase(): option,
+};
+
+Future<List<_PersonalizationOption>> _fetchPersonalizationOptions(
+  Map<String, dynamic> position,
+) async {
+  final positionId = _positionId(position);
+  if (positionId == null) {
+    return const <_PersonalizationOption>[];
+  }
+
+  final response = await http
+      .get(
+        Uri.parse('${AppConfig.apiBaseUrl}/position/$positionId/addons'),
+        headers: const {
+          'Accept': 'application/json',
+        },
+      )
+      .timeout(const Duration(seconds: 10));
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(
+      'Backend zwrocil ${response.statusCode}: ${response.body}',
+    );
+  }
+
+  final decoded = jsonDecode(response.body);
+  if (decoded is! List<dynamic>) {
+    throw Exception(
+      'Nieoczekiwany format odpowiedzi z /position/{position_id}/addons.',
+    );
+  }
+
+  return decoded
+      .map(
+        (item) => item is Map<String, dynamic>
+            ? item
+            : Map<String, dynamic>.from(item as Map),
+      )
+      .map(_personalizationOptionFromJson)
+      .toList(growable: false);
+}
+
+_PersonalizationOption _personalizationOptionFromJson(
+  Map<String, dynamic> json,
+) {
+  final label = json['name']?.toString().trim() ?? 'Dodatek';
+  final normalizedLabel = label.toLowerCase();
+  final knownOption = _knownPersonalizationOptionsByLabel[normalizedLabel];
+  final description = json['description']?.toString().trim();
+  final defaultQuantity = _asInt(json['default_quantity']) ?? 0;
+
+  return _PersonalizationOption(
+    label: label,
+    subtitle: description == null || description.isEmpty
+        ? knownOption?.subtitle ?? 'Dodatek do personalizacji pozycji.'
+        : description,
+    emoji: knownOption?.emoji ?? _fallbackExtraEmoji(label),
+    price: _price(json) ?? knownOption?.price ?? 0,
+    defaultQuantity: defaultQuantity > 0 ? defaultQuantity : 0,
+    assetPath:
+        _resolvePersonalizationAssetPath(json['photo_url']?.toString()) ??
+            knownOption?.assetPath,
+  );
+}
+
+String? _resolvePersonalizationAssetPath(String? rawValue) {
+  final value = rawValue?.trim();
+  if (value == null || value.isEmpty) {
+    return null;
+  }
+  return _isBundledAssetPhoto(value) ? _normalizeBundledAssetPhoto(value) : value;
+}
+
+List<Map<String, dynamic>> _rotatedTake(
+    List<Map<String, dynamic>> positions, int offset) {
   if (positions.isEmpty) return const [];
   final start = offset % positions.length;
   return [...positions.skip(start), ...positions.take(start)].take(3).toList();
 }
 
-Map<String, dynamic>? _pick(List<Map<String, dynamic>> positions, int index) {
-  if (positions.isEmpty) return null;
-  return positions[index < positions.length ? index : 0];
+List<_DashboardCategory> _buildDashboardCategories(
+  List<Map<String, dynamic>> positions,
+) {
+  const definitions = [
+    (
+      'zapiekanki',
+      'Zapiekanki',
+      Icons.view_agenda_rounded,
+      Color(0xFFF28A2A),
+      Color(0xFFCC5C1F),
+    ),
+    (
+      'lody',
+      'Lody',
+      Icons.icecream_rounded,
+      Color(0xFF3AB6BF),
+      Color(0xFF207E90),
+    ),
+    (
+      'napoje',
+      'Napoje',
+      Icons.local_drink_rounded,
+      Color(0xFFD5442F),
+      Color(0xFFA61F1B),
+    ),
+    (
+      'dodatki',
+      'Dodatki',
+      Icons.lunch_dining_rounded,
+      Color(0xFFE1662A),
+      Color(0xFFB83B18),
+    ),
+  ];
+
+  return definitions
+      .map(
+        (definition) => _DashboardCategory(
+          key: definition.$1,
+          title: definition.$2,
+          icon: definition.$3,
+          startColor: definition.$4,
+          endColor: definition.$5,
+          items: positions
+              .where((position) => _categoryKeyForPosition(position) == definition.$1)
+              .toList(growable: false),
+        ),
+      )
+      .toList(growable: false);
 }
 
-String _title(Map<String, dynamic> item, int fallbackIndex) => item['name']?.toString() ?? item['title']?.toString() ?? item['position_name']?.toString() ?? 'Pozycja ${fallbackIndex + 1}';
+String _categoryKeyForPosition(Map<String, dynamic> position) {
+  final positionType =
+      position['position_type']?.toString().trim().toLowerCase() ?? '';
+  final prepGroup =
+      position['prep_group_key']?.toString().trim().toLowerCase() ?? '';
+  final title = _title(position, 0).trim().toLowerCase();
+  final description = _description(position).trim().toLowerCase();
+  final haystack = '$positionType $prepGroup $title $description';
+
+  if (prepGroup.contains('zapiek') ||
+      positionType.contains('zapiek') ||
+      positionType.contains('zapkiek') ||
+      (positionType.contains('zap') && positionType.contains('iek')) ||
+      haystack.contains('zapiek')) {
+    return 'zapiekanki';
+  }
+
+  if (positionType.contains('lod') ||
+      haystack.contains('lody') ||
+      haystack.contains('lod ') ||
+      haystack.contains('ice cream') ||
+      haystack.contains('gelato')) {
+    return 'lody';
+  }
+
+  if (positionType.contains('napoj') ||
+      positionType.contains('drink') ||
+      haystack.contains('napoj') ||
+      haystack.contains('cola') ||
+      haystack.contains('pepsi') ||
+      haystack.contains('sprite') ||
+      haystack.contains('fanta') ||
+      haystack.contains('woda') ||
+      haystack.contains('sok') ||
+      haystack.contains('kawa') ||
+      haystack.contains('herbata')) {
+    return 'napoje';
+  }
+
+  return 'dodatki';
+}
+
+String _title(Map<String, dynamic> item, int fallbackIndex) =>
+    item['name']?.toString() ??
+    item['title']?.toString() ??
+    item['position_name']?.toString() ??
+    'Pozycja ${fallbackIndex + 1}';
 String _description(Map<String, dynamic> item) {
   final value = item['description']?.toString().trim();
-  return value == null || value.isEmpty ? 'Wyrozniona pozycja z dzisiejszego menu.' : value;
+  return value == null || value.isEmpty
+      ? 'Wyrozniona pozycja z dzisiejszego menu.'
+      : value;
 }
+
 String? _photo(Map<String, dynamic> item) {
   final value = item['photo_url']?.toString().trim();
-  return value == null || value.isEmpty ? null : value;
+  if (value != null && value.isNotEmpty) {
+    return value;
+  }
+
+  return _deriveDrinkAssetPath(item);
 }
+
+String? _deriveDrinkAssetPath(Map<String, dynamic> item) {
+  if (_categoryKeyForPosition(item) != 'napoje') {
+    return null;
+  }
+
+  final rawTitle = _title(item, 0).trim().toLowerCase();
+  if (rawTitle.isEmpty) {
+    return null;
+  }
+
+  final volumeMatches =
+      RegExp(r'(\d+(?:[.,]\d+)?)\s*(ml|l)?').allMatches(rawTitle).toList();
+  if (volumeMatches.isEmpty) {
+    return null;
+  }
+  final volumeMatch = volumeMatches.last;
+
+  final volumeValue = volumeMatch.group(1)?.trim() ?? '';
+  final volumeUnit = (volumeMatch.group(2) ?? '').trim().toLowerCase();
+  if (volumeValue.isEmpty) {
+    return null;
+  }
+
+  final brandPart = rawTitle.substring(0, volumeMatch.start);
+  final brandSlug = _slugifyDrinkName(
+    brandPart
+        .replaceAll(RegExp(r'\b(puszka|butelka|but|pet|can)\b'), ' ')
+        .trim(),
+  );
+  if (brandSlug.isEmpty) {
+    return null;
+  }
+
+  final volumeSlug = _drinkVolumeSlug(
+    value: volumeValue,
+    unit: volumeUnit,
+  );
+  if (volumeSlug == null || volumeSlug.isEmpty) {
+    return null;
+  }
+
+  return 'assets/images/${brandSlug}${volumeSlug}.png';
+}
+
+String _slugifyDrinkName(String value) {
+  final normalized = value
+      .replaceAll('ą', 'a')
+      .replaceAll('ć', 'c')
+      .replaceAll('ę', 'e')
+      .replaceAll('ł', 'l')
+      .replaceAll('ń', 'n')
+      .replaceAll('ó', 'o')
+      .replaceAll('ś', 's')
+      .replaceAll('ż', 'z')
+      .replaceAll('ź', 'z');
+
+  return normalized.replaceAll(RegExp(r'[^a-z0-9]+'), '');
+}
+
+String? _drinkVolumeSlug({
+  required String value,
+  required String unit,
+}) {
+  final normalizedValue = value.replaceAll(',', '.');
+
+  if (unit == 'ml') {
+    return normalizedValue.replaceAll(RegExp(r'[^0-9]'), '');
+  }
+
+  if (normalizedValue.contains('.')) {
+    return normalizedValue.replaceAll('.', '');
+  }
+
+  final parsedInt = int.tryParse(normalizedValue);
+  if (parsedInt == null) {
+    return null;
+  }
+
+  if (parsedInt >= 100) {
+    return parsedInt.toString();
+  }
+
+  return normalizedValue;
+}
+
+bool _isBundledAssetPhoto(String value) {
+  final normalized = value.trim().toLowerCase();
+  return normalized.startsWith('assets/') || normalized.startsWith('/assets/');
+}
+
+String _normalizeBundledAssetPhoto(String value) {
+  final trimmed = value.trim();
+  return trimmed.startsWith('/') ? trimmed.substring(1) : trimmed;
+}
+
+int? _asInt(Object? raw) {
+  if (raw is int) return raw;
+  if (raw is num) return raw.toInt();
+  if (raw is String) return int.tryParse(raw);
+  return null;
+}
+
 double? _price(Map<String, dynamic> item) {
   final raw = item['price'];
   if (raw is num) return raw.toDouble();
   if (raw is String) return double.tryParse(raw.replaceAll(',', '.'));
   return null;
 }
+
+int? _prepMinutes(Map<String, dynamic> item) {
+  final raw = item['prep_minutes'];
+  if (raw is int) {
+    return raw;
+  }
+  if (raw is num) {
+    return raw.toInt();
+  }
+  if (raw is String) {
+    return int.tryParse(raw);
+  }
+  return null;
+}
+
 int? _positionId(Map<String, dynamic> item) {
   final raw = item['position_id'] ?? item['id'];
   if (raw is int) return raw;
   if (raw is String) return int.tryParse(raw);
   return null;
 }
+
 int? _positionCalories(Map<String, dynamic> item) {
   final raw = item['calories'];
   if (raw is int) return raw;
@@ -2492,9 +5584,193 @@ int? _positionCalories(Map<String, dynamic> item) {
   if (raw is String) return int.tryParse(raw);
   return null;
 }
-String _priceLabel(Map<String, dynamic> item) => _price(item) == null ? 'PLN --' : 'PLN ${_fmt(_price(item)!)}';
-String _fmt(double value) => value == value.roundToDouble() ? value.toStringAsFixed(0) : value.toStringAsFixed(2);
-String _kcal(Map<String, dynamic> item) => item['calories'] == null ? '-- kcal' : '${item['calories']} kcal';
+
+String _checkoutItemDescription(_CartEntry entry) {
+  final base = _description(entry.position);
+  final serving = _servingSummary(entry.customization);
+  final extrasChanges = _extrasChangesSummary(entry.customization);
+  final parts = <String>[base];
+  if (serving != null) {
+    parts.add('Ustawienia: $serving');
+  }
+  if (extrasChanges != null) {
+    parts.add('Dodatki: $extrasChanges');
+  }
+  return parts.join(' | ');
+}
+
+double _entryPrice(_CartEntry entry) {
+  return (_price(entry.position) ?? 0) + _extrasPriceTotal(entry.customization);
+}
+
+String _entryPriceLabel(_CartEntry entry) => 'PLN ${_fmt(_entryPrice(entry))}';
+
+String _priceLabel(Map<String, dynamic> item) =>
+    _price(item) == null ? 'PLN --' : 'PLN ${_fmt(_price(item)!)}';
+String _fmt(double value) => value.toStringAsFixed(2);
+String _kcal(Map<String, dynamic> item) =>
+    item['calories'] == null ? '-- kcal' : '${item['calories']} kcal';
+String? _servingSummary(_CartCustomization customization) {
+  if (!customization.servingOptionsEnabled) {
+    return null;
+  }
+  return [
+    _cutOptionLabel(customization.cutOption),
+    _packagingOptionLabel(customization.packagingOption),
+  ].join(', ');
+}
+
+String? _extrasChangesSummary(_CartCustomization customization) {
+  final changes = _extrasChanges(customization);
+  if (changes.isEmpty) {
+    return null;
+  }
+  return changes.join(', ');
+}
+
+List<String> _personalizationChips(_CartCustomization customization) {
+  final chips = <String>[
+    if (customization.servingOptionsEnabled) ...[
+      _cutOptionLabel(customization.cutOption),
+      _packagingOptionLabel(customization.packagingOption),
+    ],
+  ];
+  final entries = customization.extras.entries
+      .where((entry) => entry.value > 0)
+      .toList()
+    ..sort((first, second) => first.key.compareTo(second.key));
+  chips.addAll(
+    entries.map(
+      (entry) => entry.value == 1 ? entry.key : '${entry.key} x${entry.value}',
+    ),
+  );
+  return chips;
+}
+
+List<String> _personalizationEmojiBadges(_CartCustomization customization) {
+  final chips = <String>[
+    if (customization.servingOptionsEnabled) ...[
+      _cutOptionBadge(customization.cutOption),
+      _packagingOptionBadge(customization.packagingOption),
+    ],
+  ];
+  final entries = customization.extras.entries
+      .where((entry) => entry.value > 0)
+      .toList()
+    ..sort((first, second) => first.key.compareTo(second.key));
+  chips.addAll(
+    entries.map((entry) {
+      final emoji =
+          customization.extraEmojis[entry.key] ?? _fallbackExtraEmoji(entry.key);
+      return entry.value == 1 ? emoji : '$emoji x${entry.value}';
+    }),
+  );
+  return chips;
+}
+
+double _extrasPriceTotal(_CartCustomization customization) {
+  var total = 0.0;
+  for (final entry in customization.extras.entries) {
+    final selectedCount = entry.value;
+    final includedCount = customization.defaultExtras[entry.key] ?? 0;
+    final paidCount = selectedCount - includedCount;
+    if (paidCount > 0) {
+      total += paidCount * (customization.extraUnitPrices[entry.key] ?? 0);
+    }
+  }
+  return total;
+}
+
+List<String> _extrasChanges(_CartCustomization customization) {
+  final changes = <String>[];
+  final labels = customization.extras.keys.toList(growable: false)..sort();
+  for (final label in labels) {
+    final selectedCount = customization.extras[label] ?? 0;
+    final includedCount = customization.defaultExtras[label] ?? 0;
+    final delta = selectedCount - includedCount;
+    if (delta == 0) {
+      continue;
+    }
+    final sign = delta > 0 ? '+' : '-';
+    final absoluteDelta = delta.abs();
+    changes.add(
+      absoluteDelta == 1
+          ? '$sign$label'
+          : '$sign$label x$absoluteDelta',
+    );
+  }
+  return changes;
+}
+
+String _fallbackExtraEmoji(String label) {
+  switch (label.toLowerCase()) {
+    case 'pomidory':
+      return '🍅';
+    case 'oliwki':
+      return '🫒';
+    case 'prazona cebulka':
+      return '🧅';
+    case 'sos bbq':
+      return '🍖';
+    case 'surowka kolorowa':
+      return '🥗';
+    case 'ketchup':
+      return '🍅';
+    case 'sos tysiaca wysp':
+      return '🥫';
+  }
+  return '✨';
+}
+
+String _cutOptionLabel(_CutOption option) {
+  switch (option) {
+    case _CutOption.whole:
+      return 'Calosc';
+    case _CutOption.cutInHalf:
+      return 'Cieta na pol';
+  }
+}
+
+String _packagingOptionLabel(_PackagingOption option) {
+  switch (option) {
+    case _PackagingOption.paperTray:
+      return 'Tacka papierowa';
+    case _PackagingOption.box:
+      return 'Pudelko';
+  }
+}
+
+String _cutOptionBadge(_CutOption option) {
+  switch (option) {
+    case _CutOption.whole:
+      return 'CALA';
+    case _CutOption.cutInHalf:
+      return '1/2';
+  }
+}
+
+String _packagingOptionBadge(_PackagingOption option) {
+  switch (option) {
+    case _PackagingOption.paperTray:
+      return 'TACKA';
+    case _PackagingOption.box:
+      return 'BOX';
+  }
+}
+
+bool _supportsZapiekankaServingOptions(Map<String, dynamic> position) {
+  final positionType =
+      position['position_type']?.toString().toLowerCase() ?? '';
+  final name = _title(position, 0).toLowerCase();
+  return positionType.contains('zapiek') || name.contains('zapiek');
+}
+
+_CartCustomization _initialCustomizationFor(Map<String, dynamic> position) {
+  return _CartCustomization(
+    servingOptionsEnabled: _supportsZapiekankaServingOptions(position),
+  );
+}
+
 String _paymentBrand(String label) {
   switch (label) {
     case 'BLIK':
@@ -2506,5 +5782,10 @@ String _paymentBrand(String label) {
   }
   return label;
 }
-Object _positionKey(Map<String, dynamic> item) => item['position_id'] ?? item['id'] ?? item['name'] ?? item.hashCode;
-bool _samePosition(Map<String, dynamic>? first, Map<String, dynamic>? second) => first != null && second != null && _positionKey(first) == _positionKey(second);
+
+Object _positionKey(Map<String, dynamic> item) =>
+    item['position_id'] ?? item['id'] ?? item['name'] ?? item.hashCode;
+bool _samePosition(Map<String, dynamic>? first, Map<String, dynamic>? second) =>
+    first != null &&
+    second != null &&
+    _positionKey(first) == _positionKey(second);

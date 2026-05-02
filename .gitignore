@@ -17,7 +17,23 @@ ENV/
 # --- Secrets ---
 .env
 .env.*
-client_secret.json
+!.env.example
+!.env.*.example
+client_secret*.json
+credentials*.json
+*credentials*.json
+*secret*.json
+*token*.json
+loginLog.json
+loginlog.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# --- Local seed data / access bootstrap ---
+my_fastapi_project/sql/admin_user.sql
+my_fastapi_project/sql/employee_user.sql
 
 # --- IDE ---
 .vscode/

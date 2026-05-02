@@ -1,20 +1,33 @@
+from pathlib import Path
+from datetime import datetime
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session, joinedload
 
 from db import get_db
 from checkout_service import CheckoutService
+from loyalty import loyalty_points_for_price
+from prep_time_config import infer_prep_group_key, prep_group_label
 from router import routes
 
 from models import (
+    ADMIN_ROLE,
     AddressCreate,
     AddressUpdate,
     DeliveryOrderDB,
     DeliveryOrderIn,
     DeliveryOrderOut,
+    DEFAULT_USER_ROLE,
+    EMPLOYEE_ROLE,
     KitchenUpdateCreate,
     KitchenUpdateDB,
+    MenuAddonDB,
     MenuPositionDB,
+    MenuPositionAddonDB,
+    ProductPrepTimeSettingDB,
     OrderCreate,
     OrderDB,
     OrderItemCreate,
@@ -33,7 +46,7 @@ import bcrypt
 import jwt
 import uuid
 
-SECRET_KEY = "supersecret"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-local-jwt-secret")
 ALGORITHM = "HS256"
 
 app = FastAPI(title="Order & Kitchen Service API")
@@ -44,19 +57,101 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount(
+    "/assets",
+    StaticFiles(directory=Path(__file__).resolve().parent / "assets", check_dir=False),
+    name="assets",
+)
 
 class MenuService:
     def __init__(self, db: Session):
         self.db = db
 
     def get_all_positions(self):
-        return self.db.query(MenuPositionDB).all()
+        settings_by_group = self._get_prep_settings_by_group()
+        return [
+            self._serialize_position(position, settings_by_group)
+            for position in self.db.query(MenuPositionDB)
+            .filter(MenuPositionDB.is_active == True)
+            .all()
+        ]
 
     def get_position(self, position_id: int):
-        position = self.db.query(MenuPositionDB).filter(MenuPositionDB.position_id == position_id).first()
+        position = (
+            self.db.query(MenuPositionDB)
+            .filter(
+                MenuPositionDB.position_id == position_id,
+                MenuPositionDB.is_active == True,
+            )
+            .first()
+        )
         if not position:
             raise HTTPException(status_code=404, detail="Menu position not found")
-        return position
+        return self._serialize_position(position, self._get_prep_settings_by_group())
+
+    def get_position_addons(self, position_id: int):
+        self.get_position(position_id)
+
+        addons = (
+            self.db.query(MenuAddonDB, MenuPositionAddonDB)
+            .join(
+                MenuPositionAddonDB,
+                MenuPositionAddonDB.addon_id == MenuAddonDB.addon_id,
+            )
+            .filter(
+                MenuPositionAddonDB.position_id == position_id,
+                MenuAddonDB.is_active == True,
+            )
+            .order_by(MenuAddonDB.sort_order.asc(), MenuAddonDB.name.asc())
+            .all()
+        )
+
+        return [
+            {
+                "addon_id": addon.addon_id,
+                "name": addon.name,
+                "description": addon.description,
+                "price": float(addon.price),
+                "photo_url": addon.photo_url,
+                "sort_order": addon.sort_order,
+                "is_active": addon.is_active,
+                "is_default": link.is_default,
+                "default_quantity": link.default_quantity,
+            }
+            for addon, link in addons
+        ]
+
+    def _get_prep_settings_by_group(self) -> dict[str, ProductPrepTimeSettingDB]:
+        settings = (
+            self.db.query(ProductPrepTimeSettingDB)
+            .filter(ProductPrepTimeSettingDB.is_active == True)
+            .all()
+        )
+        return {setting.group_key: setting for setting in settings}
+
+    def _serialize_position(
+        self,
+        position: MenuPositionDB,
+        settings_by_group: dict[str, ProductPrepTimeSettingDB],
+    ) -> dict[str, object | None]:
+        group_key = infer_prep_group_key(position.position_type, position.name)
+        setting = settings_by_group.get(group_key) if group_key else None
+
+        return {
+            "position_id": position.position_id,
+            "position_type": position.position_type,
+            "name": position.name,
+            "weight": position.weight,
+            "calories": position.calories,
+            "price": float(position.price) if position.price is not None else None,
+            "loyalty_points": loyalty_points_for_price(position.price),
+            "description": position.description,
+            "photo_url": position.photo_url,
+            "is_active": bool(position.is_active),
+            "prep_group_key": group_key,
+            "prep_group_label": prep_group_label(group_key),
+            "prep_minutes": setting.minutes if setting is not None else None,
+        }
     
 class UserService:
     def __init__(self, db: Session):
@@ -75,7 +170,12 @@ class UserService:
         hashed_pwd = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
         # utwórz encję
-        new_user = UserDB(email=email, phone=telephone_number, password=hashed_pwd, role="client")
+        new_user = UserDB(
+            email=email,
+            phone=telephone_number,
+            password=hashed_pwd,
+            role=DEFAULT_USER_ROLE,
+        )
 
         # zapisz w DB
         self.db.add(new_user)
@@ -170,9 +270,14 @@ class UserService:
     def login(self, email: str, password: str):
 
         user = self.db.query(UserDB).filter(UserDB.email == email).first()
-        print(user, password)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
+
+        normalized_role = self._normalize_role(user.role)
+        if user.role != normalized_role:
+            user.role = normalized_role
+            self.db.commit()
+            self.db.refresh(user)
         
         if not bcrypt.checkpw(password.encode("utf-8"), user.password.encode("utf-8")):
             raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -180,11 +285,32 @@ class UserService:
         jwt_token = jwt.encode({"sub": str(user.user_id)}, SECRET_KEY, algorithm=ALGORITHM)
         session_token = str(uuid.uuid4())
 
-        new_session = SessionsDB(user_id=user.user_id, session_token=session_token)
+        now = datetime.utcnow()
+        new_session = SessionsDB(
+            user_id=user.user_id,
+            session_token=session_token,
+            created_at=now,
+            last_seen_at=now,
+        )
         self.db.add(new_session)
         self.db.commit()
         self.db.refresh(new_session)
-        return {"jwt": jwt_token, "session_token": session_token}
+        return {
+            "jwt": jwt_token,
+            "session_token": session_token,
+            "role": normalized_role,
+            "user_id": user.user_id,
+            "email": user.email,
+            "loyalty_points": int(user.loyalty_points or 0),
+        }
+
+    def _normalize_role(self, role: str | None) -> str:
+        normalized = (role or DEFAULT_USER_ROLE).strip().lower()
+        if normalized == "client":
+            return DEFAULT_USER_ROLE
+        if normalized in {DEFAULT_USER_ROLE, EMPLOYEE_ROLE, ADMIN_ROLE}:
+            return normalized
+        return DEFAULT_USER_ROLE
 
 from sqlalchemy.orm import Session, joinedload
 

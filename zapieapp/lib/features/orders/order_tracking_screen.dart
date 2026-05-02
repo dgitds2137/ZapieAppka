@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
 import '../../data/models/checkout_verification.dart';
+import '../../data/repositories/checkout_repository.dart';
 import '../../router/app_router.dart';
 
 class OrderTrackingScreen extends StatefulWidget {
@@ -11,10 +15,12 @@ class OrderTrackingScreen extends StatefulWidget {
     super.key,
     required this.checkout,
     required this.authSession,
+    required this.checkoutRepository,
   });
 
   final CheckoutVerificationResponse checkout;
   final AuthSession authSession;
+  final CheckoutRepository checkoutRepository;
 
   @override
   State<OrderTrackingScreen> createState() => _OrderTrackingScreenState();
@@ -31,39 +37,323 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     'W piecu',
     'W drodze',
   ];
+  static const _stageImages = <String>[
+    'assets/images/confirmed.png',
+    'assets/images/orderReceived.png',
+    'assets/images/inOven.png',
+    'assets/images/onTheWay.png',
+  ];
 
   late final AnimationController _controller;
-  late final Animation<double> _progressAnimation;
+  late final TextEditingController _chatController;
+  late CheckoutVerificationResponse _currentCheckout;
+  List<CheckoutChatMessage> _chatMessages = const [];
+  Timer? _refreshTimer;
+  bool _isSubmittingReceiptConfirmation = false;
+  bool _isLoadingChatMessages = false;
+  bool _isSendingChatMessage = false;
 
   @override
   void initState() {
     super.initState();
+    _currentCheckout = widget.checkout;
+    _chatController = TextEditingController();
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2400),
+      duration: const Duration(milliseconds: 700),
     );
-    _progressAnimation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeInOutCubicEmphasized,
-    ).drive(Tween<double>(begin: 0, end: 1 / (_stages.length - 1)));
+    _controller.value = _progressValueForCheckout(_currentCheckout);
 
-    Future<void>.delayed(const Duration(milliseconds: 280), () {
-      if (mounted) {
-        _controller.forward();
-      }
-    });
+    _refreshTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _refreshOrderData(),
+    );
+    _refreshOrderData();
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
+    _chatController.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  Future<void> _refreshCheckoutState() async {
+    if (!widget.authSession.hasIdentity) {
+      return;
+    }
+
+    try {
+      final checkout = await widget.checkoutRepository.fetchActiveCheckout(
+        sessionToken: widget.authSession.sessionToken,
+        email: widget.authSession.email,
+      );
+
+      if (!mounted || checkout == null) {
+        return;
+      }
+
+      setState(() {
+        _currentCheckout = checkout;
+      });
+      _animateTimelineToCurrentStage();
+    } catch (_) {
+      // Keep the current local state if refresh fails.
+    }
+  }
+
+  Future<void> _refreshChatMessages() async {
+    if (!widget.authSession.hasIdentity) {
+      return;
+    }
+
+    setState(() {
+      _isLoadingChatMessages = true;
+    });
+
+    try {
+      final messages = await widget.checkoutRepository.fetchOrderMessages(
+        checkoutOrderId: _currentCheckout.savedOrderId,
+        sessionToken: widget.authSession.sessionToken,
+        email: widget.authSession.email,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _chatMessages = messages;
+        _isLoadingChatMessages = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isLoadingChatMessages = false;
+      });
+    }
+  }
+
+  Future<void> _refreshOrderData() async {
+    await _refreshCheckoutState();
+    await _refreshChatMessages();
+  }
+
+  Future<void> _confirmReceipt(bool received) async {
+    if (_isSubmittingReceiptConfirmation) {
+      return;
+    }
+
+    setState(() {
+      _isSubmittingReceiptConfirmation = true;
+    });
+
+    try {
+      final checkout = await widget.checkoutRepository.confirmReceipt(
+        CheckoutReceiptConfirmationRequest(
+          received: received,
+          sessionToken: widget.authSession.sessionToken,
+          userEmail: widget.authSession.email,
+        ),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      if (received) {
+        final routeArgs = <String, dynamic>{
+          ...widget.authSession.toRouteArgs(),
+        };
+        await SessionPersistence.saveActiveCheckout(null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(checkout.message)),
+        );
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          AppRoutes.dashboard,
+          (route) => false,
+          arguments: routeArgs,
+        );
+        return;
+      }
+
+      setState(() {
+        _currentCheckout = checkout;
+      });
+      _animateTimelineToCurrentStage();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(checkout.message)),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmittingReceiptConfirmation = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _sendChatMessage() async {
+    final text = _chatController.text.trim();
+    if (text.isEmpty || _isSendingChatMessage) {
+      return;
+    }
+
+    setState(() {
+      _isSendingChatMessage = true;
+    });
+    _chatController.clear();
+
+    try {
+      final message = await widget.checkoutRepository.sendOrderMessage(
+        checkoutOrderId: _currentCheckout.savedOrderId,
+        request: CheckoutChatMessageCreateRequest(
+          message: text,
+          sessionToken: widget.authSession.sessionToken,
+          userEmail: widget.authSession.email,
+        ),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _chatMessages = [..._chatMessages, message];
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      _chatController.text = text;
+      _chatController.selection = TextSelection.collapsed(
+        offset: _chatController.text.length,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingChatMessage = false;
+        });
+      }
+    }
+  }
+
+  void _animateTimelineToCurrentStage() {
+    final target = _progressValueForCheckout(_currentCheckout);
+    if ((_controller.value - target).abs() < 0.001) {
+      _controller.value = target;
+      return;
+    }
+
+    _controller.animateTo(
+      target,
+      curve: Curves.easeInOutCubicEmphasized,
+    );
+  }
+
+  int _activeStageIndexForCheckout(CheckoutVerificationResponse checkout) {
+    final processingStatus = checkout.processingStatus.trim().toLowerCase();
+    final verificationStage = checkout.verificationStage.trim().toLowerCase();
+    final lifecycleStatus = checkout.status.trim().toLowerCase();
+
+    if (verificationStage == 'in_oven' || verificationStage == 'oven') {
+      return 2;
+    }
+
+    if ({
+          'on_the_way',
+          'delivery_started',
+          'awaiting_receipt_confirmation',
+          'delivery_extended',
+          'delivered_confirmed',
+          'completed_by_admin',
+        }.contains(verificationStage) ||
+        lifecycleStatus == 'completed') {
+      return 3;
+    }
+
+    if (processingStatus == 'assigned') {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  double _progressValueForCheckout(CheckoutVerificationResponse checkout) {
+    if (_stages.length <= 1) {
+      return 1;
+    }
+    return _activeStageIndexForCheckout(checkout) / (_stages.length - 1);
+  }
+
+  String _trackingHeadlineForCheckout(CheckoutVerificationResponse checkout) {
+    switch (_activeStageIndexForCheckout(checkout)) {
+      case 0:
+        return 'Zamowienie czeka na podjecie';
+      case 1:
+        return 'Kuchnia przejela zamowienie';
+      case 2:
+        return 'Zamowienie jest w piecu';
+      case 3:
+        return 'Zamowienie jest w drodze';
+      default:
+        return 'Trwa realizacja zamowienia';
+    }
+  }
+
+  String _trackingMessageForCheckout(CheckoutVerificationResponse checkout) {
+    switch (_activeStageIndexForCheckout(checkout)) {
+      case 0:
+        return 'Etap "Przyjete do realizacji" wlaczy sie dopiero po kliknieciu "Podejmij" przez administratora lub pracownika.';
+      case 1:
+        return 'Zamowienie zostalo podjete do realizacji przez obsluge.';
+      case 2:
+        return 'Produkt jest aktualnie przygotowywany w piecu.';
+      case 3:
+        return 'Zamowienie opuscilo kuchnie i jest w drodze do klienta.';
+      default:
+        return 'Status realizacji jest aktualizowany na podstawie backendu.';
+    }
+  }
+
+  List<CheckoutChatMessage> _displayChatMessages() {
+    if (_chatMessages.isNotEmpty) {
+      return _chatMessages;
+    }
+
+    return [
+      CheckoutChatMessage(
+        checkoutOrderMessageId: -1,
+        checkoutOrderId: _currentCheckout.savedOrderId,
+        senderRole: 'system',
+        authorLabel: 'Kuchnia',
+        message:
+            'Czesc! Jesli chcesz doprecyzowac zamowienie, napisz tutaj szybka wiadomosc. Kuchnia widzi te wiadomosci, ale nie moze odpisac w mini-chacie.',
+        createdAt: DateTime.now().toUtc(),
+      ),
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final order = widget.checkout;
+    final order = _currentCheckout;
     final request = order.receivedOrder;
     final itemCount = request.items.length;
     final leadItem = itemCount == 0 ? 'Brak pozycji' : request.items.first.name;
@@ -160,7 +450,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                         Expanded(
                           child: _HeroStat(
                             icon: Icons.receipt_long_rounded,
-                            title: '$itemCount ${itemCount == 1 ? 'pozycja' : 'pozycje'}',
+                            title:
+                                '$itemCount ${itemCount == 1 ? 'pozycja' : 'pozycje'}',
                             subtitle: leadItem,
                           ),
                         ),
@@ -197,7 +488,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      'Na razie to frontendowa symulacja jednego kroku procesu. Zielony pasek biegnie do drugiego etapu i aktywuje go po dotarciu.',
+                      'Status jest synchronizowany z backendem. Etap "Przyjete do realizacji" wlacza sie dopiero po kliknieciu "Podejmij" przez administratora lub pracownika.',
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFFD7C5B8),
                         height: 1.35,
@@ -205,15 +496,17 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                     ),
                     const SizedBox(height: 18),
                     AnimatedBuilder(
-                      animation: _progressAnimation,
+                      animation: _controller,
                       builder: (context, _) => _StageTimeline(
                         labels: _stages,
-                        progress: _progressAnimation.value,
+                        imagePaths: _stageImages,
+                        progress: _controller.value,
+                        activeStageIndex: _activeStageIndexForCheckout(order),
                       ),
                     ),
                     const SizedBox(height: 18),
                     AnimatedBuilder(
-                      animation: _progressAnimation,
+                      animation: _controller,
                       builder: (context, _) => Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
@@ -242,19 +535,16 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    _progressAnimation.value >= 0.32
-                                        ? 'Kuchnia przejela zamowienie'
-                                        : 'Uruchamiamy realizacje',
-                                    style: theme.textTheme.titleMedium?.copyWith(
+                                    _trackingHeadlineForCheckout(order),
+                                    style:
+                                        theme.textTheme.titleMedium?.copyWith(
                                       color: const Color(0xFFF7EEE6),
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    _progressAnimation.value >= 0.32
-                                        ? 'Drugi etap zostal aktywowany po dojsciu paska postepu.'
-                                        : 'Animacja jest w drodze do drugiego etapu.',
+                                    _trackingMessageForCheckout(order),
                                     style: theme.textTheme.bodyMedium?.copyWith(
                                       color: const Color(0xFFD3C3B7),
                                       height: 1.35,
@@ -292,6 +582,224 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                   ),
                 ],
               ),
+              if (order.requiresReceiptConfirmation) ...[
+                const SizedBox(height: 16),
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xEE100E0D),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: const Color(0x34FFB061)),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Otrzymales zamowienie?',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: const Color(0xFFF7EEE6),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        order.message,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFFD3C1B5),
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      if (order.deliveryExtensionCount > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Text(
+                            'Liczba przedluzen oczekiwania: ${order.deliveryExtensionCount}',
+                            style: theme.textTheme.labelLarge?.copyWith(
+                              color: const Color(0xFFFFD7B5),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: _isSubmittingReceiptConfirmation
+                                  ? null
+                                  : () => _confirmReceipt(true),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(50),
+                                backgroundColor: const Color(0xFF2E8F57),
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: const Text(
+                                'Tak',
+                                style: TextStyle(fontWeight: FontWeight.w800),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: _isSubmittingReceiptConfirmation
+                                  ? null
+                                  : () => _confirmReceipt(false),
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(50),
+                                backgroundColor: const Color(0xFFFF8B00),
+                                foregroundColor: const Color(0xFF2B1808),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: _isSubmittingReceiptConfirmation
+                                  ? const SizedBox(
+                                      height: 18,
+                                      width: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.2,
+                                        color: Color(0xFF2B1808),
+                                      ),
+                                    )
+                                  : const Text(
+                                      'Nie',
+                                      style: TextStyle(
+                                          fontWeight: FontWeight.w800),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xEE100E0D),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: const Color(0x24FFFFFF)),
+                ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Mini-chat',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: const Color(0xFFF7EEE6),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const Spacer(),
+                        if (_isLoadingChatMessages)
+                          const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.1,
+                              color: Color(0xFF63D7D2),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Mozesz tu dopisac szybka wiadomosc do kuchni. Kuchnia widzi wiadomosci, ale nie moze odpisac w mini-chacie.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFFD3C1B5),
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF151313),
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: const Color(0x1FFFFFFF)),
+                      ),
+                      child: Column(
+                        children: [
+                          for (final chatMessage in _displayChatMessages()) ...[
+                            _ChatBubble(
+                              message: chatMessage,
+                              isUser: chatMessage.senderRole == 'customer',
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _chatController,
+                            minLines: 1,
+                            maxLines: 3,
+                            onSubmitted: (_) => _sendChatMessage(),
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: const Color(0xFFF8EEE0),
+                            ),
+                            decoration: InputDecoration(
+                              hintText: 'Napisz wiadomosc...',
+                              hintStyle: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFF9E9085),
+                              ),
+                              filled: true,
+                              fillColor: const Color(0xFF171412),
+                              contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 14),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide:
+                                    const BorderSide(color: Color(0x1FFFFFFF)),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide:
+                                    const BorderSide(color: Color(0x663BC977)),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        FilledButton(
+                          onPressed: _isSendingChatMessage ? null : _sendChatMessage,
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size(56, 56),
+                            backgroundColor: const Color(0xFF2E8F57),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: _isSendingChatMessage
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.send_rounded),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 16),
               Container(
                 decoration: BoxDecoration(
@@ -328,11 +836,15 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
           child: FilledButton(
             onPressed: () {
+              final routeArgs = <String, dynamic>{
+                ...widget.authSession.toRouteArgs(),
+                'activeCheckout': _currentCheckout.toJson(),
+              };
               Navigator.pushNamedAndRemoveUntil(
                 context,
                 AppRoutes.dashboard,
                 (route) => false,
-                arguments: widget.authSession.toRouteArgs(),
+                arguments: routeArgs,
               );
             },
             style: FilledButton.styleFrom(
@@ -405,11 +917,15 @@ class _TrackingBackground extends StatelessWidget {
 class _StageTimeline extends StatelessWidget {
   const _StageTimeline({
     required this.labels,
+    required this.imagePaths,
     required this.progress,
+    required this.activeStageIndex,
   });
 
   final List<String> labels;
+  final List<String> imagePaths;
   final double progress;
+  final int activeStageIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -418,17 +934,23 @@ class _StageTimeline extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final stepWidth = labels.length == 1 ? width : width / (labels.length - 1);
         final clampedProgress = progress.clamp(0.0, 1.0).toDouble();
+        final stageCount = labels.isEmpty ? 1 : labels.length;
+        final columnWidth = width / stageCount;
+        final startX = columnWidth / 2;
+        final endX = width - (columnWidth / 2);
+        final progressX = labels.length <= 1
+            ? endX
+            : startX + ((endX - startX) * clampedProgress);
 
         return SizedBox(
-          height: 104,
+          height: 194,
           child: Stack(
             children: [
               Positioned(
-                left: 0,
-                right: 0,
-                top: 17,
+                left: startX,
+                right: width - endX,
+                top: 104,
                 child: Container(
                   height: 8,
                   decoration: BoxDecoration(
@@ -438,11 +960,11 @@ class _StageTimeline extends StatelessWidget {
                 ),
               ),
               Positioned(
-                left: 0,
-                top: 17,
+                left: startX,
+                top: 104,
                 child: Container(
                   height: 8,
-                  width: width * clampedProgress,
+                  width: math.max(0.0, progressX - startX),
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
                       colors: [Color(0xFF2BAF68), Color(0xFF4FDE86)],
@@ -458,36 +980,45 @@ class _StageTimeline extends StatelessWidget {
                   ),
                 ),
               ),
-              for (var index = 0; index < labels.length; index++)
-                Positioned(
-                  left: math
-                      .max(0.0, math.min(width - 96, stepWidth * index - 48))
-                      .toDouble(),
-                  top: 0,
-                  child: SizedBox(
-                    width: 96,
-                    child: Column(
-                      children: [
-                        _StageDot(
-                          active: index == 0 ||
-                              clampedProgress >=
-                                  (labels.length == 1 ? 1 : index / (labels.length - 1)) - 0.003,
-                          current: index == 1 && clampedProgress < (1 / (labels.length - 1)),
+              Positioned.fill(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var index = 0; index < labels.length; index++)
+                      Expanded(
+                        child: Column(
+                          children: [
+                            _StageIllustration(
+                              imagePath: imagePaths.length > index
+                                  ? imagePaths[index]
+                                  : null,
+                              active: index <= activeStageIndex,
+                            ),
+                            const SizedBox(height: 6),
+                            _StageDot(
+                              active: index <= activeStageIndex,
+                              current: false,
+                            ),
+                            const SizedBox(height: 12),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 4),
+                              child: Text(
+                                labels[index],
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: const Color(0xFFF2E5DA),
+                                  fontWeight: FontWeight.w700,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 12),
-                        Text(
-                          labels[index],
-                          textAlign: TextAlign.center,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: const Color(0xFFF2E5DA),
-                            fontWeight: FontWeight.w700,
-                            height: 1.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                      ),
+                  ],
                 ),
+              ),
             ],
           ),
         );
@@ -537,6 +1068,58 @@ class _StageDot extends StatelessWidget {
               ),
             )
           : null,
+    );
+  }
+}
+
+class _StageIllustration extends StatelessWidget {
+  const _StageIllustration({
+    required this.imagePath,
+    required this.active,
+  });
+
+  final String? imagePath;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final content = imagePath == null
+        ? const SizedBox.shrink()
+        : kIsWeb
+            ? Image.network(
+                _webStageImagePath(imagePath!),
+                height: 82,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (context, error, stackTrace) {
+                  return _stageFallbackIcon();
+                },
+              )
+            : Image.asset(
+                imagePath!,
+                height: 82,
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (context, error, stackTrace) {
+                  return _stageFallbackIcon();
+                },
+              );
+
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 220),
+      opacity: active ? 1 : 0.42,
+      child: SizedBox(
+        height: 82,
+        child: Center(child: content),
+      ),
+    );
+  }
+
+  Widget _stageFallbackIcon() {
+    return Icon(
+      Icons.local_shipping_outlined,
+      size: 34,
+      color: active ? const Color(0xFFF5EFE8) : const Color(0x88F5EFE8),
     );
   }
 }
@@ -660,6 +1243,60 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
+class _ChatBubble extends StatelessWidget {
+  const _ChatBubble({
+    required this.message,
+    required this.isUser,
+  });
+
+  final CheckoutChatMessage message;
+  final bool isUser;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 280),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: isUser ? const Color(0xFFFF8B00) : const Color(0xFF23201E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isUser ? const Color(0x20FFFFFF) : const Color(0x16FFFFFF),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment:
+              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            Text(
+              message.authorLabel,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: isUser
+                        ? const Color(0xFF3A220B)
+                        : const Color(0xFFA6E3BD),
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              message.message,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: isUser
+                        ? const Color(0xFF24160B)
+                        : const Color(0xFFF3E3D7),
+                    height: 1.35,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _HeroStat extends StatelessWidget {
   const _HeroStat({
     required this.icon,
@@ -771,7 +1408,15 @@ class _Glow extends StatelessWidget {
 }
 
 String _fmt(double value) {
-  return value == value.roundToDouble()
-      ? value.toStringAsFixed(0)
-      : value.toStringAsFixed(2);
+  return value.toStringAsFixed(2);
+}
+
+String _webStageImagePath(String imagePath) {
+  final normalized = imagePath.replaceAll('\\', '/');
+  const marker = 'assets/images/';
+  final markerIndex = normalized.lastIndexOf(marker);
+  if (markerIndex >= 0) {
+    return normalized.substring(markerIndex);
+  }
+  return normalized;
 }
