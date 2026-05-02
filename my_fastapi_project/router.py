@@ -228,6 +228,10 @@ def routes(OrderService, KitchenService, MenuService, UserService, CheckoutServi
             user_email=email,
         )
 
+    @r.get("/checkout/delivery-estimate")
+    def get_delivery_estimate(db: Session = Depends(get_db)):
+        return CheckoutService(db).get_delivery_estimate()
+
     @r.post("/checkout/confirm-receipt", response_model=CheckoutVerificationOut)
     def confirm_checkout_receipt(
         payload: CheckoutReceiptConfirmationIn,

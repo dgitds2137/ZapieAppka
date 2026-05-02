@@ -53,6 +53,14 @@ from models import (
 class CheckoutService:
     _EMPLOYEE_ACTIVITY_WINDOW = timedelta(minutes=5)
     _SESSION_TOUCH_INTERVAL = timedelta(seconds=30)
+    _STANDARD_DELIVERY_ETA_MINUTES = 30
+    _BUSY_DELIVERY_ETA_MINUTES = 60
+    _DELIVERY_IN_PROGRESS_STAGES = {
+        "on_the_way",
+        "delivery_started",
+        "delivery_extended",
+        "awaiting_receipt_confirmation",
+    }
 
     _METHOD_MESSAGES = {
         "BLIK": "Platnosc BLIK zostala zasymulowana jako udana. Zamowienie jest aktywne.",
@@ -80,7 +88,18 @@ class CheckoutService:
         effective_eta_minutes = self._calculate_checkout_eta_minutes(
             payload.items,
             fallback_minutes=payload.eta_minutes,
+            fulfillment_method=payload.fulfillment_method,
+            fulfillment_option_index=payload.fulfillment_option_index,
+            now=created_at,
         )
+        effective_address = payload.address
+        if self._is_delivery_fulfillment(
+            payload.fulfillment_method,
+            payload.fulfillment_option_index,
+        ):
+            effective_address = payload.address.model_copy(
+                update={"eta_label": self._delivery_eta_label(effective_eta_minutes)}
+            )
         active_until = created_at + timedelta(minutes=max(effective_eta_minutes, 1))
         user_id = self._resolve_user_id(
             session_token=payload.session_token,
@@ -120,9 +139,9 @@ class CheckoutService:
             fulfillment_method=payload.fulfillment_method,
             fulfillment_option_index=payload.fulfillment_option_index,
             address_option_index=payload.address_option_index,
-            address_title=payload.address.title,
-            address_subtitle=payload.address.subtitle,
-            address_eta_label=payload.address.eta_label,
+            address_title=effective_address.title,
+            address_subtitle=effective_address.subtitle,
+            address_eta_label=effective_address.eta_label,
             notes=payload.notes,
             client_created_at=payload.created_at,
             created_at=created_at,
@@ -170,6 +189,7 @@ class CheckoutService:
                 "redeemed_points": redeemed_points,
                 "redeemed_amount": redeemed_amount,
                 "eta_minutes": effective_eta_minutes,
+                "address": effective_address,
             },
         )
 
@@ -191,6 +211,18 @@ class CheckoutService:
             user_points_balance=int(user.loyalty_points or 0) if user is not None else 0,
             received_order=response_payload,
         )
+
+    def get_delivery_estimate(self) -> dict[str, int | bool]:
+        has_delivery_in_progress = self._has_delivery_in_progress(datetime.utcnow())
+        eta_minutes = (
+            self._BUSY_DELIVERY_ETA_MINUTES
+            if has_delivery_in_progress
+            else self._STANDARD_DELIVERY_ETA_MINUTES
+        )
+        return {
+            "eta_minutes": eta_minutes,
+            "has_delivery_in_progress": has_delivery_in_progress,
+        }
 
     def get_admin_dashboard(
         self,
@@ -968,7 +1000,20 @@ class CheckoutService:
         self,
         items: list[CheckoutItemPayload],
         fallback_minutes: int,
+        fulfillment_method: str,
+        fulfillment_option_index: int,
+        now: datetime,
     ) -> int:
+        if self._is_delivery_fulfillment(
+            fulfillment_method,
+            fulfillment_option_index,
+        ):
+            return (
+                self._BUSY_DELIVERY_ETA_MINUTES
+                if self._has_delivery_in_progress(now)
+                else self._STANDARD_DELIVERY_ETA_MINUTES
+            )
+
         safe_fallback = max(1, int(fallback_minutes or 0))
         position_ids = [
             item.position_id
@@ -1005,6 +1050,32 @@ class CheckoutService:
             return safe_fallback
 
         return max(prep_minutes)
+
+    def _is_delivery_fulfillment(
+        self,
+        fulfillment_method: str | None,
+        fulfillment_option_index: int | None,
+    ) -> bool:
+        normalized_method = (fulfillment_method or "").strip().lower()
+        return fulfillment_option_index == 0 or normalized_method in {"dostawa", "delivery"}
+
+    def _has_delivery_in_progress(self, now: datetime) -> bool:
+        return (
+            self.db.query(CheckoutOrderDB.checkout_order_id)
+            .filter(
+                CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.verification_stage.in_(
+                    self._DELIVERY_IN_PROGRESS_STAGES
+                ),
+                CheckoutOrderDB.active_until > now,
+            )
+            .first()
+            is not None
+        )
+
+    def _delivery_eta_label(self, eta_minutes: int) -> str:
+        return f"~{eta_minutes} min."
 
     def _ensure_checkout_items_are_available(
         self,

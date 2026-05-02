@@ -121,8 +121,15 @@ BEGIN
     ;WITH ZapiekankaPositions AS (
         SELECT position_id
         FROM dbo.MenuPositions
-        WHERE LOWER(ISNULL(position_type, N'')) LIKE N'%zapiek%'
-           OR LOWER(ISNULL(name, N'')) LIKE N'%zapiek%'
+        WHERE (
+                LOWER(ISNULL(position_type, N'')) LIKE N'%zapiek%'
+            AND LOWER(ISNULL(position_type, N'')) NOT LIKE N'%frozen%'
+            AND LOWER(ISNULL(position_type, N'')) NOT LIKE N'%mroz%'
+        )
+           OR (
+                LOWER(ISNULL(name, N'')) LIKE N'%zapiek%'
+            AND LOWER(ISNULL(name, N'')) NOT LIKE N'%mroz%'
+        )
     ),
     AddonLinks AS (
         SELECT

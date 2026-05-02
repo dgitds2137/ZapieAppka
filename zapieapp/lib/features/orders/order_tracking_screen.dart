@@ -45,19 +45,14 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
   ];
 
   late final AnimationController _controller;
-  late final TextEditingController _chatController;
   late CheckoutVerificationResponse _currentCheckout;
-  List<CheckoutChatMessage> _chatMessages = const [];
   Timer? _refreshTimer;
   bool _isSubmittingReceiptConfirmation = false;
-  bool _isLoadingChatMessages = false;
-  bool _isSendingChatMessage = false;
 
   @override
   void initState() {
     super.initState();
     _currentCheckout = widget.checkout;
-    _chatController = TextEditingController();
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 700),
@@ -74,7 +69,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
   @override
   void dispose() {
     _refreshTimer?.cancel();
-    _chatController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -103,43 +97,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     }
   }
 
-  Future<void> _refreshChatMessages() async {
-    if (!widget.authSession.hasIdentity) {
-      return;
-    }
-
-    setState(() {
-      _isLoadingChatMessages = true;
-    });
-
-    try {
-      final messages = await widget.checkoutRepository.fetchOrderMessages(
-        checkoutOrderId: _currentCheckout.savedOrderId,
-        sessionToken: widget.authSession.sessionToken,
-        email: widget.authSession.email,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _chatMessages = messages;
-        _isLoadingChatMessages = false;
-      });
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isLoadingChatMessages = false;
-      });
-    }
-  }
-
   Future<void> _refreshOrderData() async {
     await _refreshCheckoutState();
-    await _refreshChatMessages();
   }
 
   Future<void> _confirmReceipt(bool received) async {
@@ -169,6 +128,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
           ...widget.authSession.toRouteArgs(),
         };
         await SessionPersistence.saveActiveCheckout(null);
+        if (!mounted) {
+          return;
+        }
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(checkout.message)),
         );
@@ -200,55 +162,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
       if (mounted) {
         setState(() {
           _isSubmittingReceiptConfirmation = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _sendChatMessage() async {
-    final text = _chatController.text.trim();
-    if (text.isEmpty || _isSendingChatMessage) {
-      return;
-    }
-
-    setState(() {
-      _isSendingChatMessage = true;
-    });
-    _chatController.clear();
-
-    try {
-      final message = await widget.checkoutRepository.sendOrderMessage(
-        checkoutOrderId: _currentCheckout.savedOrderId,
-        request: CheckoutChatMessageCreateRequest(
-          message: text,
-          sessionToken: widget.authSession.sessionToken,
-          userEmail: widget.authSession.email,
-        ),
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _chatMessages = [..._chatMessages, message];
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      _chatController.text = text;
-      _chatController.selection = TextSelection.collapsed(
-        offset: _chatController.text.length,
-      );
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSendingChatMessage = false;
         });
       }
     }
@@ -330,24 +243,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
       default:
         return 'Status realizacji jest aktualizowany na podstawie backendu.';
     }
-  }
-
-  List<CheckoutChatMessage> _displayChatMessages() {
-    if (_chatMessages.isNotEmpty) {
-      return _chatMessages;
-    }
-
-    return [
-      CheckoutChatMessage(
-        checkoutOrderMessageId: -1,
-        checkoutOrderId: _currentCheckout.savedOrderId,
-        senderRole: 'system',
-        authorLabel: 'Kuchnia',
-        message:
-            'Czesc! Jesli chcesz doprecyzowac zamowienie, napisz tutaj szybka wiadomosc. Kuchnia widzi te wiadomosci, ale nie moze odpisac w mini-chacie.',
-        createdAt: DateTime.now().toUtc(),
-      ),
-    ];
   }
 
   @override
@@ -689,128 +584,6 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Text(
-                          'Mini-chat',
-                          style: theme.textTheme.titleLarge?.copyWith(
-                            color: const Color(0xFFF7EEE6),
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (_isLoadingChatMessages)
-                          const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.1,
-                              color: Color(0xFF63D7D2),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Mozesz tu dopisac szybka wiadomosc do kuchni. Kuchnia widzi wiadomosci, ale nie moze odpisac w mini-chacie.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFFD3C1B5),
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF151313),
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(color: const Color(0x1FFFFFFF)),
-                      ),
-                      child: Column(
-                        children: [
-                          for (final chatMessage in _displayChatMessages()) ...[
-                            _ChatBubble(
-                              message: chatMessage,
-                              isUser: chatMessage.senderRole == 'customer',
-                            ),
-                            const SizedBox(height: 10),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _chatController,
-                            minLines: 1,
-                            maxLines: 3,
-                            onSubmitted: (_) => _sendChatMessage(),
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFFF8EEE0),
-                            ),
-                            decoration: InputDecoration(
-                              hintText: 'Napisz wiadomosc...',
-                              hintStyle: theme.textTheme.bodyMedium?.copyWith(
-                                color: const Color(0xFF9E9085),
-                              ),
-                              filled: true,
-                              fillColor: const Color(0xFF171412),
-                              contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 14),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide:
-                                    const BorderSide(color: Color(0x1FFFFFFF)),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(14),
-                                borderSide:
-                                    const BorderSide(color: Color(0x663BC977)),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        FilledButton(
-                          onPressed: _isSendingChatMessage ? null : _sendChatMessage,
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size(56, 56),
-                            backgroundColor: const Color(0xFF2E8F57),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          child: _isSendingChatMessage
-                              ? const SizedBox(
-                                  height: 18,
-                                  width: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.send_rounded),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xEE100E0D),
-                  borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: const Color(0x24FFFFFF)),
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
                     Text(
                       'Pozycje w zamowieniu',
                       style: theme.textTheme.titleLarge?.copyWith(
@@ -822,6 +595,30 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                     for (final item in request.items.take(4)) ...[
                       _TrackingItemTile(item: item),
                       const SizedBox(height: 10),
+                    ],
+                    if (request.redeemedPoints > 0 ||
+                        request.redeemedAmount > 0) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Wykorzystano ${request.redeemedPoints} pkt',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFFD3C1B5),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '-PLN ${_fmt(request.redeemedAmount)}',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: const Color(0xFFFFB66A),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ],
                 ),
@@ -1243,60 +1040,6 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
-class _ChatBubble extends StatelessWidget {
-  const _ChatBubble({
-    required this.message,
-    required this.isUser,
-  });
-
-  final CheckoutChatMessage message;
-  final bool isUser;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 280),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: isUser ? const Color(0xFFFF8B00) : const Color(0xFF23201E),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isUser ? const Color(0x20FFFFFF) : const Color(0x16FFFFFF),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            Text(
-              message.authorLabel,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: isUser
-                        ? const Color(0xFF3A220B)
-                        : const Color(0xFFA6E3BD),
-                    fontWeight: FontWeight.w900,
-                  ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              message.message,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: isUser
-                        ? const Color(0xFF24160B)
-                        : const Color(0xFFF3E3D7),
-                    height: 1.35,
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _HeroStat extends StatelessWidget {
   const _HeroStat({
     required this.icon,
@@ -1399,7 +1142,7 @@ class _Glow extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: RadialGradient(
-            colors: [color, color.withOpacity(0)],
+            colors: [color, color.withValues(alpha: 0)],
           ),
         ),
       ),

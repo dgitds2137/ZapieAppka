@@ -173,7 +173,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       final loyaltyPoints = _asInt(decoded['loyalty_points']) ?? 0;
-      final updatedSession = _authSession.copyWith(loyaltyPoints: loyaltyPoints);
+      final updatedSession =
+          _authSession.copyWith(loyaltyPoints: loyaltyPoints);
       await SessionPersistence.saveAuthSession(updatedSession);
 
       if (!mounted) {
@@ -419,8 +420,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           categories: _buildDashboardCategories(positions),
           initialCategoryKey: category.key,
           initialCartEntries: resolvedCartEntries,
-          hasActiveCheckout:
-              _activeCheckout != null && _isCheckoutStillActive(_activeCheckout),
+          hasActiveCheckout: _activeCheckout != null &&
+              _isCheckoutStillActive(_activeCheckout),
           onCartChanged: _replaceCart,
         ),
       ),
@@ -961,7 +962,8 @@ class _CategoryProductsScreen extends StatefulWidget {
   final ValueChanged<List<_CartEntry>> onCartChanged;
 
   @override
-  State<_CategoryProductsScreen> createState() => _CategoryProductsScreenState();
+  State<_CategoryProductsScreen> createState() =>
+      _CategoryProductsScreenState();
 }
 
 class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
@@ -1030,7 +1032,8 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
   }
 
   void _removeFromCart(Map<String, dynamic> position) {
-    final index = _entries.indexWhere((entry) => _samePosition(entry.position, position));
+    final index =
+        _entries.indexWhere((entry) => _samePosition(entry.position, position));
     if (index < 0) {
       return;
     }
@@ -1090,12 +1093,14 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
                 physics: const BouncingScrollPhysics(),
                 child: Row(
                   children: [
-                    for (var index = 0; index < widget.categories.length; index++) ...[
+                    for (var index = 0;
+                        index < widget.categories.length;
+                        index++) ...[
                       if (index > 0) const SizedBox(width: 8),
                       _CategoryViewTab(
                         category: widget.categories[index],
-                        selected:
-                            widget.categories[index].key == _selectedCategoryKey,
+                        selected: widget.categories[index].key ==
+                            _selectedCategoryKey,
                         onTap: widget.categories[index].items.isEmpty
                             ? null
                             : () {
@@ -1145,7 +1150,8 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
                           onDecrement: () => _removeFromCart(items[index]),
                           locked: widget.hasActiveCheckout,
                         ),
-                        if (index < items.length - 1) const SizedBox(height: 10),
+                        if (index < items.length - 1)
+                          const SizedBox(height: 10),
                       ],
                   ],
                 ),
@@ -1202,9 +1208,8 @@ class _CategoryViewTab extends StatelessWidget {
             color: selected ? category.startColor : const Color(0xFF2A2522),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected
-                  ? const Color(0x66FFF1E7)
-                  : const Color(0x20FFFFFF),
+              color:
+                  selected ? const Color(0x66FFF1E7) : const Color(0x20FFFFFF),
             ),
             boxShadow: selected
                 ? [
@@ -1287,6 +1292,17 @@ class _CategoryProductRow extends StatelessWidget {
                             fontWeight: FontWeight.w800,
                           ),
                     ),
+                    if (_isFrozenPosition(position)) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: const [
+                          _ProductStateBadge(label: 'MROZONE'),
+                          _ProductStateBadge(label: 'DO ODGRZANIA'),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 6),
                     Text(
                       _description(position),
@@ -1302,18 +1318,20 @@ class _CategoryProductRow extends StatelessWidget {
                       children: [
                         Text(
                           _kcal(position),
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: const Color(0xFFB59E90),
-                                fontWeight: FontWeight.w700,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: const Color(0xFFB59E90),
+                                    fontWeight: FontWeight.w700,
+                                  ),
                         ),
                         const SizedBox(width: 10),
                         Text(
                           _priceLabel(position),
-                          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                                color: const Color(0xFFF4DDCE),
-                                fontWeight: FontWeight.w800,
-                              ),
+                          style:
+                              Theme.of(context).textTheme.labelMedium?.copyWith(
+                                    color: const Color(0xFFF4DDCE),
+                                    fontWeight: FontWeight.w800,
+                                  ),
                         ),
                       ],
                     ),
@@ -1403,15 +1421,15 @@ class _CategoryStepperButton extends StatelessWidget {
         width: 26,
         height: 26,
         decoration: BoxDecoration(
-          color: onTap == null ? const Color(0xFF221D1B) : const Color(0xFF38302C),
+          color:
+              onTap == null ? const Color(0xFF221D1B) : const Color(0xFF38302C),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Icon(
           icon,
           size: 16,
-          color: onTap == null
-              ? const Color(0xFF7B6F68)
-              : const Color(0xFFF7EEE7),
+          color:
+              onTap == null ? const Color(0xFF7B6F68) : const Color(0xFFF7EEE7),
         ),
       ),
     );
@@ -1705,7 +1723,8 @@ class _BottomChrome extends StatelessWidget {
                                     Positioned(
                                       top: -8,
                                       right: -18,
-                                      child: _PointsBadge(points: loyaltyPoints),
+                                      child:
+                                          _PointsBadge(points: loyaltyPoints),
                                     ),
                                 ],
                               ),
@@ -1942,6 +1961,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   int _addressIndex = 0;
   String? _selectedPaymentMethod;
   int _redeemedPoints = 0;
+  int _deliveryEtaMinutes = 30;
 
   static const _fulfillmentOptions = <({String label, IconData icon})>[
     (label: 'Dostawa', icon: Icons.delivery_dining_rounded),
@@ -1958,7 +1978,9 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   void initState() {
     super.initState();
     _entries = List<_CartEntry>.from(widget.initialEntries);
-    _addresses = List<({String title, String subtitle})>.from(_defaultAddresses);
+    _addresses =
+        List<({String title, String subtitle})>.from(_defaultAddresses);
+    _loadDeliveryEstimate();
   }
 
   @override
@@ -1969,6 +1991,33 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
 
   void _syncEntries() {
     widget.onCartChanged(List<_CartEntry>.from(_entries));
+  }
+
+  Future<void> _loadDeliveryEstimate() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/checkout/delivery-estimate'),
+        headers: const {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 6));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return;
+      }
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        return;
+      }
+
+      final etaMinutes = _asInt(decoded['eta_minutes']);
+      if (etaMinutes == null || etaMinutes <= 0 || !mounted) {
+        return;
+      }
+
+      setState(() => _deliveryEtaMinutes = etaMinutes);
+    } catch (_) {
+      // The backend recalculates ETA on checkout, so the UI can keep its fallback.
+    }
   }
 
   void _removeEntry(int id) {
@@ -2001,134 +2050,18 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   }
 
   Future<void> _showAddAddressDialog() async {
-    final formKey = GlobalKey<FormState>();
-    final streetController = TextEditingController();
-    final postalController = TextEditingController();
-    final cityController = TextEditingController(text: 'Warszawa');
-
-    ({String title, String subtitle})? newAddress;
-    try {
-      newAddress = await showDialog<({String title, String subtitle})>(
-        context: context,
-        barrierColor: const Color(0xC4000000),
-        builder: (dialogContext) {
-          final theme = Theme.of(dialogContext);
-
-          return AlertDialog(
-            backgroundColor: const Color(0xFF211917),
-            surfaceTintColor: Colors.transparent,
-            title: Text(
-              'Nowy adres dostawy',
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: const Color(0xFFF8EEE0),
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            content: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Form(
-                key: formKey,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextFormField(
-                        controller: streetController,
-                        autofocus: true,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          labelText: 'Ulica i numer',
-                          prefixIcon: Icon(Icons.location_on_outlined),
-                        ),
-                        validator: (value) {
-                          if ((value ?? '').trim().isEmpty) {
-                            return 'Podaj ulice i numer.';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: postalController,
-                        keyboardType: TextInputType.text,
-                        textInputAction: TextInputAction.next,
-                        decoration: const InputDecoration(
-                          labelText: 'Kod pocztowy',
-                          prefixIcon: Icon(Icons.local_post_office_outlined),
-                        ),
-                        validator: (value) {
-                          if ((value ?? '').trim().isEmpty) {
-                            return 'Podaj kod pocztowy.';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: cityController,
-                        textInputAction: TextInputAction.done,
-                        decoration: const InputDecoration(
-                          labelText: 'Miasto',
-                          prefixIcon: Icon(Icons.location_city_outlined),
-                        ),
-                        validator: (value) {
-                          if ((value ?? '').trim().isEmpty) {
-                            return 'Podaj miasto.';
-                          }
-                          return null;
-                        },
-                        onFieldSubmitted: (_) {
-                          if (formKey.currentState?.validate() != true) {
-                            return;
-                          }
-
-                          Navigator.of(dialogContext).pop((
-                            title: streetController.text.trim(),
-                            subtitle:
-                                '${postalController.text.trim()}, ${cityController.text.trim()}',
-                          ));
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('Anuluj'),
-              ),
-              FilledButton(
-                onPressed: () {
-                  if (formKey.currentState?.validate() != true) {
-                    return;
-                  }
-
-                  Navigator.of(dialogContext).pop((
-                    title: streetController.text.trim(),
-                    subtitle:
-                        '${postalController.text.trim()}, ${cityController.text.trim()}',
-                  ));
-                },
-                child: const Text('Dodaj adres'),
-              ),
-            ],
-          );
-        },
-      );
-    } finally {
-      streetController.dispose();
-      postalController.dispose();
-      cityController.dispose();
-    }
+    final newAddress = await showDialog<({String title, String subtitle})>(
+      context: context,
+      barrierColor: const Color(0xC4000000),
+      builder: (_) => const _AddAddressDialog(),
+    );
 
     if (newAddress == null || !mounted) {
       return;
     }
 
     setState(() {
-      _addresses.add(newAddress!);
+      _addresses.add(newAddress);
       _addressIndex = _addresses.length - 1;
       _fulfillmentIndex = 0;
     });
@@ -2189,15 +2122,11 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
 
   bool _usesDeliveryBuffer() => _fulfillmentIndex == 0;
 
-  int _deliveryBufferMinutesForAddress(int addressIndex) {
-    return addressIndex == 0 ? 10 : 25;
-  }
-
   int _summaryEtaMinutes(int prepMinutes) {
     if (!_usesDeliveryBuffer()) {
       return prepMinutes;
     }
-    return prepMinutes + _deliveryBufferMinutesForAddress(_addressIndex);
+    return _deliveryEtaMinutes;
   }
 
   String _summaryEtaLabel(int prepMinutes) {
@@ -2205,14 +2134,12 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   }
 
   String _addressEtaLabel(int prepMinutes) {
-    final addressIndex = _usesDeliveryBuffer() ? _addressIndex : 0;
-    return _addressEtaLabelForIndex(prepMinutes, addressIndex);
+    return _addressEtaLabelForIndex(prepMinutes, _addressIndex);
   }
 
-  String _addressEtaLabelForIndex(int prepMinutes, int addressIndex) {
-    final totalMinutes = _usesDeliveryBuffer()
-        ? prepMinutes + _deliveryBufferMinutesForAddress(addressIndex)
-        : prepMinutes;
+  String _addressEtaLabelForIndex(int prepMinutes, int _) {
+    final totalMinutes =
+        _usesDeliveryBuffer() ? _deliveryEtaMinutes : prepMinutes;
     return '~$totalMinutes min.';
   }
 
@@ -2255,6 +2182,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     final double total = math.max(0.0, subtotal - redeemedAmount);
     final quickNote = _noteController.text.trim();
     final estimatedPrepMinutes = _estimatedPrepMinutes();
+    final etaMinutes = _summaryEtaMinutes(estimatedPrepMinutes);
 
     return CheckoutVerificationRequest(
       createdAt: DateTime.now().toUtc(),
@@ -2263,7 +2191,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
       totalAmount: total,
       redeemedPoints: redeemedPoints,
       redeemedAmount: redeemedAmount,
-      etaMinutes: estimatedPrepMinutes,
+      etaMinutes: etaMinutes,
       paymentMethod: paymentMethod,
       fulfillmentMethod: _fulfillmentOptions[_fulfillmentIndex].label,
       fulfillmentOptionIndex: _fulfillmentIndex,
@@ -2402,52 +2330,54 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                               ],
                             ],
                           ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Adres dostawy',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                  color: const Color(0xFFF8EEDF),
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                          const SizedBox(height: 10),
-                          SizedBox(
-                            height: 108,
-                            child: ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              physics: const BouncingScrollPhysics(),
-                              itemCount: _addresses.length + 1,
-                              separatorBuilder: (_, __) =>
-                                  const SizedBox(width: 10),
-                              itemBuilder: (context, index) {
-                                if (index == _addresses.length) {
-                                  return Center(
-                                    child: _AddAddressTile(
-                                      onTap: _showAddAddressDialog,
+                          if (_usesDeliveryBuffer()) ...[
+                            const SizedBox(height: 16),
+                            Text(
+                              'Adres dostawy',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFFF8EEDF),
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: 10),
+                            SizedBox(
+                              height: 108,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                physics: const BouncingScrollPhysics(),
+                                itemCount: _addresses.length + 1,
+                                separatorBuilder: (_, __) =>
+                                    const SizedBox(width: 10),
+                                itemBuilder: (context, index) {
+                                  if (index == _addresses.length) {
+                                    return Center(
+                                      child: _AddAddressTile(
+                                        onTap: _showAddAddressDialog,
+                                      ),
+                                    );
+                                  }
+
+                                  return SizedBox(
+                                    width: 204,
+                                    child: _AddressTile(
+                                      title: _addresses[index].title,
+                                      subtitle: _addresses[index].subtitle,
+                                      eta: _addressEtaLabelForIndex(
+                                        estimatedPrepMinutes,
+                                        index,
+                                      ),
+                                      isSelected: _addressIndex == index,
+                                      onTap: () =>
+                                          setState(() => _addressIndex = index),
                                     ),
                                   );
-                                }
-
-                                return SizedBox(
-                                  width: 204,
-                                  child: _AddressTile(
-                                    title: _addresses[index].title,
-                                    subtitle: _addresses[index].subtitle,
-                                    eta: _addressEtaLabelForIndex(
-                                      estimatedPrepMinutes,
-                                      index,
-                                    ),
-                                    isSelected: _addressIndex == index,
-                                    onTap: () =>
-                                        setState(() => _addressIndex = index),
-                                  ),
-                                );
-                              },
+                                },
+                              ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),
@@ -2532,10 +2462,10 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                                   child: SliderTheme(
                                     data: SliderTheme.of(context).copyWith(
                                       activeTrackColor: const Color(0xFFFFA247),
-                                      inactiveTrackColor: const Color(0x33FFFFFF),
+                                      inactiveTrackColor:
+                                          const Color(0x33FFFFFF),
                                       thumbColor: const Color(0xFFFFA247),
-                                      overlayColor:
-                                          const Color(0x33FFA247),
+                                      overlayColor: const Color(0x33FFA247),
                                     ),
                                     child: Slider(
                                       value: redeemedPoints.toDouble(),
@@ -2545,8 +2475,8 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                                       onChanged: (value) {
                                         setState(() {
                                           _redeemedPoints =
-                                              ((value / 10).round() * 10)
-                                                  .clamp(0, maxRedeemablePoints);
+                                              ((value / 10).round() * 10).clamp(
+                                                  0, maxRedeemablePoints);
                                         });
                                       },
                                     ),
@@ -2556,14 +2486,14 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                                 OutlinedButton(
                                   onPressed: () {
                                     setState(() {
-                                      _redeemedPoints =
-                                          redeemedPoints > 0 ? 0 : maxRedeemablePoints;
+                                      _redeemedPoints = redeemedPoints > 0
+                                          ? 0
+                                          : maxRedeemablePoints;
                                     });
                                   },
                                   style: OutlinedButton.styleFrom(
                                     minimumSize: const Size(72, 44),
-                                    foregroundColor:
-                                        const Color(0xFFF7EEE6),
+                                    foregroundColor: const Color(0xFFF7EEE6),
                                     side: const BorderSide(
                                       color: Color(0x30FFFFFF),
                                     ),
@@ -2967,8 +2897,7 @@ class _PaymentVerificationScreenState
                         const SizedBox(height: 14),
                         if (successfulCheckout != null) ...[
                           FilledButton(
-                            onPressed: () =>
-                                _openTrackingScreen(
+                            onPressed: () => _openTrackingScreen(
                               successfulCheckout,
                               widget.authSession,
                             ),
@@ -3154,6 +3083,17 @@ class _ProductPreviewDialog extends StatelessWidget {
                       fontWeight: FontWeight.w900,
                     ),
                   ),
+                  if (_isFrozenPosition(position)) ...[
+                    const SizedBox(height: 10),
+                    const Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _ProductStateBadge(label: 'MROZONE'),
+                        _ProductStateBadge(label: 'DO ODGRZANIA'),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Text(
                     description,
@@ -3282,6 +3222,17 @@ class _SummaryProductTile extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                 ),
+                if (_isFrozenPosition(entry.position)) ...[
+                  const SizedBox(height: 6),
+                  const Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      _ProductStateBadge(label: 'MROZONE'),
+                      _ProductStateBadge(label: 'DO ODGRZANIA'),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 4),
                 Text(
                   _description(entry.position),
@@ -3402,8 +3353,7 @@ class _CartPersonalizationScreenState
     }
 
     try {
-      final options =
-          await _fetchPersonalizationOptions(widget.entry.position);
+      final options = await _fetchPersonalizationOptions(widget.entry.position);
       if (!mounted) {
         return;
       }
@@ -3657,8 +3607,7 @@ class _CartPersonalizationScreenState
                                   selected: _customization.cutOption ==
                                       _CutOption.whole,
                                   onTap: () => _setCutOption(_CutOption.whole),
-                                  assetPath:
-                                      'assets/images/productWhole.png',
+                                  assetPath: 'assets/images/productWhole.png',
                                   assetScale: 1.64,
                                 ),
                                 _ChoiceItem(
@@ -3668,8 +3617,7 @@ class _CartPersonalizationScreenState
                                       _CutOption.cutInHalf,
                                   onTap: () =>
                                       _setCutOption(_CutOption.cutInHalf),
-                                  assetPath:
-                                      'assets/images/productHalfed.png',
+                                  assetPath: 'assets/images/productHalfed.png',
                                   assetScale: 1.64,
                                 ),
                               ],
@@ -3687,8 +3635,7 @@ class _CartPersonalizationScreenState
                                   onTap: () => _setPackagingOption(
                                     _PackagingOption.paperTray,
                                   ),
-                                  assetPath:
-                                      'assets/images/paperLongPlate.png',
+                                  assetPath: 'assets/images/paperLongPlate.png',
                                   assetScale: 0.91,
                                 ),
                                 _ChoiceItem(
@@ -4501,6 +4448,127 @@ class _AddAddressTile extends StatelessWidget {
   }
 }
 
+class _AddAddressDialog extends StatefulWidget {
+  const _AddAddressDialog();
+
+  @override
+  State<_AddAddressDialog> createState() => _AddAddressDialogState();
+}
+
+class _AddAddressDialogState extends State<_AddAddressDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _streetController = TextEditingController();
+  final _postalController = TextEditingController();
+  final _cityController = TextEditingController(text: 'Warszawa');
+
+  @override
+  void dispose() {
+    _streetController.dispose();
+    _postalController.dispose();
+    _cityController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (_formKey.currentState?.validate() != true) {
+      return;
+    }
+
+    Navigator.of(context).pop((
+      title: _streetController.text.trim(),
+      subtitle:
+          '${_postalController.text.trim()}, ${_cityController.text.trim()}',
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AlertDialog(
+      backgroundColor: const Color(0xFF211917),
+      surfaceTintColor: Colors.transparent,
+      title: Text(
+        'Nowy adres dostawy',
+        style: theme.textTheme.titleLarge?.copyWith(
+          color: const Color(0xFFF8EEE0),
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _streetController,
+                  autofocus: true,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: 'Ulica i numer',
+                    prefixIcon: Icon(Icons.location_on_outlined),
+                  ),
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Podaj ulice i numer.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _postalController,
+                  keyboardType: TextInputType.text,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: 'Kod pocztowy',
+                    prefixIcon: Icon(Icons.local_post_office_outlined),
+                  ),
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Podaj kod pocztowy.';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _cityController,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    labelText: 'Miasto',
+                    prefixIcon: Icon(Icons.location_city_outlined),
+                  ),
+                  validator: (value) {
+                    if ((value ?? '').trim().isEmpty) {
+                      return 'Podaj miasto.';
+                    }
+                    return null;
+                  },
+                  onFieldSubmitted: (_) => _submit(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Anuluj'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: const Text('Dodaj adres'),
+        ),
+      ],
+    );
+  }
+}
+
 class _SummaryMetricPill extends StatelessWidget {
   const _SummaryMetricPill({required this.child});
 
@@ -4690,6 +4758,31 @@ class _TinyBadge extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ProductStateBadge extends StatelessWidget {
+  const _ProductStateBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A231D),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x33AEE6FF)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: const Color(0xFFBEEAFF),
+              fontWeight: FontWeight.w800,
+            ),
       ),
     );
   }
@@ -5251,7 +5344,8 @@ const _knownPersonalizationOptions = <_PersonalizationOption>[
   ),
 ];
 
-final Map<String, _PersonalizationOption> _knownPersonalizationOptionsByLabel = {
+final Map<String, _PersonalizationOption> _knownPersonalizationOptionsByLabel =
+    {
   for (final option in _knownPersonalizationOptions)
     option.label.trim().toLowerCase(): option,
 };
@@ -5259,19 +5353,20 @@ final Map<String, _PersonalizationOption> _knownPersonalizationOptionsByLabel = 
 Future<List<_PersonalizationOption>> _fetchPersonalizationOptions(
   Map<String, dynamic> position,
 ) async {
+  if (_isFrozenPosition(position)) {
+    return const <_PersonalizationOption>[];
+  }
   final positionId = _positionId(position);
   if (positionId == null) {
     return const <_PersonalizationOption>[];
   }
 
-  final response = await http
-      .get(
-        Uri.parse('${AppConfig.apiBaseUrl}/position/$positionId/addons'),
-        headers: const {
-          'Accept': 'application/json',
-        },
-      )
-      .timeout(const Duration(seconds: 10));
+  final response = await http.get(
+    Uri.parse('${AppConfig.apiBaseUrl}/position/$positionId/addons'),
+    headers: const {
+      'Accept': 'application/json',
+    },
+  ).timeout(const Duration(seconds: 10));
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
     throw Exception(
@@ -5324,7 +5419,9 @@ String? _resolvePersonalizationAssetPath(String? rawValue) {
   if (value == null || value.isEmpty) {
     return null;
   }
-  return _isBundledAssetPhoto(value) ? _normalizeBundledAssetPhoto(value) : value;
+  return _isBundledAssetPhoto(value)
+      ? _normalizeBundledAssetPhoto(value)
+      : value;
 }
 
 List<Map<String, dynamic>> _rotatedTake(
@@ -5377,7 +5474,8 @@ List<_DashboardCategory> _buildDashboardCategories(
           startColor: definition.$4,
           endColor: definition.$5,
           items: positions
-              .where((position) => _categoryKeyForPosition(position) == definition.$1)
+              .where((position) =>
+                  _categoryKeyForPosition(position) == definition.$1)
               .toList(growable: false),
         ),
       )
@@ -5488,7 +5586,7 @@ String? _deriveDrinkAssetPath(Map<String, dynamic> item) {
     return null;
   }
 
-  return 'assets/images/${brandSlug}${volumeSlug}.png';
+  return 'assets/images/$brandSlug$volumeSlug.png';
 }
 
 String _slugifyDrinkName(String value) {
@@ -5660,8 +5758,8 @@ List<String> _personalizationEmojiBadges(_CartCustomization customization) {
     ..sort((first, second) => first.key.compareTo(second.key));
   chips.addAll(
     entries.map((entry) {
-      final emoji =
-          customization.extraEmojis[entry.key] ?? _fallbackExtraEmoji(entry.key);
+      final emoji = customization.extraEmojis[entry.key] ??
+          _fallbackExtraEmoji(entry.key);
       return entry.value == 1 ? emoji : '$emoji x${entry.value}';
     }),
   );
@@ -5694,9 +5792,7 @@ List<String> _extrasChanges(_CartCustomization customization) {
     final sign = delta > 0 ? '+' : '-';
     final absoluteDelta = delta.abs();
     changes.add(
-      absoluteDelta == 1
-          ? '$sign$label'
-          : '$sign$label x$absoluteDelta',
+      absoluteDelta == 1 ? '$sign$label' : '$sign$label x$absoluteDelta',
     );
   }
   return changes;
@@ -5759,10 +5855,25 @@ String _packagingOptionBadge(_PackagingOption option) {
 }
 
 bool _supportsZapiekankaServingOptions(Map<String, dynamic> position) {
+  if (_isFrozenPosition(position)) {
+    return false;
+  }
   final positionType =
       position['position_type']?.toString().toLowerCase() ?? '';
   final name = _title(position, 0).toLowerCase();
   return positionType.contains('zapiek') || name.contains('zapiek');
+}
+
+bool _isFrozenPosition(Map<String, dynamic> position) {
+  final positionType =
+      position['position_type']?.toString().trim().toLowerCase() ?? '';
+  final title = _title(position, 0).trim().toLowerCase();
+  final description = _description(position).trim().toLowerCase();
+  final haystack = '$positionType $title $description';
+  return haystack.contains('frozen') ||
+      haystack.contains('mroz') ||
+      haystack.contains('zamroz') ||
+      haystack.contains('odgrzan');
 }
 
 _CartCustomization _initialCustomizationFor(Map<String, dynamic> position) {

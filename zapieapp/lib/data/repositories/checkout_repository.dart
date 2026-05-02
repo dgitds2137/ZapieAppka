@@ -52,7 +52,8 @@ class HttpCheckoutRepository implements CheckoutRepository {
   CheckoutVerificationResponse? _cachedActiveCheckout;
 
   @override
-  CheckoutVerificationResponse? get cachedActiveCheckout => _cachedActiveCheckout;
+  CheckoutVerificationResponse? get cachedActiveCheckout =>
+      _cachedActiveCheckout;
 
   @override
   void rememberActiveCheckout(CheckoutVerificationResponse? checkout) {
@@ -75,12 +76,14 @@ class HttpCheckoutRepository implements CheckoutRepository {
         .timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Backend zwrocil ${response.statusCode}: ${response.body}');
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
     }
 
     final decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {
-      throw Exception('Nieoczekiwany format odpowiedzi z /checkout/verification.');
+      throw Exception(
+          'Nieoczekiwany format odpowiedzi z /checkout/verification.');
     }
 
     final checkout = CheckoutVerificationResponse.fromJson(decoded);
@@ -101,19 +104,18 @@ class HttpCheckoutRepository implements CheckoutRepository {
       queryParameters['email'] = email;
     }
 
-    final response = await _client
-        .get(
-          Uri.parse('$_apiBaseUrl/checkout/active').replace(
-            queryParameters: queryParameters.isEmpty ? null : queryParameters,
-          ),
-          headers: const {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(const Duration(seconds: 10));
+    final response = await _client.get(
+      Uri.parse('$_apiBaseUrl/checkout/active').replace(
+        queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      ),
+      headers: const {
+        'Accept': 'application/json',
+      },
+    ).timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Backend zwrocil ${response.statusCode}: ${response.body}');
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
     }
 
     if (response.body.trim().isEmpty || response.body.trim() == 'null') {
@@ -147,12 +149,14 @@ class HttpCheckoutRepository implements CheckoutRepository {
         .timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Backend zwrocil ${response.statusCode}: ${response.body}');
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
     }
 
     final decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {
-      throw Exception('Nieoczekiwany format odpowiedzi z /checkout/confirm-receipt.');
+      throw Exception(
+          'Nieoczekiwany format odpowiedzi z /checkout/confirm-receipt.');
     }
 
     final checkout = CheckoutVerificationResponse.fromJson(decoded);
@@ -176,20 +180,19 @@ class HttpCheckoutRepository implements CheckoutRepository {
       queryParameters['email'] = email;
     }
 
-    final response = await _client
-        .get(
-          Uri.parse('$_apiBaseUrl/checkout/orders/$checkoutOrderId/messages')
-              .replace(
-            queryParameters: queryParameters.isEmpty ? null : queryParameters,
-          ),
-          headers: const {
-            'Accept': 'application/json',
-          },
-        )
-        .timeout(const Duration(seconds: 10));
+    final response = await _client.get(
+      Uri.parse('$_apiBaseUrl/checkout/orders/$checkoutOrderId/messages')
+          .replace(
+        queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      ),
+      headers: const {
+        'Accept': 'application/json',
+      },
+    ).timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Backend zwrocil ${response.statusCode}: ${response.body}');
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
     }
 
     final decoded = jsonDecode(response.body);
@@ -225,7 +228,8 @@ class HttpCheckoutRepository implements CheckoutRepository {
         .timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Backend zwrocil ${response.statusCode}: ${response.body}');
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
     }
 
     final decoded = jsonDecode(response.body);
@@ -245,7 +249,8 @@ class HttpCheckoutRepository implements CheckoutRepository {
   }) async {
     final response = await _client
         .post(
-          Uri.parse('$_apiBaseUrl/checkout/orders/$checkoutOrderId/messages/read'),
+          Uri.parse(
+              '$_apiBaseUrl/checkout/orders/$checkoutOrderId/messages/read'),
           headers: const {
             'Accept': 'application/json',
             'Content-Type': 'application/json',
@@ -255,7 +260,8 @@ class HttpCheckoutRepository implements CheckoutRepository {
         .timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception('Backend zwrocil ${response.statusCode}: ${response.body}');
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
     }
   }
 }
