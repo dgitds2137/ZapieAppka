@@ -81,7 +81,7 @@ BEGIN
     SET role = CASE
         WHEN role IS NULL OR LTRIM(RTRIM(role)) = N'' THEN N'user'
         WHEN LOWER(LTRIM(RTRIM(role))) = N'client' THEN N'user'
-        WHEN LOWER(LTRIM(RTRIM(role))) IN (N'user', N'employee', N'admin')
+        WHEN LOWER(LTRIM(RTRIM(role))) IN (N'user', N'employee', N'driver', N'admin')
             THEN LOWER(LTRIM(RTRIM(role)))
         ELSE N'user'
     END;
@@ -115,6 +115,6 @@ IF OBJECT_ID(N'dbo.Users', N'U') IS NOT NULL
 BEGIN
     ALTER TABLE dbo.Users
         ADD CONSTRAINT CK_Users_role
-            CHECK (role IN (N'user', N'employee', N'admin'));
+            CHECK (role IN (N'user', N'employee', N'driver', N'admin'));
 END;
 GO

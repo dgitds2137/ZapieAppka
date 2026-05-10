@@ -7,6 +7,7 @@ import '../../core/config/app_config.dart';
 import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
 import '../../router/app_router.dart';
+import 'social_auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -23,6 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
+  final SocialAuthService _socialAuthService = const SocialAuthService();
 
   bool loading = false;
   bool obscurePassword = true;
@@ -82,7 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return _LoginResult.failure(message);
     } catch (_) {
       return const _LoginResult.failure(
-          'Brak polaczenia z backendem. Sprawdz czy FastAPI dziala pod ${AppConfig.apiBaseUrl}.',
+        'Brak polaczenia z backendem. Sprawdz czy FastAPI dziala pod ${AppConfig.apiBaseUrl}.',
       );
     }
   }
@@ -121,16 +123,48 @@ class _LoginScreenState extends State<LoginScreen> {
       jwt: result.jwt,
       sessionToken: result.sessionToken,
       role: result.role,
+      authProvider: 'password',
       loyaltyPoints: result.loyaltyPoints ?? 0,
     );
 
-    await SessionPersistence.saveAuthSession(authSession);
+    await SessionPersistence.saveAuthSession(
+      authSession,
+      lifetime: Duration(days: AppConfig.persistedLoginDays),
+    );
+
+    if (!mounted) {
+      return;
+    }
 
     Navigator.pushReplacementNamed(
       context,
       AppRoutes.dashboard,
       arguments: authSession.toRouteArgs(),
     );
+  }
+
+  Future<void> _startSocialLogin(SocialAuthProvider provider) async {
+    if (loading) {
+      return;
+    }
+
+    try {
+      await _socialAuthService.authenticate(provider);
+    } on SocialAuthUnavailableException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    }
   }
 
   void fillDemoCredentials() {
@@ -146,6 +180,11 @@ class _LoginScreenState extends State<LoginScreen> {
   void fillEmployeeCredentials() {
     emailController.text = 'employee@zapieapp.pl';
     passwordController.text = 'Employee123!';
+  }
+
+  void fillDriverCredentials() {
+    emailController.text = 'driver@zapieapp.pl';
+    passwordController.text = 'Driver123!';
   }
 
   @override
@@ -277,6 +316,70 @@ class _LoginScreenState extends State<LoginScreen> {
                                 loading ? 'Logowanie...' : 'Zaloguj sie',
                               ),
                             ),
+                            const SizedBox(height: 18),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Divider(
+                                    color: Colors.white.withValues(alpha: 0.18),
+                                  ),
+                                ),
+                                Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 10),
+                                  child: Text(
+                                    'lub',
+                                    style:
+                                        theme.textTheme.labelMedium?.copyWith(
+                                      color: const Color(0xFFD6C4B8),
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  child: Divider(
+                                    color: Colors.white.withValues(alpha: 0.18),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            OutlinedButton.icon(
+                              onPressed: loading
+                                  ? null
+                                  : () => _startSocialLogin(
+                                        SocialAuthProvider.google,
+                                      ),
+                              icon: const Icon(Icons.account_circle_outlined),
+                              label: Text(
+                                AppConfig.googleAuthConfigured
+                                    ? 'Kontynuuj z Google'
+                                    : 'Google',
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: loading
+                                  ? null
+                                  : () => _startSocialLogin(
+                                        SocialAuthProvider.facebook,
+                                      ),
+                              icon: const Icon(Icons.facebook_outlined),
+                              label: Text(
+                                AppConfig.facebookAuthConfigured
+                                    ? 'Kontynuuj z Facebook'
+                                    : 'Facebook',
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Sesja logowania bedzie zapamietana na tym urzadzeniu przez okolo ${AppConfig.persistedLoginDays} dni.',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFFD6C4B8),
+                                height: 1.35,
+                              ),
+                            ),
                             const SizedBox(height: 12),
                             OutlinedButton(
                               onPressed: loading ? null : fillDemoCredentials,
@@ -292,6 +395,11 @@ class _LoginScreenState extends State<LoginScreen> {
                               onPressed:
                                   loading ? null : fillEmployeeCredentials,
                               child: const Text('Wypelnij konto pracownika'),
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton(
+                              onPressed: loading ? null : fillDriverCredentials,
+                              child: const Text('Wypelnij konto kierowcy'),
                             ),
                             const SizedBox(height: 16),
                             Text(
@@ -312,6 +420,14 @@ class _LoginScreenState extends State<LoginScreen> {
                             const SizedBox(height: 6),
                             Text(
                               'Pracownik: employee@zapieapp.pl / Employee123!',
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: const Color(0xFFD6C4B8),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Kierowca: driver@zapieapp.pl / Driver123!',
                               textAlign: TextAlign.center,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: const Color(0xFFD6C4B8),

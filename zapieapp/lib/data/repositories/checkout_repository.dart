@@ -19,6 +19,13 @@ abstract class CheckoutRepository {
     String? email,
   });
 
+  Future<CheckoutHistoryPage> fetchCheckoutHistory({
+    String? sessionToken,
+    String? email,
+    int page = 1,
+    int pageSize = 10,
+  });
+
   Future<CheckoutVerificationResponse> confirmReceipt(
     CheckoutReceiptConfirmationRequest request,
   );
@@ -131,6 +138,45 @@ class HttpCheckoutRepository implements CheckoutRepository {
     final checkout = CheckoutVerificationResponse.fromJson(decoded);
     rememberActiveCheckout(checkout);
     return checkout;
+  }
+
+  @override
+  Future<CheckoutHistoryPage> fetchCheckoutHistory({
+    String? sessionToken,
+    String? email,
+    int page = 1,
+    int pageSize = 10,
+  }) async {
+    final queryParameters = <String, String>{};
+    if (sessionToken != null && sessionToken.isNotEmpty) {
+      queryParameters['session_token'] = sessionToken;
+    }
+    if (email != null && email.isNotEmpty) {
+      queryParameters['email'] = email;
+    }
+    queryParameters['page'] = page.toString();
+    queryParameters['page_size'] = pageSize.toString();
+
+    final response = await _client.get(
+      Uri.parse('$_apiBaseUrl/checkout/history').replace(
+        queryParameters: queryParameters.isEmpty ? null : queryParameters,
+      ),
+      headers: const {
+        'Accept': 'application/json',
+      },
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Nieoczekiwany format odpowiedzi z /checkout/history.');
+    }
+
+    return CheckoutHistoryPage.fromJson(decoded);
   }
 
   @override

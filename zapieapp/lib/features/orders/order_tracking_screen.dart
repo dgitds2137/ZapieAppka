@@ -16,11 +16,13 @@ class OrderTrackingScreen extends StatefulWidget {
     required this.checkout,
     required this.authSession,
     required this.checkoutRepository,
+    this.isHistoryView = false,
   });
 
   final CheckoutVerificationResponse checkout;
   final AuthSession authSession;
   final CheckoutRepository checkoutRepository;
+  final bool isHistoryView;
 
   @override
   State<OrderTrackingScreen> createState() => _OrderTrackingScreenState();
@@ -31,17 +33,53 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
   static const _backgroundAsset =
       'assets/images/background_big_ingredients_darker.png';
 
-  static const _stages = <String>[
+  static const _deliveryStages = <String>[
     'Potwierdzone',
     'Przyjete do realizacji',
     'W piecu',
-    'W drodze',
+    'Gotowe do wysylki',
+    'W dostawie',
   ];
-  static const _stageImages = <String>[
+  static const _deliveryStageImages = <String>[
     'assets/images/confirmed.png',
     'assets/images/orderReceived.png',
     'assets/images/inOven.png',
+    'assets/images/paperBox.png',
     'assets/images/onTheWay.png',
+  ];
+  static const _pickupStages = <String>[
+    'Potwierdzone',
+    'Przyjete do realizacji',
+    'W piecu',
+    'Gotowe',
+  ];
+  static const _pickupStageImages = <String>[
+    'assets/images/confirmed.png',
+    'assets/images/orderReceived.png',
+    'assets/images/inOven.png',
+    'assets/images/paperBox.png',
+  ];
+  static const _deliveryStagesNoOven = <String>[
+    'Potwierdzone',
+    'Przyjete do realizacji',
+    'Gotowe do wysylki',
+    'W dostawie',
+  ];
+  static const _deliveryStageImagesNoOven = <String>[
+    'assets/images/confirmed.png',
+    'assets/images/orderReceived.png',
+    'assets/images/paperBox.png',
+    'assets/images/onTheWay.png',
+  ];
+  static const _pickupStagesNoOven = <String>[
+    'Potwierdzone',
+    'Przyjete do realizacji',
+    'Gotowe',
+  ];
+  static const _pickupStageImagesNoOven = <String>[
+    'assets/images/confirmed.png',
+    'assets/images/orderReceived.png',
+    'assets/images/paperBox.png',
   ];
 
   late final AnimationController _controller;
@@ -180,13 +218,77 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     );
   }
 
+  bool _isDeliveryCheckout(CheckoutVerificationResponse checkout) {
+    final fulfillmentMethod =
+        checkout.receivedOrder.fulfillmentMethod.trim().toLowerCase();
+    return fulfillmentMethod == 'dostawa' || fulfillmentMethod == 'delivery';
+  }
+
+  bool _supportsOvenStageForCheckout(CheckoutVerificationResponse checkout) {
+    if (checkout.receivedOrder.items.isEmpty) {
+      return true;
+    }
+
+    return checkout.receivedOrder.items.any((item) {
+      final signature =
+          '${item.name.toLowerCase()} ${(item.description ?? '').toLowerCase()}';
+      const noOvenKeywords = <String>[
+        'mroz',
+        'frozen',
+        'odgrzan',
+        'hermetycz',
+        'lod',
+        'ice cream',
+        'gelato',
+        'cola',
+        'sprite',
+        'fanta',
+        'pepsi',
+        'napoj',
+        'woda',
+        'sok',
+        'kawa',
+        'herbata',
+      ];
+      return !noOvenKeywords.any(signature.contains);
+    });
+  }
+
+  List<String> _stageLabelsForCheckout(CheckoutVerificationResponse checkout) {
+    final isDelivery = _isDeliveryCheckout(checkout);
+    final supportsOven = _supportsOvenStageForCheckout(checkout);
+    if (isDelivery) {
+      return supportsOven ? _deliveryStages : _deliveryStagesNoOven;
+    }
+    return supportsOven ? _pickupStages : _pickupStagesNoOven;
+  }
+
+  List<String> _stageImagesForCheckout(CheckoutVerificationResponse checkout) {
+    final isDelivery = _isDeliveryCheckout(checkout);
+    final supportsOven = _supportsOvenStageForCheckout(checkout);
+    if (isDelivery) {
+      return supportsOven ? _deliveryStageImages : _deliveryStageImagesNoOven;
+    }
+    return supportsOven ? _pickupStageImages : _pickupStageImagesNoOven;
+  }
+
   int _activeStageIndexForCheckout(CheckoutVerificationResponse checkout) {
     final processingStatus = checkout.processingStatus.trim().toLowerCase();
     final verificationStage = checkout.verificationStage.trim().toLowerCase();
     final lifecycleStatus = checkout.status.trim().toLowerCase();
+    final isDelivery = _isDeliveryCheckout(checkout);
+    final supportsOven = _supportsOvenStageForCheckout(checkout);
 
-    if (verificationStage == 'in_oven' || verificationStage == 'oven') {
+    if (supportsOven &&
+        (verificationStage == 'in_oven' || verificationStage == 'oven')) {
       return 2;
+    }
+
+    if (verificationStage == 'ready_for_delivery') {
+      if (isDelivery) {
+        return supportsOven ? 3 : 2;
+      }
+      return supportsOven ? 2 : 2;
     }
 
     if ({
@@ -198,7 +300,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
           'completed_by_admin',
         }.contains(verificationStage) ||
         lifecycleStatus == 'completed') {
-      return 3;
+      if (isDelivery) {
+        return supportsOven ? 4 : 3;
+      }
+      return supportsOven ? 3 : 2;
     }
 
     if (processingStatus == 'assigned') {
@@ -209,37 +314,60 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
   }
 
   double _progressValueForCheckout(CheckoutVerificationResponse checkout) {
-    if (_stages.length <= 1) {
+    final labels = _stageLabelsForCheckout(checkout);
+    if (labels.length <= 1) {
       return 1;
     }
-    return _activeStageIndexForCheckout(checkout) / (_stages.length - 1);
+    return _activeStageIndexForCheckout(checkout) / (labels.length - 1);
   }
 
   String _trackingHeadlineForCheckout(CheckoutVerificationResponse checkout) {
+    final isDelivery = _isDeliveryCheckout(checkout);
+    final supportsOven = _supportsOvenStageForCheckout(checkout);
     switch (_activeStageIndexForCheckout(checkout)) {
       case 0:
         return 'Zamowienie czeka na podjecie';
       case 1:
         return 'Kuchnia przejela zamowienie';
       case 2:
-        return 'Zamowienie jest w piecu';
+        if (supportsOven) {
+          return 'Zamowienie jest w piecu';
+        }
+        return isDelivery
+            ? 'Zamowienie jest gotowe do wysylki'
+            : 'Zamowienie jest gotowe';
       case 3:
-        return 'Zamowienie jest w drodze';
+        return isDelivery
+            ? 'Zamowienie jest w dostawie'
+            : 'Zamowienie jest gotowe';
+      case 4:
+        return 'Zamowienie jest w dostawie';
       default:
         return 'Trwa realizacja zamowienia';
     }
   }
 
   String _trackingMessageForCheckout(CheckoutVerificationResponse checkout) {
+    final isDelivery = _isDeliveryCheckout(checkout);
+    final supportsOven = _supportsOvenStageForCheckout(checkout);
     switch (_activeStageIndexForCheckout(checkout)) {
       case 0:
         return 'Etap "Przyjete do realizacji" wlaczy sie dopiero po kliknieciu "Podejmij" przez administratora lub pracownika.';
       case 1:
         return 'Zamowienie zostalo podjete do realizacji przez obsluge.';
       case 2:
-        return 'Produkt jest aktualnie przygotowywany w piecu.';
+        if (supportsOven) {
+          return 'Produkt jest aktualnie przygotowywany w piecu.';
+        }
+        return isDelivery
+            ? 'Zamowienie jest spakowane i czeka na podjecie przez kierowce.'
+            : 'Zamowienie jest gotowe do odbioru.';
       case 3:
-        return 'Zamowienie opuscilo kuchnie i jest w drodze do klienta.';
+        return isDelivery
+            ? 'Zamowienie zostalo podjete przez kierowce i jest w drodze do klienta.'
+            : 'Zamowienie jest gotowe do odbioru.';
+      case 4:
+        return 'Zamowienie zostalo podjete przez kierowce i jest w drodze do klienta.';
       default:
         return 'Status realizacji jest aktualizowany na podstawie backendu.';
     }
@@ -264,7 +392,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
               Row(
                 children: [
                   Text(
-                    'Trwajace zamowienie',
+                    widget.isHistoryView
+                        ? 'Szczegoly zamowienia'
+                        : 'Trwajace zamowienie',
                     style: theme.textTheme.headlineSmall?.copyWith(
                       color: const Color(0xFFF9EEE2),
                       fontWeight: FontWeight.w900,
@@ -272,9 +402,13 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                   ),
                   const Spacer(),
                   _TopPill(
-                    icon: Icons.bolt_rounded,
-                    label: 'LIVE',
-                    color: const Color(0xFF3BC977),
+                    icon: widget.isHistoryView
+                        ? Icons.history_rounded
+                        : Icons.bolt_rounded,
+                    label: widget.isHistoryView ? 'ARCHIWUM' : 'LIVE',
+                    color: widget.isHistoryView
+                        ? const Color(0xFFE98B38)
+                        : const Color(0xFF3BC977),
                   ),
                 ],
               ),
@@ -393,8 +527,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                     AnimatedBuilder(
                       animation: _controller,
                       builder: (context, _) => _StageTimeline(
-                        labels: _stages,
-                        imagePaths: _stageImages,
+                        labels: _stageLabelsForCheckout(order),
+                        imagePaths: _stageImagesForCheckout(order),
                         progress: _controller.value,
                         activeStageIndex: _activeStageIndexForCheckout(order),
                       ),
@@ -635,8 +769,10 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
             onPressed: () {
               final routeArgs = <String, dynamic>{
                 ...widget.authSession.toRouteArgs(),
-                'activeCheckout': _currentCheckout.toJson(),
               };
+              if (!widget.isHistoryView) {
+                routeArgs['activeCheckout'] = _currentCheckout.toJson();
+              }
               Navigator.pushNamedAndRemoveUntil(
                 context,
                 AppRoutes.dashboard,

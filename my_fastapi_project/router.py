@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Form, HTTPException
 from sqlalchemy.orm import Session
-import os
+import jwt
+from config import get_settings
 from models import (
     UserSchema,
     UserCreate,
@@ -16,6 +17,7 @@ from models import (
     OrderUpdate,
     OrderItemUpdate,
     CheckoutVerificationIn,
+    CheckoutHistoryPageOut,
     CheckoutVerificationOut,
     CheckoutReceiptConfirmationIn,
     CheckoutOrderMessageCreateIn,
@@ -23,10 +25,12 @@ from models import (
     CheckoutOrderMessagesReadIn,
     CheckoutOrderMessagesReadOut,
     AdminCatalogAddonOut,
+    AdminCatalogDeliveryMinimumUpdateIn,
     AdminCatalogItemUpdateIn,
     AdminCatalogOut,
     AdminCatalogPositionOut,
     AdminDashboardOut,
+    AdminClosedOrdersPageOut,
     AdminDashboardOrderOut,
     AdminOrderStatusUpdateIn,
     PrepTimeSettingOut,
@@ -36,7 +40,7 @@ from models import (
 import base64
 from datetime import datetime, timedelta
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-local-jwt-secret")
+SECRET_KEY = get_settings().jwt_secret_key
 ALGORITHM = "HS256"
 
 def routes(OrderService, KitchenService, MenuService, UserService, CheckoutService, get_db):
@@ -75,17 +79,23 @@ def routes(OrderService, KitchenService, MenuService, UserService, CheckoutServi
     
     @r.post("/google-auth")
     def google_auth(id_token: str):
-        # tu weryfikujesz id_token w Google
-        # np. requests.get("https://oauth2.googleapis.com/tokeninfo?id_token=...")
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Google auth nie jest jeszcze skonfigurowany po stronie backendu. "
+                "Docelowo endpoint ma weryfikowac token z providera i zwracac standardowa sesje aplikacji."
+            ),
+        )
 
-        # przykładowe dane użytkownika
-        user = User(id=1, email="test@example.com", name="Daniel")
-
-        # generowanie JWT
-        payload = {"sub": user.id, "email": user.email, "name": user.name}
-        token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
-
-        return {"jwt": token, "user": user}
+    @r.post("/facebook-auth")
+    def facebook_auth(access_token: str):
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                "Facebook auth nie jest jeszcze skonfigurowany po stronie backendu. "
+                "Docelowo endpoint ma weryfikowac token z providera i zwracac standardowa sesje aplikacji."
+            ),
+        )
 
     @r.post("/register")
     def register(email: str = Form(...), 
@@ -228,6 +238,21 @@ def routes(OrderService, KitchenService, MenuService, UserService, CheckoutServi
             user_email=email,
         )
 
+    @r.get("/checkout/history", response_model=CheckoutHistoryPageOut)
+    def get_checkout_history(
+        session_token: str | None = None,
+        email: str | None = None,
+        page: int = 1,
+        page_size: int = 10,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).get_checkout_history(
+            session_token=session_token,
+            user_email=email,
+            page=page,
+            page_size=page_size,
+        )
+
     @r.get("/checkout/delivery-estimate")
     def get_delivery_estimate(db: Session = Depends(get_db)):
         return CheckoutService(db).get_delivery_estimate()
@@ -294,6 +319,23 @@ def routes(OrderService, KitchenService, MenuService, UserService, CheckoutServi
             user_email=email,
         )
 
+    @r.get("/admin/orders/history", response_model=AdminClosedOrdersPageOut)
+    def get_admin_closed_orders_history(
+        session_token: str | None = None,
+        email: str | None = None,
+        page: int = 1,
+        page_size: int = 15,
+        today_only: bool = False,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).get_admin_closed_orders_history(
+            session_token=session_token,
+            user_email=email,
+            page=page,
+            page_size=page_size,
+            today_only=today_only,
+        )
+
     @r.get("/admin/catalog", response_model=AdminCatalogOut)
     def get_admin_catalog(
         session_token: str | None = None,
@@ -330,6 +372,18 @@ def routes(OrderService, KitchenService, MenuService, UserService, CheckoutServi
     ):
         return CheckoutService(db).update_admin_catalog_addon(
             addon_id=addon_id,
+            payload=payload,
+        )
+
+    @r.patch(
+        "/admin/catalog/delivery-minimum",
+        response_model=AdminCatalogOut,
+    )
+    def update_admin_delivery_minimum(
+        payload: AdminCatalogDeliveryMinimumUpdateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).update_delivery_minimum_amount(
             payload=payload,
         )
 

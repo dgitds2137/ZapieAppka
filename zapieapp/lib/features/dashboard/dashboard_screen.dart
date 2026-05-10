@@ -11,6 +11,7 @@ import '../../data/models/auth_session.dart';
 import '../../data/models/checkout_verification.dart';
 import '../../data/repositories/checkout_repository.dart';
 import '../admin/admin_dashboard_screen.dart';
+import '../orders/order_list_screen.dart';
 import '../orders/order_tracking_screen.dart';
 import '../../router/app_router.dart';
 
@@ -32,11 +33,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late Future<List<Map<String, dynamic>>> _positionsFuture;
   AuthSession _authSession = const AuthSession();
   String? _authSessionKey;
-  Map<String, dynamic>? _selectedPosition;
   final List<_CartEntry> _cart = [];
   CheckoutVerificationResponse? _activeCheckout;
   bool _isLoadingActiveCheckout = false;
-  int _nextCartEntryId = 1;
   int _activeFooterIndex = 1;
   int _loyaltyPoints = 0;
 
@@ -337,11 +336,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _selectPosition(Map<String, dynamic> position) {
-    setState(() {
-      _selectedPosition = position;
-    });
+  Future<void> _openProfileOrders() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => OrderListScreen(
+          authSession: _authSession,
+          checkoutRepository: _checkoutRepository,
+          activeCheckout: _activeCheckout,
+        ),
+      ),
+    );
 
+    if (!mounted) {
+      return;
+    }
+    _loadActiveCheckout();
+    _loadLoyaltyPoints();
+  }
+
+  void _selectPosition(Map<String, dynamic> position) {
     showDialog<void>(
       context: context,
       barrierColor: const Color(0xC4000000),
@@ -350,30 +363,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onClose: () => Navigator.of(dialogContext).pop(),
       ),
     );
-  }
-
-  void _addToCart(Map<String, dynamic> position) {
-    if (_activeCheckout != null && _isCheckoutStillActive(_activeCheckout)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Masz aktywne zamowienie. Poczekaj na jego zakonczenie, zanim dodasz kolejne pozycje.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _selectedPosition = position;
-      _cart.add(
-        _CartEntry(
-          id: _nextCartEntryId++,
-          position: position,
-          customization: _initialCustomizationFor(position),
-        ),
-      );
-    });
   }
 
   void _removeFromCart(int cartEntryId) {
@@ -387,9 +376,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _cart
         ..clear()
         ..addAll(entries);
-      _nextCartEntryId = _cart.fold<int>(
-              0, (maxId, entry) => entry.id > maxId ? entry.id : maxId) +
-          1;
     });
   }
 
@@ -428,31 +414,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Map<String, dynamic>? _resolveSelected(List<Map<String, dynamic>> positions) {
-    if (positions.isEmpty) return null;
-    if (_selectedPosition == null) return positions.first;
-    for (final item in positions) {
-      if (_samePosition(item, _selectedPosition)) return item;
-    }
-    return positions.first;
-  }
-
-  List<({String title, List<Map<String, dynamic>> items})> _sections(
-      List<Map<String, dynamic>> positions) {
-    if (positions.isEmpty) return const [];
-    return [
-      (title: 'Popularne', items: _rotatedTake(positions, 0)),
-      (
-        title: 'Ostatnio zamawiane',
-        items: _rotatedTake(positions.reversed.toList(), 0)
-      ),
-      (
-        title: 'Ulubione pozycje',
-        items: _rotatedTake(positions, positions.length > 2 ? 1 : 0)
-      ),
-    ];
-  }
-
   List<_CartEntry> _resolvedCartEntries(List<Map<String, dynamic>> positions) {
     return _cart.map((entry) {
       for (final position in positions) {
@@ -464,26 +425,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }).toList(growable: false);
   }
 
-  int _cartQuantityFor(
-    Map<String, dynamic> position,
-    List<_CartEntry> cartEntries,
-  ) {
-    if (_activeCheckout != null && _isCheckoutStillActive(_activeCheckout)) {
-      return 0;
-    }
-
-    var count = 0;
-    for (final entry in cartEntries) {
-      if (_samePosition(entry.position, position)) {
-        count++;
-      }
-    }
-    return count;
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_authSession.isAdmin || _authSession.isEmployee) {
+    if (_authSession.isStaff) {
       return AdminDashboardScreen(authSession: _authSession);
     }
 
@@ -491,7 +435,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       future: _positionsFuture,
       builder: (context, snapshot) {
         final positions = snapshot.data ?? const <Map<String, dynamic>>[];
-        final selected = _resolveSelected(positions);
         final cartEntries = _resolvedCartEntries(positions);
         final dashboardCategories = _buildDashboardCategories(positions);
         final hasBottomModule = _activeCheckout != null ||
@@ -515,10 +458,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icons.fastfood_outlined,
             title: 'Menu jest puste',
             message:
-                'Gdy backend zwroci dane z /positions, dashboard automatycznie uzupelni sekcje i koszyk.',
+                'Gdy backend zwroci dane z /positions, dashboard automatycznie uzupelni kategorie i koszyk.',
           );
         } else {
-          final sections = _sections(positions);
           body = SafeArea(
             bottom: false,
             child: RefreshIndicator(
@@ -526,43 +468,55 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _reload();
                 await _positionsFuture;
               },
-              child: ListView(
-                physics: const BouncingScrollPhysics(
-                    parent: AlwaysScrollableScrollPhysics()),
-                padding: EdgeInsets.fromLTRB(
-                    14, 12, 14, hasBottomModule ? 206 : 110),
-                children: [
-                  _TopBar(
-                    onReload: _reload,
-                    onLogout: () async {
-                      _checkoutRepository.rememberActiveCheckout(null);
-                      await SessionPersistence.clearAll();
-                      if (!context.mounted) {
-                        return;
-                      }
-                      Navigator.pushReplacementNamed(context, AppRoutes.login);
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  for (final section in sections) ...[
-                    _SectionBlock(
-                      title: section.title,
-                      items: section.items,
-                      selected: selected,
-                      cartQuantityFor: (item) =>
-                          _cartQuantityFor(item, cartEntries),
-                      onSelect: _selectPosition,
-                      onAddToCart: _addToCart,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final horizontalPadding =
+                      constraints.maxWidth >= 720 ? 18.0 : 14.0;
+                  final crossAxisCount = constraints.maxWidth >= 980 ? 3 : 2;
+                  final childAspectRatio =
+                      constraints.maxWidth >= 980 ? 0.92 : 0.82;
+
+                  return ListView(
+                    physics: const BouncingScrollPhysics(
+                      parent: AlwaysScrollableScrollPhysics(),
                     ),
-                    const SizedBox(height: 16),
-                  ],
-                  _CategoryBlock(
-                    categories: dashboardCategories,
-                    selected: selected,
-                    onCategoryTap: (category) =>
-                        _openCategoryView(category, positions),
-                  ),
-                ],
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPadding,
+                      12,
+                      horizontalPadding,
+                      hasBottomModule ? 206 : 110,
+                    ),
+                    children: [
+                      _TopBar(
+                        onReload: _reload,
+                        onLogout: () async {
+                          _checkoutRepository.rememberActiveCheckout(null);
+                          await SessionPersistence.clearAll();
+                          if (!context.mounted) {
+                            return;
+                          }
+                          Navigator.pushReplacementNamed(
+                            context,
+                            AppRoutes.login,
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      _DashboardHeroCard(
+                        categoryCount: dashboardCategories.length,
+                        productCount: positions.length,
+                      ),
+                      const SizedBox(height: 18),
+                      _CategoryBlock(
+                        categories: dashboardCategories,
+                        crossAxisCount: crossAxisCount,
+                        childAspectRatio: childAspectRatio,
+                        onCategoryTap: (category) =>
+                            _openCategoryView(category, positions),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           );
@@ -585,6 +539,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               setState(() => _activeFooterIndex = index);
               if (label == 'Nagrody') {
                 _showRewardsDialog();
+                return;
+              }
+              if (label == 'Profil') {
+                _openProfileOrders();
                 return;
               }
               ScaffoldMessenger.of(context).showSnackBar(
@@ -658,173 +616,115 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _SectionBlock extends StatelessWidget {
-  const _SectionBlock({
-    required this.title,
-    required this.items,
-    required this.selected,
-    required this.cartQuantityFor,
-    required this.onSelect,
-    required this.onAddToCart,
+class _DashboardHeroCard extends StatelessWidget {
+  const _DashboardHeroCard({
+    required this.categoryCount,
+    required this.productCount,
   });
 
-  final String title;
-  final List<Map<String, dynamic>> items;
-  final Map<String, dynamic>? selected;
-  final int Function(Map<String, dynamic>) cartQuantityFor;
-  final ValueChanged<Map<String, dynamic>> onSelect;
-  final ValueChanged<Map<String, dynamic>> onAddToCart;
+  final int categoryCount;
+  final int productCount;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final cardWidth = MediaQuery.of(context).size.width < 460 ? 182.0 : 206.0;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title,
-            style: theme.textTheme.titleLarge?.copyWith(
-                color: const Color(0xFFF8EEE7), fontWeight: FontWeight.w800)),
-        const SizedBox(height: 10),
-        SizedBox(
-          height: 252,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            physics: const BouncingScrollPhysics(),
-            itemCount: items.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (context, i) => SizedBox(
-              width: cardWidth,
-              child: _MenuCard(
-                position: items[i],
-                index: i,
-                selected: _samePosition(items[i], selected),
-                cartQuantity: cartQuantityFor(items[i]),
-                onTap: () => onSelect(items[i]),
-                onAddToCart: () => onAddToCart(items[i]),
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
+      decoration: BoxDecoration(
+        color: const Color(0xD9161312),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: const Color(0x1BFFFFFF)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x2A000000),
+            blurRadius: 28,
+            offset: Offset(0, 16),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0x1CFFFFFF),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              'Dashboard',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: const Color(0xFFF6E7D9),
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 14),
+          Text(
+            'Wybierz kategorie i wejdz prosto do produktow.',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              color: const Color(0xFFF8EEE7),
+              fontWeight: FontWeight.w900,
+              height: 1.05,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Menu zaczyna sie od kategorii. Mniej szumu na starcie, szybsze wejscie w to, czego faktycznie szukasz.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: const Color(0xD8D3C3B7),
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _HeroMetricPill(
+                icon: Icons.grid_view_rounded,
+                label: '$categoryCount kategorie',
+              ),
+              const SizedBox(width: 10),
+              _HeroMetricPill(
+                icon: Icons.fastfood_rounded,
+                label: '$productCount pozycji',
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _MenuCard extends StatelessWidget {
-  const _MenuCard({
-    required this.position,
-    required this.index,
-    required this.selected,
-    required this.cartQuantity,
-    required this.onTap,
-    required this.onAddToCart,
-  });
+class _HeroMetricPill extends StatelessWidget {
+  const _HeroMetricPill({required this.icon, required this.label});
 
-  final Map<String, dynamic> position;
-  final int index;
-  final bool selected;
-  final int cartQuantity;
-  final VoidCallback onTap;
-  final VoidCallback onAddToCart;
+  final IconData icon;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final title = _title(position, index);
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.all(7),
-          decoration: BoxDecoration(
-            color: const Color(0xE6121111),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-                color: selected
-                    ? const Color(0xFFF08B2D)
-                    : const Color(0x26FFFFFF),
-                width: selected ? 1.4 : 1),
-            boxShadow: selected
-                ? const [
-                    BoxShadow(
-                        color: Color(0x40190B03),
-                        blurRadius: 18,
-                        offset: Offset(0, 10))
-                  ]
-                : null,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                height: 148,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: _PositionImage(
-                            photoUrl: _photo(position), title: title)),
-                    Positioned(
-                      top: 6,
-                      left: 6,
-                      child: _TinyBadge(
-                        icon: Icons.shopping_bag_outlined,
-                        active: cartQuantity > 0,
-                        label: cartQuantity > 0 ? '$cartQuantity' : null,
-                        onTap: onAddToCart,
-                      ),
-                    ),
-                    const Positioned(
-                        top: 6,
-                        right: 6,
-                        child: _TinyBadge(
-                            icon: Icons.favorite_border_rounded,
-                            active: false)),
-                    Positioned(
-                      right: 8,
-                      bottom: 8,
-                      child: _PricePill(label: _priceLabel(position)),
-                    ),
-                  ],
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0x14131110),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x1AFFFFFF)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: const Color(0xFFFFC58B)),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: const Color(0xFFF7EBDD),
+                  fontWeight: FontWeight.w700,
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                      color: const Color(0xFFF7EEE8),
-                      fontWeight: FontWeight.w700,
-                      height: 1.15)),
-              const SizedBox(height: 4),
-              Text(_description(position),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: const Color(0xCCCFBBAE), height: 1.2)),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                      child: Text(_priceLabel(position),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.labelMedium?.copyWith(
-                              color: const Color(0xFFF4D8C6),
-                              fontWeight: FontWeight.w700))),
-                  Text(_kcal(position),
-                      style: theme.textTheme.labelSmall
-                          ?.copyWith(color: const Color(0xFF918076))),
-                ],
-              ),
-            ],
           ),
-        ),
+        ],
       ),
     );
   }
@@ -833,12 +733,14 @@ class _MenuCard extends StatelessWidget {
 class _CategoryBlock extends StatelessWidget {
   const _CategoryBlock({
     required this.categories,
-    required this.selected,
+    required this.crossAxisCount,
+    required this.childAspectRatio,
     required this.onCategoryTap,
   });
 
   final List<_DashboardCategory> categories;
-  final Map<String, dynamic>? selected;
+  final int crossAxisCount;
+  final double childAspectRatio;
   final ValueChanged<_DashboardCategory> onCategoryTap;
 
   @override
@@ -851,28 +753,31 @@ class _CategoryBlock extends StatelessWidget {
         Text('Kategorie',
             style: theme.textTheme.titleLarge?.copyWith(
                 color: const Color(0xFFF8EEE7), fontWeight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        Text(
+          'Przegladaj menu po kategoriach. Produkty sa widoczne dopiero po wejsciu do konkretnej sekcji.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: const Color(0xCCCFBBAE),
+            height: 1.35,
+          ),
+        ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            for (var index = 0; index < categories.length; index++) ...[
-              if (index > 0) const SizedBox(width: 10),
-              Expanded(
-                child: _CategoryTile(
-                  title: categories[index].title,
-                  icon: categories[index].icon,
-                  startColor: categories[index].startColor,
-                  endColor: categories[index].endColor,
-                  selected: selected != null &&
-                      categories[index]
-                          .items
-                          .any((item) => _samePosition(item, selected)),
-                  onTap: categories[index].items.isEmpty
-                      ? null
-                      : () => onCategoryTap(categories[index]),
-                ),
-              ),
-            ],
-          ],
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: categories.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: childAspectRatio,
+          ),
+          itemBuilder: (context, index) => _CategoryTile(
+            category: categories[index],
+            onTap: categories[index].items.isEmpty
+                ? null
+                : () => onCategoryTap(categories[index]),
+          ),
         ),
       ],
     );
@@ -880,65 +785,116 @@ class _CategoryBlock extends StatelessWidget {
 }
 
 class _CategoryTile extends StatelessWidget {
-  const _CategoryTile(
-      {required this.title,
-      required this.icon,
-      required this.startColor,
-      required this.endColor,
-      required this.selected,
-      required this.onTap});
+  const _CategoryTile({
+    required this.category,
+    required this.onTap,
+  });
 
-  final String title;
-  final IconData icon;
-  final Color startColor;
-  final Color endColor;
-  final bool selected;
+  final _DashboardCategory category;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final previewItem = category.items.isEmpty ? null : category.items.first;
+    final previewTitle = category.title;
+    final previewPhoto = previewItem == null ? null : _photo(previewItem);
+    final productCountLabel = category.items.length == 1
+        ? '1 pozycja'
+        : '${category.items.length} pozycji';
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(24),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.fromLTRB(10, 12, 10, 12),
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            gradient: LinearGradient(
-                colors: [startColor, endColor],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-                color: selected
-                    ? const Color(0xFFFBE6D8)
-                    : const Color(0x14FFFFFF)),
+            color: const Color(0xFF151210),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0x20FFFFFF)),
             boxShadow: [
               BoxShadow(
-                  color: endColor.withValues(alpha: 0.35),
-                  blurRadius: selected ? 18 : 12,
-                  offset: const Offset(0, 10))
+                color: category.endColor.withValues(alpha: 0.26),
+                blurRadius: 24,
+                offset: const Offset(0, 14),
+              ),
             ],
           ),
-          child: AspectRatio(
-            aspectRatio: 0.86,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(icon, color: const Color(0xFFFFECDD), size: 34),
-                const Spacer(),
-                Text(title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (previewPhoto != null)
+                _PositionImage(photoUrl: previewPhoto, title: previewTitle),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      category.startColor.withValues(alpha: 0.34),
+                      const Color(0xA8100E0E),
+                      const Color(0xF4151111),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    stops: const [0, 0.48, 1],
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0x2B0E0D0C),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: const Color(0x18FFFFFF)),
+                          ),
+                          child: Text(
+                            productCountLabel,
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: const Color(0xFFF8EEE7),
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    Text(
+                      category.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge?.copyWith(
                         color: const Color(0xFFFFF5EF),
-                        fontWeight: FontWeight.w800,
-                        height: 1.05)),
-              ],
-            ),
+                        fontWeight: FontWeight.w900,
+                        height: 1.02,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _categorySubtitle(category.key),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: const Color(0xFFE6D7CC),
+                        height: 1.28,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1059,6 +1015,8 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
   Widget build(BuildContext context) {
     final category = _selectedCategory;
     final items = category.items;
+    final itemCountLabel =
+        items.length == 1 ? '1 produkt' : '${items.length} produktow';
 
     return Scaffold(
       extendBody: true,
@@ -1079,7 +1037,7 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    'Kategorie',
+                    'Menu',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           color: const Color(0xFFF8EEE7),
                           fontWeight: FontWeight.w900,
@@ -1093,10 +1051,13 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
                 physics: const BouncingScrollPhysics(),
                 child: Row(
                   children: [
+                    _DashboardHomeTab(
+                      onTap: () => Navigator.of(context).pop(),
+                    ),
+                    const SizedBox(width: 8),
                     for (var index = 0;
                         index < widget.categories.length;
                         index++) ...[
-                      if (index > 0) const SizedBox(width: 8),
                       _CategoryViewTab(
                         category: widget.categories[index],
                         selected: widget.categories[index].key ==
@@ -1110,50 +1071,102 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
                                 });
                               },
                       ),
+                      if (index < widget.categories.length - 1)
+                        const SizedBox(width: 8),
                     ],
                   ],
                 ),
               ),
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
                 decoration: BoxDecoration(
                   color: const Color(0xD82B2827),
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(24),
                   border: Border.all(color: const Color(0x1EFFFFFF)),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      category.title,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: const Color(0xFFF8EEE7),
-                            fontWeight: FontWeight.w900,
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  switchInCurve: Curves.easeOutCubic,
+                  switchOutCurve: Curves.easeInCubic,
+                  child: Column(
+                    key: ValueKey<String>(_selectedCategoryKey),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 46,
+                            height: 46,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  category.startColor,
+                                  category.endColor
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(
+                              category.icon,
+                              color: const Color(0xFFFFF0E6),
+                            ),
                           ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (items.isEmpty)
-                      const _StateCard(
-                        icon: Icons.inventory_2_outlined,
-                        title: 'Brak produktow w tej kategorii',
-                        message:
-                            'Gdy backend zwroci pozycje dla tej kategorii, lista pojawi sie tutaj.',
-                      )
-                    else
-                      for (var index = 0; index < items.length; index++) ...[
-                        _CategoryProductRow(
-                          position: items[index],
-                          quantity: _quantityFor(items[index]),
-                          onTap: () => _openProductPreview(items[index]),
-                          onIncrement: () => _addToCart(items[index]),
-                          onDecrement: () => _removeFromCart(items[index]),
-                          locked: widget.hasActiveCheckout,
-                        ),
-                        if (index < items.length - 1)
-                          const SizedBox(height: 10),
-                      ],
-                  ],
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  category.title,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleLarge
+                                      ?.copyWith(
+                                        color: const Color(0xFFF8EEE7),
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '$itemCountLabel • ${_categorySubtitle(category.key)}',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                        color: const Color(0xCCCFBBAE),
+                                      ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      if (items.isEmpty)
+                        const _StateCard(
+                          icon: Icons.inventory_2_outlined,
+                          title: 'Brak produktow w tej kategorii',
+                          message:
+                              'Gdy backend zwroci pozycje dla tej kategorii, lista pojawi sie tutaj.',
+                        )
+                      else
+                        for (var index = 0; index < items.length; index++) ...[
+                          _CategoryProductRow(
+                            position: items[index],
+                            quantity: _quantityFor(items[index]),
+                            onTap: () => _openProductPreview(items[index]),
+                            onIncrement: () => _addToCart(items[index]),
+                            onDecrement: () => _removeFromCart(items[index]),
+                            locked: widget.hasActiveCheckout,
+                          ),
+                          if (index < items.length - 1)
+                            const SizedBox(height: 10),
+                        ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1227,6 +1240,49 @@ class _CategoryViewTab extends StatelessWidget {
                   color: const Color(0xFFFFF4ED),
                   fontWeight: FontWeight.w800,
                 ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardHomeTab extends StatelessWidget {
+  const _DashboardHomeTab({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1B1816),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x20FFFFFF)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.grid_view_rounded,
+                size: 16,
+                color: Color(0xFFF6E7D9),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Dashboard',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: const Color(0xFFFFF4ED),
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+            ],
           ),
         ),
       ),
@@ -2758,6 +2814,15 @@ class _PaymentVerificationScreenState
     );
   }
 
+  String _verificationErrorMessage() {
+    final raw = _verificationError?.toString() ?? 'Nieznany blad.';
+    final detailMatch = RegExp(r'"detail"\s*:\s*"([^"]+)"').firstMatch(raw);
+    if (detailMatch != null) {
+      return detailMatch.group(1) ?? raw;
+    }
+    return raw;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -2867,7 +2932,7 @@ class _PaymentVerificationScreenState
                                       isLoading
                                           ? 'Wysylamy szczegoly zamowienia do backendu i przygotowujemy etap wstepnej weryfikacji.'
                                           : hasError
-                                              ? 'Nie udalo sie wyslac zamowienia do backendu.'
+                                              ? _verificationErrorMessage()
                                               : (successfulCheckout?.message ??
                                                   'Backend przyjal dane do wstepnej weryfikacji.'),
                                       style:
@@ -4711,58 +4776,6 @@ class _IconCircle extends StatelessWidget {
   }
 }
 
-class _TinyBadge extends StatelessWidget {
-  const _TinyBadge({
-    required this.icon,
-    required this.active,
-    this.label,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final bool active;
-  final String? label;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(7),
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 22, minWidth: 22),
-          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
-          decoration: BoxDecoration(
-            color: active ? const Color(0xFFE77A27) : const Color(0x7A0E0D0C),
-            borderRadius: BorderRadius.circular(7),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon,
-                  size: 11,
-                  color: active ? Colors.white : const Color(0xFFF5E6D9)),
-              if (label != null) ...[
-                const SizedBox(width: 3),
-                Text(
-                  label!,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _ProductStateBadge extends StatelessWidget {
   const _ProductStateBadge({required this.label});
 
@@ -5424,13 +5437,6 @@ String? _resolvePersonalizationAssetPath(String? rawValue) {
       : value;
 }
 
-List<Map<String, dynamic>> _rotatedTake(
-    List<Map<String, dynamic>> positions, int offset) {
-  if (positions.isEmpty) return const [];
-  final start = offset % positions.length;
-  return [...positions.skip(start), ...positions.take(start)].take(3).toList();
-}
-
 List<_DashboardCategory> _buildDashboardCategories(
   List<Map<String, dynamic>> positions,
 ) {
@@ -5522,6 +5528,19 @@ String _categoryKeyForPosition(Map<String, dynamic> position) {
   }
 
   return 'dodatki';
+}
+
+String _categorySubtitle(String categoryKey) {
+  switch (categoryKey) {
+    case 'zapiekanki':
+      return 'Klasyczne i mrozone warianty do szybkiego wyboru.';
+    case 'lody':
+      return 'Chlodne pozycje na deser i szybka przerwe.';
+    case 'napoje':
+      return 'Puszki i napoje do kompletu zamowienia.';
+    default:
+      return 'Dodatki, ktore domykaja zestaw.';
+  }
 }
 
 String _title(Map<String, dynamic> item, int fallbackIndex) =>

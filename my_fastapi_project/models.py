@@ -19,6 +19,7 @@ Base = declarative_base()
 
 DEFAULT_USER_ROLE = "user"
 EMPLOYEE_ROLE = "employee"
+DRIVER_ROLE = "driver"
 ADMIN_ROLE = "admin"
 CHECKOUT_ORDER_STATUS_UNASSIGNED = "unassigned"
 CHECKOUT_ORDER_STATUS_ASSIGNED = "assigned"
@@ -92,7 +93,7 @@ class MenuPositionDB(Base):
     name = Column(String(80), nullable=True)
     weight = Column(Integer, nullable=True)
     calories = Column(Integer, nullable=True)
-    price = Column(Numeric(18, 0), nullable=True)
+    price = Column(Numeric(10, 2), nullable=True)
     description = Column(Text, nullable=True)
     photo_url = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
@@ -113,6 +114,17 @@ class ProductPrepTimeSettingDB(Base):
     minutes = Column(Integer, nullable=False, default=15)
     sort_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
+    updated_by_user_id = Column(Integer, ForeignKey("Users.user_id"), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class AppRuntimeSettingDB(Base):
+    __tablename__ = "AppRuntimeSettings"
+
+    setting_id = Column(Integer, primary_key=True, index=True)
+    setting_key = Column(String(80), nullable=False, unique=True, index=True)
+    label = Column(String(160), nullable=False)
+    decimal_value = Column(Numeric(10, 2), nullable=False, default=0)
     updated_by_user_id = Column(Integer, ForeignKey("Users.user_id"), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -445,12 +457,20 @@ class AdminCatalogAddonOut(BaseModel):
 
 
 class AdminCatalogOut(BaseModel):
+    delivery_minimum_amount: float
     positions: list[AdminCatalogPositionOut]
     addons: list[AdminCatalogAddonOut]
 
 
 class AdminCatalogItemUpdateIn(BaseModel):
-    is_active: bool
+    is_active: bool | None = None
+    price: float | None = None
+    session_token: str | None = None
+    user_email: EmailStr | None = None
+
+
+class AdminCatalogDeliveryMinimumUpdateIn(BaseModel):
+    amount: float
     session_token: str | None = None
     user_email: EmailStr | None = None
 
@@ -508,6 +528,14 @@ class CheckoutVerificationOut(BaseModel):
     awarded_points: int = 0
     user_points_balance: int = 0
     received_order: CheckoutVerificationIn
+
+
+class CheckoutHistoryPageOut(BaseModel):
+    page: int = 1
+    page_size: int = 10
+    total_count: int = 0
+    has_more: bool = False
+    orders: list[CheckoutVerificationOut]
 
 
 class CheckoutReceiptConfirmationIn(BaseModel):
@@ -590,6 +618,10 @@ class AdminDashboardOrderOut(BaseModel):
     address_subtitle: str
     notes: str | None = None
     supports_progress_updates: bool = True
+    can_mark_in_oven: bool = True
+    oven_slot_count: int = 0
+    oven_load: int = 0
+    oven_capacity: int = 6
     unread_customer_message_count: int = 0
     assigned_to_me: bool = False
     assigned_operator_email: str | None = None
@@ -608,7 +640,16 @@ class AdminDashboardOut(BaseModel):
     pending_orders: list[AdminDashboardOrderOut]
     in_progress_orders: list[AdminDashboardOrderOut]
     closed_orders: list[AdminDashboardOrderOut]
+    closed_orders_has_more: bool = False
     my_taken_orders: list[AdminDashboardOrderOut]
+
+
+class AdminClosedOrdersPageOut(BaseModel):
+    page: int = 1
+    page_size: int = 15
+    total_count: int = 0
+    has_more: bool = False
+    orders: list[AdminDashboardOrderOut]
 
 
 class AdminOrderStatusUpdateIn(BaseModel):

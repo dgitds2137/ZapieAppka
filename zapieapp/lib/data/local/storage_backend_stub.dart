@@ -1,5 +1,7 @@
 final Map<String, String> _memoryStorage = <String, String>{};
 
+Future<void> initializeStorageBackend() async {}
+
 void writeStorageValueSync(String key, String value) {
   _memoryStorage[key] = value;
 }

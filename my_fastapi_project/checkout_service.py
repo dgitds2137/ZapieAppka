@@ -13,14 +13,18 @@ from loyalty import (
 )
 from models import (
     ADMIN_ROLE,
+    DRIVER_ROLE,
     EMPLOYEE_ROLE,
     CHECKOUT_ORDER_STATUS_ASSIGNED,
     CHECKOUT_ORDER_STATUS_COMPLETED,
     CHECKOUT_ORDER_STATUS_UNASSIGNED,
+    AppRuntimeSettingDB,
     AdminDashboardActiveEmployeeOut,
     AdminCatalogAddonOut,
+    AdminCatalogDeliveryMinimumUpdateIn,
     AdminCatalogItemUpdateIn,
     AdminCatalogOut,
+    AdminClosedOrdersPageOut,
     AdminCatalogPositionOut,
     AdminDashboardOrderItemOut,
     AdminDashboardOrderOut,
@@ -36,6 +40,7 @@ from models import (
     CheckoutOrderItemDB,
     CheckoutSupportAlertDB,
     CheckoutVerificationIn,
+    CheckoutHistoryPageOut,
     CheckoutVerificationOut,
     CheckoutReceiptConfirmationIn,
     CheckoutAddressPayload,
@@ -55,6 +60,15 @@ class CheckoutService:
     _SESSION_TOUCH_INTERVAL = timedelta(seconds=30)
     _STANDARD_DELIVERY_ETA_MINUTES = 30
     _BUSY_DELIVERY_ETA_MINUTES = 60
+    _OVEN_CAPACITY = 6
+    _OVEN_QUEUE_DELAY_MINUTES = 8
+    _CHECKOUT_HISTORY_DEFAULT_PAGE_SIZE = 10
+    _CHECKOUT_HISTORY_MAX_PAGE_SIZE = 25
+    _ADMIN_CLOSED_ORDERS_PREVIEW_LIMIT = 8
+    _ADMIN_HISTORY_DEFAULT_PAGE_SIZE = 15
+    _ADMIN_HISTORY_MAX_PAGE_SIZE = 30
+    _DEFAULT_DELIVERY_MINIMUM_AMOUNT = 20.0
+    _DELIVERY_MINIMUM_SETTING_KEY = "delivery_minimum_amount"
     _DELIVERY_IN_PROGRESS_STAGES = {
         "on_the_way",
         "delivery_started",
@@ -117,6 +131,20 @@ class CheckoutService:
             subtotal_amount=subtotal_amount,
         )
         effective_total_amount = max(0.0, round(subtotal_amount - redeemed_amount, 2))
+        if self._is_delivery_fulfillment(
+            payload.fulfillment_method,
+            payload.fulfillment_option_index,
+        ):
+            minimum_delivery_amount = self._get_delivery_minimum_amount()
+            if subtotal_amount < minimum_delivery_amount:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Minimalna wartosc zamowienia z dostawa to "
+                        f"PLN {minimum_delivery_amount:.2f}. "
+                        "Dodaj kolejne pozycje albo wybierz odbior osobisty."
+                    ),
+                )
         awarded_points = (
             loyalty_points_for_order_total(subtotal_amount)
             if user is not None
@@ -235,18 +263,27 @@ class CheckoutService:
         )
 
         now = datetime.utcnow()
-        is_employee_view = (current_user.role or "").strip().lower() == EMPLOYEE_ROLE
+        normalized_role = (current_user.role or "").strip().lower()
+        is_employee_view = normalized_role == EMPLOYEE_ROLE
+        is_driver_view = normalized_role == DRIVER_ROLE
+        is_limited_staff_view = normalized_role in {EMPLOYEE_ROLE, DRIVER_ROLE}
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         turnover_start = day_start - timedelta(days=4)
-        active_employees = [] if is_employee_view else self._get_active_employees(now=now)
-
-        checkout_rows = (
+        active_employees = [] if is_limited_staff_view else self._get_active_employees(now=now)
+        current_oven_load = self._get_current_oven_load()
+        active_checkout_rows = (
             self.db.query(CheckoutOrderDB, UserDB.email)
             .outerjoin(UserDB, UserDB.user_id == CheckoutOrderDB.user_id)
             .options(
                 joinedload(CheckoutOrderDB.items),
                 joinedload(CheckoutOrderDB.chat_messages),
+            )
+            .filter(
+                or_(
+                    CheckoutOrderDB.status != "completed",
+                    CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                ),
             )
             .order_by(CheckoutOrderDB.created_at.desc())
             .all()
@@ -254,14 +291,53 @@ class CheckoutService:
 
         pending_orders: list[AdminDashboardOrderOut] = []
         in_progress_orders: list[AdminDashboardOrderOut] = []
-        closed_orders: list[AdminDashboardOrderOut] = []
         my_taken_orders: list[AdminDashboardOrderOut] = []
+        closed_orders_query = self._closed_orders_query(
+            current_user=current_user,
+            normalized_role=normalized_role,
+        )
+        order_history_count = closed_orders_query.count()
+        closed_preview_rows = (
+            closed_orders_query
+            .outerjoin(UserDB, UserDB.user_id == CheckoutOrderDB.user_id)
+            .options(
+                joinedload(CheckoutOrderDB.items),
+                joinedload(CheckoutOrderDB.chat_messages),
+            )
+            .order_by(self._closed_orders_sort_expression().desc())
+            .limit(self._ADMIN_CLOSED_ORDERS_PREVIEW_LIMIT)
+            .all()
+        )
+        recent_closed_metric_rows = (
+            self._closed_orders_query(
+                current_user=current_user,
+                normalized_role=normalized_role,
+            )
+            .options(
+                joinedload(CheckoutOrderDB.items),
+                joinedload(CheckoutOrderDB.chat_messages),
+            )
+            .filter(
+                or_(
+                    CheckoutOrderDB.receipt_confirmed_at >= turnover_start,
+                    CheckoutOrderDB.active_until >= turnover_start,
+                    CheckoutOrderDB.assigned_at >= turnover_start,
+                    CheckoutOrderDB.created_at >= turnover_start,
+                ),
+            )
+            .all()
+        )
         completed_orders_today = 0
         assigned_user_ids = {
             checkout_order.assigned_to_user_id
-            for checkout_order, _ in checkout_rows
+            for checkout_order, _ in active_checkout_rows
             if checkout_order.assigned_to_user_id is not None
         }
+        assigned_user_ids.update(
+            checkout_order.assigned_to_user_id
+            for checkout_order in closed_preview_rows
+            if checkout_order.assigned_to_user_id is not None
+        )
         assigned_user_emails = {
             user.user_id: user.email
             for user in self.db.query(UserDB).filter(UserDB.user_id.in_(assigned_user_ids)).all()
@@ -271,33 +347,36 @@ class CheckoutService:
             (day_start - timedelta(days=offset)).date(): 0.0 for offset in range(4, -1, -1)
         }
 
-        for checkout_order, customer_email in checkout_rows:
-            is_closed_order = self._is_order_closed(checkout_order)
+        for checkout_order in recent_closed_metric_rows:
             closed_at = self._resolve_closed_at(checkout_order)
-
             if closed_at is not None and closed_at >= turnover_start:
                 turnover_day = closed_at.date()
                 if turnover_day in turnover_by_day:
                     turnover_by_day[turnover_day] += 1
 
-            if is_closed_order and closed_at is not None and closed_at >= day_start:
+            if is_limited_staff_view:
+                continue
+
+            if closed_at is not None and closed_at >= day_start:
                 completed_orders_today += 1
 
-            if is_closed_order and (
-                not is_employee_view
-                or checkout_order.assigned_to_user_id == current_user.user_id
-            ):
-                closed_orders.append(
-                    self._build_admin_order(
-                        checkout_order,
-                        customer_email=customer_email,
-                        now=now,
-                        current_user_id=current_user.user_id,
-                        assigned_operator_email=assigned_user_emails.get(
-                            checkout_order.assigned_to_user_id,
-                        ),
-                    )
-                )
+        closed_orders = [
+            self._build_admin_order(
+                checkout_order,
+                customer_email=None,
+                now=now,
+                current_user_id=current_user.user_id,
+                assigned_operator_email=assigned_user_emails.get(
+                    checkout_order.assigned_to_user_id,
+                ),
+                current_oven_load=current_oven_load,
+            )
+            for checkout_order in closed_preview_rows
+        ]
+
+        for checkout_order, customer_email in active_checkout_rows:
+            if is_driver_view and not self._is_driver_order(checkout_order):
+                continue
 
             if not self._is_order_visible_on_admin_board(checkout_order):
                 continue
@@ -310,19 +389,27 @@ class CheckoutService:
                 assigned_operator_email=assigned_user_emails.get(
                     checkout_order.assigned_to_user_id,
                 ),
+                current_oven_load=current_oven_load,
             )
-            if checkout_order.processing_status == CHECKOUT_ORDER_STATUS_ASSIGNED:
-                in_progress_orders.append(dashboard_order)
-                if dashboard_order.assigned_to_me:
-                    my_taken_orders.append(dashboard_order)
-            else:
-                pending_orders.append(dashboard_order)
+            is_ready_for_delivery = self._is_ready_for_delivery_stage(checkout_order)
 
-        closed_orders.sort(
-            key=lambda order: order.closed_at or order.created_at,
-            reverse=True,
-        )
-        order_history_count = len(closed_orders)
+            if is_driver_view:
+                if is_ready_for_delivery:
+                    pending_orders.append(dashboard_order)
+                elif checkout_order.processing_status == CHECKOUT_ORDER_STATUS_ASSIGNED:
+                    if dashboard_order.assigned_to_me:
+                        in_progress_orders.append(dashboard_order)
+                        my_taken_orders.append(dashboard_order)
+            else:
+                if (
+                    checkout_order.processing_status == CHECKOUT_ORDER_STATUS_ASSIGNED
+                    or is_ready_for_delivery
+                ):
+                    in_progress_orders.append(dashboard_order)
+                    if dashboard_order.assigned_to_me:
+                        my_taken_orders.append(dashboard_order)
+                else:
+                    pending_orders.append(dashboard_order)
 
         logged_in_employee_count = len(active_employees)
         new_users_this_month = (
@@ -337,21 +424,22 @@ class CheckoutService:
                 total_amount=round(total, 2),
             )
             for day, total in sorted(turnover_by_day.items())
-        ] if not is_employee_view else []
+        ] if not is_limited_staff_view else []
 
         return AdminDashboardOut(
-            logged_in_employee_count=0 if is_employee_view else logged_in_employee_count,
-            active_employees=[] if is_employee_view else active_employees,
-            prep_time_settings=self._get_prep_time_settings(),
+            logged_in_employee_count=0 if is_limited_staff_view else logged_in_employee_count,
+            active_employees=[] if is_limited_staff_view else active_employees,
+            prep_time_settings=[] if is_driver_view else self._get_prep_time_settings(),
             pending_order_count=len(pending_orders),
             in_progress_order_count=len(in_progress_orders),
-            new_users_this_month=0 if is_employee_view else new_users_this_month,
-            completed_orders_today=0 if is_employee_view else completed_orders_today,
+            new_users_this_month=0 if is_limited_staff_view else new_users_this_month,
+            completed_orders_today=0 if is_limited_staff_view else completed_orders_today,
             order_history_count=order_history_count,
             turnover_last_days=turnover_last_days,
             pending_orders=pending_orders,
             in_progress_orders=in_progress_orders,
             closed_orders=closed_orders,
+            closed_orders_has_more=order_history_count > len(closed_orders),
             my_taken_orders=my_taken_orders,
         )
 
@@ -394,6 +482,7 @@ class CheckoutService:
         )
 
         return AdminCatalogOut(
+            delivery_minimum_amount=self._get_delivery_minimum_amount(),
             positions=[
                 AdminCatalogPositionOut(
                     position_id=position.position_id,
@@ -436,7 +525,13 @@ class CheckoutService:
         if position is None:
             raise HTTPException(status_code=404, detail="Nie znaleziono pozycji menu.")
 
-        position.is_active = bool(payload.is_active)
+        if payload.is_active is None and payload.price is None:
+            raise HTTPException(status_code=400, detail="Brak zmian do zapisania.")
+
+        if payload.is_active is not None:
+            position.is_active = bool(payload.is_active)
+        if payload.price is not None:
+            position.price = self._normalize_catalog_price(payload.price)
         self.db.commit()
         self.db.refresh(position)
 
@@ -467,7 +562,13 @@ class CheckoutService:
         if addon is None:
             raise HTTPException(status_code=404, detail="Nie znaleziono dodatku.")
 
-        addon.is_active = bool(payload.is_active)
+        if payload.is_active is None and payload.price is None:
+            raise HTTPException(status_code=400, detail="Brak zmian do zapisania.")
+
+        if payload.is_active is not None:
+            addon.is_active = bool(payload.is_active)
+        if payload.price is not None:
+            addon.price = self._normalize_catalog_price(payload.price)
         self.db.commit()
         self.db.refresh(addon)
 
@@ -478,6 +579,32 @@ class CheckoutService:
             price=float(addon.price),
             sort_order=addon.sort_order or 0,
             is_active=bool(addon.is_active),
+        )
+
+    def update_delivery_minimum_amount(
+        self,
+        payload: AdminCatalogDeliveryMinimumUpdateIn,
+    ) -> AdminCatalogOut:
+        operator = self._require_admin_role(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+        amount = round(float(payload.amount), 2)
+        if amount < 0 or amount > 999:
+            raise HTTPException(
+                status_code=400,
+                detail="Minimalna wartosc dostawy musi miescic sie w zakresie 0-999 PLN.",
+            )
+
+        self._set_decimal_runtime_setting(
+            setting_key=self._DELIVERY_MINIMUM_SETTING_KEY,
+            label="Minimalna wartosc zamowienia z dostawa",
+            decimal_value=amount,
+            updated_by_user_id=operator.user_id,
+        )
+        return self.get_admin_catalog(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
         )
 
     def update_prep_time_setting(
@@ -535,6 +662,7 @@ class CheckoutService:
             session_token=payload.session_token,
             user_email=payload.user_email,
         )
+        normalized_role = (operator.role or "").strip().lower()
 
         processing_status = self._normalize_processing_status(payload.processing_status)
         verification_stage = self._normalize_operator_verification_stage(
@@ -553,6 +681,12 @@ class CheckoutService:
         if checkout_order is None:
             raise HTTPException(status_code=404, detail="Nie znaleziono zamowienia checkout.")
 
+        if normalized_role == DRIVER_ROLE and not self._is_driver_order(checkout_order):
+            raise HTTPException(
+                status_code=403,
+                detail="Kierowca moze obslugiwac tylko zamowienia z dostawa.",
+            )
+
         supports_progress_updates = self._order_supports_progress_updates(checkout_order)
 
         if (
@@ -566,15 +700,79 @@ class CheckoutService:
 
         if (
             not supports_progress_updates
-            and verification_stage in {"in_oven", "on_the_way"}
+            and verification_stage == "in_oven"
         ):
             raise HTTPException(
                 status_code=409,
-                detail="To zamowienie nie obsluguje etapow posrednich realizacji.",
+                detail="To zamowienie nie obsluguje etapu pieca.",
+            )
+
+        is_delivery_order = self._is_driver_order(checkout_order)
+        is_ready_for_delivery_transition = verification_stage == "ready_for_delivery"
+
+        if normalized_role == DRIVER_ROLE and verification_stage == "in_oven":
+            raise HTTPException(
+                status_code=403,
+                detail="Kierowca nie moze oznaczac etapu pieca.",
+            )
+
+        if verification_stage == "in_oven":
+            oven_load_without_current = self._get_current_oven_load(
+                exclude_checkout_order_id=checkout_order.checkout_order_id,
+            )
+            order_oven_slot_count = self._order_oven_slot_count(checkout_order)
+            if (
+                order_oven_slot_count <= 0
+                or oven_load_without_current + order_oven_slot_count > self._OVEN_CAPACITY
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Piec jest obecnie pelny. Zwolnij miejsce w piecu i sprobuj ponownie."
+                    ),
+                )
+
+        if is_ready_for_delivery_transition:
+            if normalized_role == DRIVER_ROLE:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Kierowca nie moze oznaczac zamowienia jako gotowego do wysylki.",
+                )
+            if not is_delivery_order:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Etap gotowosci do wysylki dotyczy tylko zamowien z dostawa.",
+                )
+        elif (
+            verification_stage == "on_the_way"
+            and is_delivery_order
+            and normalized_role != DRIVER_ROLE
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Status w dostawie jest ustawiany dopiero po podjeciu zamowienia przez kierowce.",
             )
 
         checkout_order.processing_status = processing_status
         if processing_status == CHECKOUT_ORDER_STATUS_ASSIGNED:
+            if (
+                normalized_role == DRIVER_ROLE
+                and checkout_order.assigned_to_user_id is None
+                and not self._is_ready_for_delivery_stage(checkout_order)
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Kierowca moze podjac tylko dostawe oznaczona jako gotowa do wysylki.",
+                )
+            if (
+                normalized_role != DRIVER_ROLE
+                and is_delivery_order
+                and self._is_ready_for_delivery_stage(checkout_order)
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Dostawe gotowa do wysylki moze podjac tylko kierowca.",
+                )
             if (
                 checkout_order.assigned_to_user_id is not None
                 and checkout_order.assigned_to_user_id != operator.user_id
@@ -587,12 +785,46 @@ class CheckoutService:
                 checkout_order.assigned_to_user_id = operator.user_id
             if checkout_order.assigned_at is None:
                 checkout_order.assigned_at = datetime.utcnow()
-            checkout_order.verification_stage = verification_stage or "assigned"
+            if is_ready_for_delivery_transition:
+                checkout_order.processing_status = CHECKOUT_ORDER_STATUS_UNASSIGNED
+                checkout_order.assigned_to_user_id = None
+                checkout_order.assigned_at = None
+                checkout_order.verification_stage = "ready_for_delivery"
+            elif (
+                normalized_role == DRIVER_ROLE
+                and self._is_ready_for_delivery_stage(checkout_order)
+                and not verification_stage
+            ):
+                checkout_order.verification_stage = "on_the_way"
+            else:
+                checkout_order.verification_stage = verification_stage or "assigned"
         elif processing_status == CHECKOUT_ORDER_STATUS_UNASSIGNED:
+            if (
+                normalized_role == DRIVER_ROLE
+                and checkout_order.assigned_to_user_id is not None
+                and checkout_order.assigned_to_user_id != operator.user_id
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Kierowca nie moze cofnac dostawy przypisanej do innej osoby.",
+                )
             checkout_order.assigned_to_user_id = None
             checkout_order.assigned_at = None
-            checkout_order.verification_stage = "accepted"
+            checkout_order.verification_stage = (
+                "ready_for_delivery"
+                if is_delivery_order and self._is_ready_for_delivery_stage(checkout_order)
+                else "accepted"
+            )
         if processing_status == CHECKOUT_ORDER_STATUS_COMPLETED:
+            if (
+                normalized_role == DRIVER_ROLE
+                and checkout_order.assigned_to_user_id is not None
+                and checkout_order.assigned_to_user_id != operator.user_id
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Kierowca moze zakonczyc tylko dostawe przypisana do siebie.",
+                )
             now = datetime.utcnow()
             checkout_order.status = "completed"
             checkout_order.verification_stage = "completed_by_admin"
@@ -607,6 +839,7 @@ class CheckoutService:
         if checkout_order.user_id is not None:
             customer = self.db.query(UserDB).filter(UserDB.user_id == checkout_order.user_id).first()
             customer_email = customer.email if customer is not None else None
+        current_oven_load = self._get_current_oven_load()
 
         return self._build_admin_order(
             checkout_order,
@@ -616,6 +849,7 @@ class CheckoutService:
             assigned_operator_email=operator.email
             if checkout_order.assigned_to_user_id == operator.user_id
             else None,
+            current_oven_load=current_oven_load,
         )
 
     def get_active_checkout(
@@ -639,6 +873,129 @@ class CheckoutService:
             return None
 
         return self._build_response(checkout_order, now)
+
+    def get_checkout_history(
+        self,
+        session_token: str | None = None,
+        user_email: str | None = None,
+        page: int = 1,
+        page_size: int = _CHECKOUT_HISTORY_DEFAULT_PAGE_SIZE,
+    ) -> CheckoutHistoryPageOut:
+        user_id = self._resolve_user_id(
+            session_token=session_token,
+            user_email=user_email,
+        )
+        if user_id is None:
+            return CheckoutHistoryPageOut(orders=[])
+
+        now = datetime.utcnow()
+        self._refresh_checkout_states(user_id=user_id, now=now)
+        normalized_page, normalized_page_size, offset = self._normalize_pagination(
+            page=page,
+            page_size=page_size,
+            default_page_size=self._CHECKOUT_HISTORY_DEFAULT_PAGE_SIZE,
+            max_page_size=self._CHECKOUT_HISTORY_MAX_PAGE_SIZE,
+        )
+        base_query = (
+            self.db.query(CheckoutOrderDB)
+            .options(joinedload(CheckoutOrderDB.items))
+            .filter(
+                CheckoutOrderDB.user_id == user_id,
+                or_(
+                    CheckoutOrderDB.status == "completed",
+                    CheckoutOrderDB.processing_status == CHECKOUT_ORDER_STATUS_COMPLETED,
+                ),
+            )
+        )
+        total_count = base_query.count()
+        checkout_orders = (
+            base_query
+            .order_by(self._closed_orders_sort_expression().desc())
+            .offset(offset)
+            .limit(normalized_page_size)
+            .all()
+        )
+        orders = [
+            self._build_response(checkout_order, now=now)
+            for checkout_order in checkout_orders
+        ]
+        return CheckoutHistoryPageOut(
+            page=normalized_page,
+            page_size=normalized_page_size,
+            total_count=total_count,
+            has_more=(offset + len(orders)) < total_count,
+            orders=orders,
+        )
+
+    def get_admin_closed_orders_history(
+        self,
+        session_token: str | None = None,
+        user_email: str | None = None,
+        page: int = 1,
+        page_size: int = _ADMIN_HISTORY_DEFAULT_PAGE_SIZE,
+        today_only: bool = False,
+    ) -> AdminClosedOrdersPageOut:
+        current_user = self._require_admin_user(
+            session_token=session_token,
+            user_email=user_email,
+        )
+        now = datetime.utcnow()
+        normalized_role = (current_user.role or "").strip().lower()
+        normalized_page, normalized_page_size, offset = self._normalize_pagination(
+            page=page,
+            page_size=page_size,
+            default_page_size=self._ADMIN_HISTORY_DEFAULT_PAGE_SIZE,
+            max_page_size=self._ADMIN_HISTORY_MAX_PAGE_SIZE,
+        )
+
+        base_query = self._closed_orders_query(
+            current_user=current_user,
+            normalized_role=normalized_role,
+            today_only=today_only,
+        )
+        total_count = base_query.count()
+        closed_rows = (
+            base_query
+            .outerjoin(UserDB, UserDB.user_id == CheckoutOrderDB.user_id)
+            .options(
+                joinedload(CheckoutOrderDB.items),
+                joinedload(CheckoutOrderDB.chat_messages),
+            )
+            .order_by(self._closed_orders_sort_expression().desc())
+            .offset(offset)
+            .limit(normalized_page_size)
+            .all()
+        )
+        assigned_user_ids = {
+            checkout_order.assigned_to_user_id
+            for checkout_order in closed_rows
+            if checkout_order.assigned_to_user_id is not None
+        }
+        assigned_user_emails = {
+            user.user_id: user.email
+            for user in self.db.query(UserDB).filter(UserDB.user_id.in_(assigned_user_ids)).all()
+        } if assigned_user_ids else {}
+
+        orders = [
+            self._build_admin_order(
+                checkout_order,
+                customer_email=None,
+                now=now,
+                current_user_id=current_user.user_id,
+                assigned_operator_email=assigned_user_emails.get(
+                    checkout_order.assigned_to_user_id,
+                ),
+                current_oven_load=0,
+            )
+            for checkout_order in closed_rows
+        ]
+        return AdminClosedOrdersPageOut(
+            page=normalized_page,
+            page_size=normalized_page_size,
+            total_count=total_count,
+            has_more=(offset + len(orders)) < total_count,
+            orders=orders,
+        )
 
     def confirm_receipt(
         self,
@@ -855,11 +1212,11 @@ class CheckoutService:
         requires_receipt_confirmation = (
             checkout_order.verification_stage == "awaiting_receipt_confirmation"
         )
-        remaining_seconds = 0.0 if requires_receipt_confirmation else max(
-            0.0,
-            (checkout_order.active_until - reference_time).total_seconds(),
+        remaining_eta_minutes = self._remaining_eta_minutes(
+            checkout_order=checkout_order,
+            now=reference_time,
+            include_oven_queue=not requires_receipt_confirmation,
         )
-        remaining_eta_minutes = max(0, int((remaining_seconds + 59) // 60))
 
         payload = CheckoutVerificationIn(
             created_at=self._as_utc(checkout_order.client_created_at),
@@ -996,6 +1353,61 @@ class CheckoutService:
             is_active=bool(setting.is_active),
         )
 
+    def _get_delivery_minimum_amount(self) -> float:
+        return self._get_decimal_runtime_setting(
+            setting_key=self._DELIVERY_MINIMUM_SETTING_KEY,
+            default_value=self._DEFAULT_DELIVERY_MINIMUM_AMOUNT,
+        )
+
+    def _get_decimal_runtime_setting(
+        self,
+        setting_key: str,
+        default_value: float,
+    ) -> float:
+        setting = (
+            self.db.query(AppRuntimeSettingDB)
+            .filter(AppRuntimeSettingDB.setting_key == setting_key)
+            .first()
+        )
+        if setting is None or setting.decimal_value is None:
+            return round(float(default_value), 2)
+        return round(float(setting.decimal_value), 2)
+
+    def _set_decimal_runtime_setting(
+        self,
+        setting_key: str,
+        label: str,
+        decimal_value: float,
+        updated_by_user_id: int | None,
+    ) -> None:
+        setting = (
+            self.db.query(AppRuntimeSettingDB)
+            .filter(AppRuntimeSettingDB.setting_key == setting_key)
+            .first()
+        )
+        if setting is None:
+            setting = AppRuntimeSettingDB(
+                setting_key=setting_key,
+                label=label,
+            )
+            self.db.add(setting)
+
+        setting.label = label
+        setting.decimal_value = round(float(decimal_value), 2)
+        setting.updated_by_user_id = updated_by_user_id
+        setting.updated_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(setting)
+
+    def _normalize_catalog_price(self, price: float) -> float:
+        normalized_price = round(float(price), 2)
+        if normalized_price < 0 or normalized_price > 999:
+            raise HTTPException(
+                status_code=400,
+                detail="Cena musi miescic sie w zakresie 0-999 PLN.",
+            )
+        return normalized_price
+
     def _calculate_checkout_eta_minutes(
         self,
         items: list[CheckoutItemPayload],
@@ -1059,6 +1471,15 @@ class CheckoutService:
         normalized_method = (fulfillment_method or "").strip().lower()
         return fulfillment_option_index == 0 or normalized_method in {"dostawa", "delivery"}
 
+    def _is_driver_order(self, checkout_order: CheckoutOrderDB) -> bool:
+        return self._is_delivery_fulfillment(
+            checkout_order.fulfillment_method,
+            checkout_order.fulfillment_option_index,
+        )
+
+    def _is_ready_for_delivery_stage(self, checkout_order: CheckoutOrderDB) -> bool:
+        return (checkout_order.verification_stage or "").strip().lower() == "ready_for_delivery"
+
     def _has_delivery_in_progress(self, now: datetime) -> bool:
         return (
             self.db.query(CheckoutOrderDB.checkout_order_id)
@@ -1076,6 +1497,67 @@ class CheckoutService:
 
     def _delivery_eta_label(self, eta_minutes: int) -> str:
         return f"~{eta_minutes} min."
+
+    def _normalize_pagination(
+        self,
+        page: int,
+        page_size: int,
+        default_page_size: int,
+        max_page_size: int,
+    ) -> tuple[int, int, int]:
+        normalized_page = max(1, int(page or 1))
+        normalized_page_size = int(page_size or default_page_size)
+        normalized_page_size = max(1, min(max_page_size, normalized_page_size))
+        offset = (normalized_page - 1) * normalized_page_size
+        return normalized_page, normalized_page_size, offset
+
+    def _closed_orders_sort_expression(self):
+        return func.coalesce(
+            CheckoutOrderDB.receipt_confirmed_at,
+            CheckoutOrderDB.active_until,
+            CheckoutOrderDB.assigned_at,
+            CheckoutOrderDB.created_at,
+        )
+
+    def _closed_orders_query(
+        self,
+        current_user: UserDB,
+        normalized_role: str,
+        today_only: bool = False,
+    ):
+        query = self.db.query(CheckoutOrderDB).filter(
+            or_(
+                CheckoutOrderDB.status == "completed",
+                CheckoutOrderDB.processing_status == CHECKOUT_ORDER_STATUS_COMPLETED,
+            )
+        )
+        if normalized_role in {EMPLOYEE_ROLE, DRIVER_ROLE}:
+            query = query.filter(
+                CheckoutOrderDB.assigned_to_user_id == current_user.user_id,
+            )
+
+        if today_only:
+            day_start = datetime.utcnow().replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            next_day = day_start + timedelta(days=1)
+            query = query.filter(
+                or_(
+                    (CheckoutOrderDB.receipt_confirmed_at >= day_start)
+                    & (CheckoutOrderDB.receipt_confirmed_at < next_day),
+                    (CheckoutOrderDB.active_until >= day_start)
+                    & (CheckoutOrderDB.active_until < next_day),
+                    (CheckoutOrderDB.assigned_at >= day_start)
+                    & (CheckoutOrderDB.assigned_at < next_day),
+                    (CheckoutOrderDB.created_at >= day_start)
+                    & (CheckoutOrderDB.created_at < next_day),
+                )
+            )
+
+        return query
 
     def _ensure_checkout_items_are_available(
         self,
@@ -1171,7 +1653,10 @@ class CheckoutService:
             self.db.query(SessionsDB, UserDB)
             .join(UserDB, UserDB.user_id == SessionsDB.user_id)
             .filter(
-                func.lower(func.ltrim(func.rtrim(UserDB.role))) == EMPLOYEE_ROLE,
+                or_(
+                    func.lower(func.ltrim(func.rtrim(UserDB.role))) == EMPLOYEE_ROLE,
+                    func.lower(func.ltrim(func.rtrim(UserDB.role))) == DRIVER_ROLE,
+                ),
                 SessionsDB.last_seen_at >= active_since,
             )
             .order_by(SessionsDB.last_seen_at.desc(), SessionsDB.id.desc())
@@ -1254,10 +1739,10 @@ class CheckoutService:
 
         user = self.db.query(UserDB).filter(UserDB.user_id == user_id).first()
         normalized_role = (user.role or "").strip().lower()
-        if normalized_role not in {ADMIN_ROLE, EMPLOYEE_ROLE}:
+        if normalized_role not in {ADMIN_ROLE, EMPLOYEE_ROLE, DRIVER_ROLE}:
             raise HTTPException(
                 status_code=403,
-                detail="Ten panel jest dostepny tylko dla administratora lub pracownika.",
+                detail="Ten panel jest dostepny tylko dla administratora, pracownika lub kierowcy.",
             )
 
         return user
@@ -1308,6 +1793,7 @@ class CheckoutService:
         allowed_stages = {
             "assigned",
             "in_oven",
+            "ready_for_delivery",
             "on_the_way",
         }
         if normalized not in allowed_stages:
@@ -1334,14 +1820,14 @@ class CheckoutService:
         now: datetime,
         current_user_id: int | None = None,
         assigned_operator_email: str | None = None,
+        current_oven_load: int | None = None,
     ) -> AdminDashboardOrderOut:
-        if checkout_order.active_until is None:
-            remaining_eta_minutes = 0
-        else:
-            remaining_eta_minutes = max(
-                0,
-                int(((checkout_order.active_until - now).total_seconds() + 59) // 60),
-            )
+        remaining_eta_minutes = self._remaining_eta_minutes(
+            checkout_order=checkout_order,
+            now=now,
+            include_oven_queue=True,
+            current_oven_load=current_oven_load,
+        )
 
         item_count = sum((item.quantity or 1) for item in checkout_order.items)
         item_names = [
@@ -1353,6 +1839,12 @@ class CheckoutService:
             for message in checkout_order.chat_messages
             if (message.sender_role or "").strip().lower() == "customer"
             and message.staff_read_at is None
+        )
+        supports_progress_updates = self._order_supports_progress_updates(checkout_order)
+        oven_slot_count = self._order_oven_slot_count(checkout_order)
+        oven_load = self._get_effective_oven_load(
+            checkout_order=checkout_order,
+            current_oven_load=current_oven_load,
         )
 
         return AdminDashboardOrderOut(
@@ -1383,7 +1875,15 @@ class CheckoutService:
             address_title=checkout_order.address_title,
             address_subtitle=checkout_order.address_subtitle,
             notes=checkout_order.notes,
-            supports_progress_updates=self._order_supports_progress_updates(checkout_order),
+            supports_progress_updates=supports_progress_updates,
+            can_mark_in_oven=(
+                supports_progress_updates
+                and oven_slot_count > 0
+                and oven_load + oven_slot_count <= self._OVEN_CAPACITY
+            ),
+            oven_slot_count=oven_slot_count,
+            oven_load=oven_load,
+            oven_capacity=self._OVEN_CAPACITY,
             unread_customer_message_count=unread_customer_message_count,
             assigned_to_me=(
                 current_user_id is not None
@@ -1399,21 +1899,158 @@ class CheckoutService:
         if not checkout_order.items:
             return True
 
-        item_names = [
-            (item.name or "").strip().lower()
+        item_signatures = [
+            f"{(item.name or '').strip().lower()} {(item.description or '').strip().lower()}"
             for item in checkout_order.items
         ]
-        if not any(item_names):
+        if not any(item_signatures):
             return True
 
-        return not all(self._is_ice_cream_item_name(name) for name in item_names)
+        return any(self._item_supports_oven_stage(signature) for signature in item_signatures)
 
-    def _is_ice_cream_item_name(self, name: str) -> bool:
-        normalized = (name or "").strip().lower()
+    def _item_supports_oven_stage(self, item_signature: str) -> bool:
+        normalized = (item_signature or "").strip().lower()
         if not normalized:
             return False
 
-        return "lod" in normalized or "ice cream" in normalized
+        no_oven_keywords = (
+            "mroz",
+            "frozen",
+            "odgrzan",
+            "hermetycz",
+            "lod",
+            "ice cream",
+            "gelato",
+            "cola",
+            "sprite",
+            "fanta",
+            "pepsi",
+            "napoj",
+            "woda",
+            "sok",
+            "kawa",
+            "herbata",
+        )
+        return not any(keyword in normalized for keyword in no_oven_keywords)
+
+    def _is_in_oven_stage(self, checkout_order: CheckoutOrderDB) -> bool:
+        return (checkout_order.verification_stage or "").strip().lower() in {"in_oven", "oven"}
+
+    def _order_oven_slot_count(self, checkout_order: CheckoutOrderDB) -> int:
+        if not checkout_order.items:
+            return 0
+
+        oven_items_count = 0
+        for item in checkout_order.items:
+            item_signature = (
+                f"{(item.name or '').strip().lower()} "
+                f"{(item.description or '').strip().lower()}"
+            )
+            if not self._item_supports_oven_stage(item_signature):
+                continue
+            oven_items_count += max(1, int(item.quantity or 1))
+
+        if oven_items_count <= 0:
+            return 0
+        return min(self._OVEN_CAPACITY, oven_items_count)
+
+    def _get_current_oven_load(
+        self,
+        exclude_checkout_order_id: int | None = None,
+    ) -> int:
+        query = (
+            self.db.query(CheckoutOrderDB)
+            .options(joinedload(CheckoutOrderDB.items))
+            .filter(
+                CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.verification_stage.in_(("in_oven", "oven")),
+            )
+        )
+        if exclude_checkout_order_id is not None:
+            query = query.filter(
+                CheckoutOrderDB.checkout_order_id != exclude_checkout_order_id,
+            )
+
+        return sum(
+            self._order_oven_slot_count(checkout_order)
+            for checkout_order in query.all()
+        )
+
+    def _get_effective_oven_load(
+        self,
+        checkout_order: CheckoutOrderDB,
+        current_oven_load: int | None = None,
+    ) -> int:
+        resolved_oven_load = (
+            self._get_current_oven_load()
+            if current_oven_load is None
+            else current_oven_load
+        )
+        if self._is_in_oven_stage(checkout_order):
+            return max(0, resolved_oven_load - self._order_oven_slot_count(checkout_order))
+        return resolved_oven_load
+
+    def _remaining_eta_minutes(
+        self,
+        checkout_order: CheckoutOrderDB,
+        now: datetime,
+        include_oven_queue: bool,
+        current_oven_load: int | None = None,
+    ) -> int:
+        if checkout_order.active_until is None:
+            return 0
+
+        remaining_seconds = max(
+            0.0,
+            (checkout_order.active_until - now).total_seconds(),
+        )
+        remaining_eta_minutes = max(0, int((remaining_seconds + 59) // 60))
+        if not include_oven_queue:
+            return remaining_eta_minutes
+
+        return remaining_eta_minutes + self._oven_queue_delay_minutes(
+            checkout_order=checkout_order,
+            current_oven_load=current_oven_load,
+        )
+
+    def _oven_queue_delay_minutes(
+        self,
+        checkout_order: CheckoutOrderDB,
+        current_oven_load: int | None = None,
+    ) -> int:
+        if not self._order_supports_progress_updates(checkout_order):
+            return 0
+        if checkout_order.processing_status != CHECKOUT_ORDER_STATUS_ASSIGNED:
+            return 0
+        if self._is_in_oven_stage(checkout_order):
+            return 0
+        if self._is_ready_for_delivery_stage(checkout_order):
+            return 0
+        if (checkout_order.verification_stage or "").strip().lower() not in {
+            "",
+            "accepted",
+            "assigned",
+        }:
+            return 0
+
+        order_oven_slot_count = self._order_oven_slot_count(checkout_order)
+        if order_oven_slot_count <= 0:
+            return 0
+
+        oven_load = self._get_effective_oven_load(
+            checkout_order=checkout_order,
+            current_oven_load=current_oven_load,
+        )
+        overflow_slots = (oven_load + order_oven_slot_count) - self._OVEN_CAPACITY
+        if overflow_slots <= 0:
+            return 0
+
+        delayed_batches = max(
+            1,
+            (overflow_slots + self._OVEN_CAPACITY - 1) // self._OVEN_CAPACITY,
+        )
+        return delayed_batches * self._OVEN_QUEUE_DELAY_MINUTES
 
     def _serialize_checkout_message(
         self,
@@ -1430,7 +2067,7 @@ class CheckoutService:
         )
 
     def _chat_sender_role_for_user(self, normalized_role: str) -> str:
-        return "staff" if normalized_role in {ADMIN_ROLE, EMPLOYEE_ROLE} else "customer"
+        return "staff" if normalized_role in {ADMIN_ROLE, EMPLOYEE_ROLE, DRIVER_ROLE} else "customer"
 
     def _chat_author_label(self, user: UserDB, sender_role: str) -> str:
         if sender_role == "staff":
@@ -1466,7 +2103,7 @@ class CheckoutService:
             raise HTTPException(status_code=404, detail="Nie znaleziono zamowienia checkout.")
 
         normalized_role = (current_user.role or "").strip().lower()
-        if normalized_role in {ADMIN_ROLE, EMPLOYEE_ROLE} and allow_staff:
+        if normalized_role in {ADMIN_ROLE, EMPLOYEE_ROLE, DRIVER_ROLE} and allow_staff:
             return checkout_order, current_user, normalized_role
 
         if checkout_order.user_id != current_user.user_id:
@@ -1485,15 +2122,15 @@ class CheckoutService:
     ) -> None:
         if normalized_role == ADMIN_ROLE:
             return
-        if normalized_role != EMPLOYEE_ROLE:
+        if normalized_role not in {EMPLOYEE_ROLE, DRIVER_ROLE}:
             raise HTTPException(
                 status_code=403,
-                detail="Tylko przypisany pracownik moze obslugiwac wiadomosci dla tego zamowienia.",
+                detail="Tylko przypisany pracownik lub kierowca moze obslugiwac wiadomosci dla tego zamowienia.",
             )
         if checkout_order.assigned_to_user_id != current_user.user_id:
             raise HTTPException(
                 status_code=403,
-                detail="To zamowienie nie jest przypisane do zalogowanego pracownika.",
+                detail="To zamowienie nie jest przypisane do zalogowanego operatora.",
             )
 
     def _resolve_closed_at(self, checkout_order: CheckoutOrderDB) -> datetime | None:

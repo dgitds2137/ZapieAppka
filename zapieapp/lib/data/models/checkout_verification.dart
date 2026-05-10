@@ -266,6 +266,42 @@ class CheckoutVerificationResponse {
   }
 }
 
+class CheckoutHistoryPage {
+  const CheckoutHistoryPage({
+    required this.page,
+    required this.pageSize,
+    required this.totalCount,
+    required this.hasMore,
+    required this.orders,
+  });
+
+  final int page;
+  final int pageSize;
+  final int totalCount;
+  final bool hasMore;
+  final List<CheckoutVerificationResponse> orders;
+
+  factory CheckoutHistoryPage.fromJson(Map<String, dynamic> json) {
+    final ordersJson = json['orders'];
+    return CheckoutHistoryPage(
+      page: _asInt(json['page']) ?? 1,
+      pageSize: _asInt(json['page_size']) ?? 10,
+      totalCount: _asInt(json['total_count']) ?? 0,
+      hasMore: json['has_more'] == true,
+      orders: ordersJson is List
+          ? ordersJson
+              .whereType<Map>()
+              .map(
+                (item) => CheckoutVerificationResponse.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .toList(growable: false)
+          : const [],
+    );
+  }
+}
+
 class CheckoutReceiptConfirmationRequest {
   const CheckoutReceiptConfirmationRequest({
     required this.received,

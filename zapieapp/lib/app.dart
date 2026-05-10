@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'core/config/app_config.dart';
 import 'core/theme/app_theme.dart';
+import 'data/local/session_persistence.dart';
 import 'router/app_router.dart';
 
 class ZapieApp extends StatelessWidget {
@@ -17,7 +18,9 @@ class ZapieApp extends StatelessWidget {
       showPerformanceOverlay: AppConfig.showPerformanceOverlay,
       theme: buildAppTheme(),
       scrollBehavior: const _AppScrollBehavior(),
-      initialRoute: AppRoutes.login,
+      initialRoute: SessionPersistence.hasValidAuthSessionSync()
+          ? AppRoutes.dashboard
+          : AppRoutes.login,
       routes: buildRoutes(),
     );
   }

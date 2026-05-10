@@ -15,6 +15,13 @@ abstract class AdminDashboardRepository {
     required AuthSession authSession,
   });
 
+  Future<AdminClosedOrdersPage> fetchClosedOrdersHistory({
+    required AuthSession authSession,
+    int page = 1,
+    int pageSize = 15,
+    bool todayOnly = false,
+  });
+
   Future<AdminDashboardOrder> updateOrderProcessingStatus({
     required AuthSession authSession,
     required int checkoutOrderId,
@@ -31,13 +38,20 @@ abstract class AdminDashboardRepository {
   Future<AdminCatalogPosition> updatePositionActive({
     required AuthSession authSession,
     required int positionId,
-    required bool isActive,
+    bool? isActive,
+    double? price,
   });
 
   Future<AdminCatalogAddon> updateAddonActive({
     required AuthSession authSession,
     required int addonId,
-    required bool isActive,
+    bool? isActive,
+    double? price,
+  });
+
+  Future<AdminCatalogData> updateDeliveryMinimumAmount({
+    required AuthSession authSession,
+    required double amount,
   });
 }
 
@@ -101,6 +115,42 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
     }
 
     return AdminCatalogData.fromJson(decoded);
+  }
+
+  @override
+  Future<AdminClosedOrdersPage> fetchClosedOrdersHistory({
+    required AuthSession authSession,
+    int page = 1,
+    int pageSize = 15,
+    bool todayOnly = false,
+  }) async {
+    final response = await _client.get(
+      Uri.parse('$_apiBaseUrl/admin/orders/history').replace(
+        queryParameters: {
+          ..._identityQueryParameters(authSession),
+          'page': page.toString(),
+          'page_size': pageSize.toString(),
+          'today_only': todayOnly.toString(),
+        },
+      ),
+      headers: const {
+        'Accept': 'application/json',
+      },
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception(
+        'Nieoczekiwany format odpowiedzi z /admin/orders/history.',
+      );
+    }
+
+    return AdminClosedOrdersPage.fromJson(decoded);
   }
 
   @override
@@ -187,7 +237,8 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
   Future<AdminCatalogPosition> updatePositionActive({
     required AuthSession authSession,
     required int positionId,
-    required bool isActive,
+    bool? isActive,
+    double? price,
   }) async {
     final response = await _client
         .patch(
@@ -197,7 +248,8 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
             'Content-Type': 'application/json',
           },
           body: jsonEncode({
-            'is_active': isActive,
+            if (isActive != null) 'is_active': isActive,
+            if (price != null) 'price': price,
             'session_token': authSession.sessionToken,
             'user_email': authSession.email,
           }),
@@ -223,7 +275,8 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
   Future<AdminCatalogAddon> updateAddonActive({
     required AuthSession authSession,
     required int addonId,
-    required bool isActive,
+    bool? isActive,
+    double? price,
   }) async {
     final response = await _client
         .patch(
@@ -233,7 +286,8 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
             'Content-Type': 'application/json',
           },
           body: jsonEncode({
-            'is_active': isActive,
+            if (isActive != null) 'is_active': isActive,
+            if (price != null) 'price': price,
             'session_token': authSession.sessionToken,
             'user_email': authSession.email,
           }),
@@ -253,6 +307,41 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
     }
 
     return AdminCatalogAddon.fromJson(decoded);
+  }
+
+  @override
+  Future<AdminCatalogData> updateDeliveryMinimumAmount({
+    required AuthSession authSession,
+    required double amount,
+  }) async {
+    final response = await _client
+        .patch(
+          Uri.parse('$_apiBaseUrl/admin/catalog/delivery-minimum'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'amount': amount,
+            'session_token': authSession.sessionToken,
+            'user_email': authSession.email,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception(
+        'Nieoczekiwany format odpowiedzi z /admin/catalog/delivery-minimum.',
+      );
+    }
+
+    return AdminCatalogData.fromJson(decoded);
   }
 
   Map<String, String> _identityQueryParameters(AuthSession authSession) {

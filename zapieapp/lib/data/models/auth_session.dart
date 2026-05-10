@@ -4,6 +4,7 @@ class AuthSession {
     this.jwt,
     this.sessionToken,
     this.role,
+    this.authProvider = 'password',
     this.loyaltyPoints = 0,
   });
 
@@ -11,10 +12,13 @@ class AuthSession {
   final String? jwt;
   final String? sessionToken;
   final String? role;
+  final String authProvider;
   final int loyaltyPoints;
 
   bool get isAdmin => role == 'admin';
   bool get isEmployee => role == 'employee';
+  bool get isDriver => role == 'driver';
+  bool get isStaff => isAdmin || isEmployee || isDriver;
   bool get isUser => role == null || role == 'user';
 
   bool get hasIdentity =>
@@ -26,6 +30,7 @@ class AuthSession {
     String? jwt,
     String? sessionToken,
     String? role,
+    String? authProvider,
     int? loyaltyPoints,
   }) {
     return AuthSession(
@@ -33,6 +38,7 @@ class AuthSession {
       jwt: jwt ?? this.jwt,
       sessionToken: sessionToken ?? this.sessionToken,
       role: role ?? this.role,
+      authProvider: authProvider ?? this.authProvider,
       loyaltyPoints: loyaltyPoints ?? this.loyaltyPoints,
     );
   }
@@ -42,6 +48,7 @@ class AuthSession {
         'jwt': jwt,
         'sessionToken': sessionToken,
         'role': role,
+        'authProvider': authProvider,
         'loyaltyPoints': loyaltyPoints,
       };
 
@@ -52,6 +59,7 @@ class AuthSession {
         jwt: args['jwt']?.toString(),
         sessionToken: args['sessionToken']?.toString(),
         role: args['role']?.toString(),
+        authProvider: args['authProvider']?.toString() ?? 'password',
         loyaltyPoints: _asInt(args['loyaltyPoints']) ?? 0,
       );
     }

@@ -1,4 +1,13 @@
 class OrderOverview {
+  const OrderOverview({
+    required this.id,
+    required this.customerName,
+    required this.status,
+    required this.paymentMethod,
+    required this.createdLabel,
+    required this.itemCount,
+  });
+
   final int id;
   final String customerName;
   final String status;

@@ -128,10 +128,12 @@ class AdminCatalogAddon {
 
 class AdminCatalogData {
   const AdminCatalogData({
+    required this.deliveryMinimumAmount,
     required this.positions,
     required this.addons,
   });
 
+  final double deliveryMinimumAmount;
   final List<AdminCatalogPosition> positions;
   final List<AdminCatalogAddon> addons;
 
@@ -140,6 +142,8 @@ class AdminCatalogData {
     final addonsJson = json['addons'];
 
     return AdminCatalogData(
+      deliveryMinimumAmount:
+          _asDouble(json['delivery_minimum_amount']) ?? 20,
       positions: positionsJson is List
           ? positionsJson
               .whereType<Map>()
@@ -186,6 +190,10 @@ class AdminDashboardOrder {
     required this.addressSubtitle,
     this.notes,
     bool? supportsProgressUpdates = true,
+    this.canMarkInOven = true,
+    this.ovenSlotCount = 0,
+    this.ovenLoad = 0,
+    this.ovenCapacity = 6,
     this.unreadCustomerMessageCount = 0,
     this.assignedToMe = false,
     this.assignedOperatorEmail,
@@ -211,6 +219,10 @@ class AdminDashboardOrder {
   final String addressSubtitle;
   final String? notes;
   final bool? _supportsProgressUpdates;
+  final bool canMarkInOven;
+  final int ovenSlotCount;
+  final int ovenLoad;
+  final int ovenCapacity;
   final int unreadCustomerMessageCount;
   final bool assignedToMe;
   final String? assignedOperatorEmail;
@@ -256,6 +268,10 @@ class AdminDashboardOrder {
       addressSubtitle: json['address_subtitle']?.toString() ?? '',
       notes: json['notes']?.toString(),
       supportsProgressUpdates: json['supports_progress_updates'] != false,
+      canMarkInOven: json['can_mark_in_oven'] != false,
+      ovenSlotCount: _asInt(json['oven_slot_count']) ?? 0,
+      ovenLoad: _asInt(json['oven_load']) ?? 0,
+      ovenCapacity: _asInt(json['oven_capacity']) ?? 6,
       unreadCustomerMessageCount:
           _asInt(json['unread_customer_message_count']) ?? 0,
       assignedToMe: json['assigned_to_me'] == true,
@@ -301,6 +317,7 @@ class AdminDashboardData {
     required this.pendingOrders,
     required this.inProgressOrders,
     required this.closedOrders,
+    this.closedOrdersHasMore = false,
     required this.myTakenOrders,
   });
 
@@ -316,6 +333,7 @@ class AdminDashboardData {
   final List<AdminDashboardOrder> pendingOrders;
   final List<AdminDashboardOrder> inProgressOrders;
   final List<AdminDashboardOrder> closedOrders;
+  final bool closedOrdersHasMore;
   final List<AdminDashboardOrder> myTakenOrders;
 
   factory AdminDashboardData.fromJson(Map<String, dynamic> json) {
@@ -386,8 +404,45 @@ class AdminDashboardData {
                   ))
               .toList(growable: false)
           : const [],
+      closedOrdersHasMore: json['closed_orders_has_more'] == true,
       myTakenOrders: myTakenJson is List
           ? myTakenJson
+              .whereType<Map>()
+              .map(
+                (item) => AdminDashboardOrder.fromJson(
+                  Map<String, dynamic>.from(item),
+                ),
+              )
+              .toList(growable: false)
+          : const [],
+    );
+  }
+}
+
+class AdminClosedOrdersPage {
+  const AdminClosedOrdersPage({
+    required this.page,
+    required this.pageSize,
+    required this.totalCount,
+    required this.hasMore,
+    required this.orders,
+  });
+
+  final int page;
+  final int pageSize;
+  final int totalCount;
+  final bool hasMore;
+  final List<AdminDashboardOrder> orders;
+
+  factory AdminClosedOrdersPage.fromJson(Map<String, dynamic> json) {
+    final ordersJson = json['orders'];
+    return AdminClosedOrdersPage(
+      page: _asInt(json['page']) ?? 1,
+      pageSize: _asInt(json['page_size']) ?? 15,
+      totalCount: _asInt(json['total_count']) ?? 0,
+      hasMore: json['has_more'] == true,
+      orders: ordersJson is List
+          ? ordersJson
               .whereType<Map>()
               .map(
                 (item) => AdminDashboardOrder.fromJson(

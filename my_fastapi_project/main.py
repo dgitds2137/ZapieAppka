@@ -1,13 +1,15 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime
-import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from sqlalchemy.orm import Session, joinedload
 
-from db import get_db
+from config import get_settings
+from db import ensure_database_schema, get_db, get_engine
 from checkout_service import CheckoutService
 from loyalty import loyalty_points_for_price
 from prep_time_config import infer_prep_group_key, prep_group_label
@@ -21,6 +23,7 @@ from models import (
     DeliveryOrderIn,
     DeliveryOrderOut,
     DEFAULT_USER_ROLE,
+    DRIVER_ROLE,
     EMPLOYEE_ROLE,
     KitchenUpdateCreate,
     KitchenUpdateDB,
@@ -46,14 +49,24 @@ import bcrypt
 import jwt
 import uuid
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-local-jwt-secret")
+settings = get_settings()
+SECRET_KEY = settings.jwt_secret_key
 ALGORITHM = "HS256"
 
-app = FastAPI(title="Order & Kitchen Service API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.require_database_on_startup:
+        ensure_database_schema()
+    yield
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
-    allow_credentials=True,
+    allow_origins=settings.cors_allow_origins,
+    allow_origin_regex=settings.cors_allow_origin_regex,
+    allow_credentials=settings.cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -62,6 +75,22 @@ app.mount(
     StaticFiles(directory=Path(__file__).resolve().parent / "assets", check_dir=False),
     name="assets",
 )
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "app": settings.app_name,
+        "environment": settings.environment,
+    }
+
+
+@app.get("/health/db")
+def health_db():
+    with get_engine().connect() as connection:
+        connection.execute(text("SELECT 1"))
+    return {"status": "ok", "database": "ok"}
 
 class MenuService:
     def __init__(self, db: Session):
@@ -308,7 +337,7 @@ class UserService:
         normalized = (role or DEFAULT_USER_ROLE).strip().lower()
         if normalized == "client":
             return DEFAULT_USER_ROLE
-        if normalized in {DEFAULT_USER_ROLE, EMPLOYEE_ROLE, ADMIN_ROLE}:
+        if normalized in {DEFAULT_USER_ROLE, EMPLOYEE_ROLE, DRIVER_ROLE, ADMIN_ROLE}:
             return normalized
         return DEFAULT_USER_ROLE
 
