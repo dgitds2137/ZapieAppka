@@ -1,8 +1,9 @@
 # ZapieApp API na Azure
 
-Najprostszy pasujacy wariant na ten etap: Azure App Service for Linux z Pythonem.
-Backend jest pojedyncza aplikacja FastAPI, a App Service daje publiczny HTTPS, App Settings
-na sekrety i prosty deploy bez Kubernetes ani osobnej orkiestracji.
+Rekomendowany wariant dla ciaglego developmentu: Azure Container Apps + Azure
+Container Registry + GitHub Actions. Backend jest budowany z `Dockerfile`, wiec
+systemowe zaleznosci, w tym ODBC Driver 18 dla SQL Server, sa wersjonowane razem
+z aplikacja. Push do `main` buduje obraz i publikuje nowa rewizje API.
 
 ## Lokalnie
 
@@ -26,55 +27,133 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/health/db
 ```
 
-## Azure App Service
+## Azure Container Apps CI/CD
 
-Uruchamiaj deploy z katalogu `my_fastapi_project`, bo tam jest `requirements.txt`.
+Workflow jest w `.github/workflows/deploy-api-containerapp.yml`.
+
+W GitHub ustaw repository variables:
+
+```text
+AZURE_RESOURCE_GROUP=rg-zapieapp-dev
+AZURE_CONTAINER_REGISTRY_NAME=<unikalna-nazwa-acr>
+AZURE_CONTAINER_APP_ENVIRONMENT=zapieapp-api-env
+AZURE_CONTAINER_APP_NAME=zapieapp-api-dev-alpha
+```
+
+W GitHub ustaw repository secrets:
+
+```text
+AZURE_CLIENT_ID=<client id aplikacji Entra z federated credential>
+AZURE_TENANT_ID=<tenant id>
+AZURE_SUBSCRIPTION_ID=<subscription id>
+```
+
+Sekrety runtime trzymaj w Azure Container App, nie w repo:
+
+```text
+mssql-conn-str
+jwt-secret-key
+```
+
+Jednorazowy setup najlepiej uruchomic w Azure Cloud Shell:
 
 ```powershell
-cd C:\FFApi\my_fastapi_project
-
 $RG="rg-zapieapp-dev"
 $APP="zapieapp-api-dev-alpha"
+$ENV="zapieapp-api-env"
+$ACR="<unikalna-nazwa-acr>"
 $LOCATION="westeurope"
+$REPO="dgitds2137/ZapieAppka"
 
 az login
-az webapp up `
-  --resource-group $RG `
-  --name $APP `
-  --location $LOCATION `
-  --runtime "PYTHON:3.11" `
-  --sku B1 `
-  --logs
+az extension add --name containerapp --upgrade
+az provider register --namespace Microsoft.App
+az provider register --namespace Microsoft.OperationalInsights
 
-az webapp config set `
-  --resource-group $RG `
-  --name $APP `
-  --startup-file "bash startup.sh"
+az group create --name $RG --location $LOCATION
+az acr create --resource-group $RG --name $ACR --sku Basic
+az containerapp env create --resource-group $RG --name $ENV --location $LOCATION
 
-az webapp config appsettings set `
+$MSSQL_CONN_STR="mssql+pyodbc://USER:PASSWORD@SERVER.database.windows.net:1433/DATABASE?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no&loginTimeout=1200"
+$JWT_SECRET_KEY="TU_DLUGI_LOSOWY_SECRET"
+
+az containerapp create `
   --resource-group $RG `
   --name $APP `
-  --settings `
+  --environment $ENV `
+  --image mcr.microsoft.com/azuredocs/containerapps-helloworld:latest `
+  --ingress external `
+  --target-port 8000 `
+  --secrets "mssql-conn-str=$MSSQL_CONN_STR" "jwt-secret-key=$JWT_SECRET_KEY" `
+  --env-vars `
     APP_ENV=production `
-    SCM_DO_BUILD_DURING_DEPLOYMENT=true `
-    JWT_SECRET_KEY="TU_DLUGI_LOSOWY_SECRET" `
-    MSSQL_CONN_STR="mssql+pyodbc://USER:PASSWORD@SERVER.database.windows.net:1433/DATABASE?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no&loginTimeout=1200" `
-    CORS_ALLOW_ORIGIN_REGEX="^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    PORT=8000 `
+    REQUIRE_DATABASE_ON_STARTUP=false `
+    MSSQL_CONN_STR=secretref:mssql-conn-str `
+    JWT_SECRET_KEY=secretref:jwt-secret-key
 
-az webapp restart --resource-group $RG --name $APP
+az containerapp identity assign `
+  --resource-group $RG `
+  --name $APP `
+  --system-assigned
+
+$ACR_ID=$(az acr show --resource-group $RG --name $ACR --query id --output tsv)
+$PRINCIPAL_ID=$(az containerapp identity show --resource-group $RG --name $APP --query principalId --output tsv)
+
+az role assignment create `
+  --assignee-object-id $PRINCIPAL_ID `
+  --assignee-principal-type ServicePrincipal `
+  --role AcrPull `
+  --scope $ACR_ID
+
+az containerapp registry set `
+  --resource-group $RG `
+  --name $APP `
+  --server "$ACR.azurecr.io" `
+  --identity system
+
+$APPREG="zapieapp-github-actions"
+$APP_ID=$(az ad app create --display-name $APPREG --query appId --output tsv)
+az ad sp create --id $APP_ID
+
+$SUBSCRIPTION_ID=$(az account show --query id --output tsv)
+$TENANT_ID=$(az account show --query tenantId --output tsv)
+
+az role assignment create `
+  --assignee $APP_ID `
+  --role Contributor `
+  --scope "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RG"
+
+az role assignment create `
+  --assignee $APP_ID `
+  --role AcrPush `
+  --scope $ACR_ID
+
+@{
+  name = "github-main"
+  issuer = "https://token.actions.githubusercontent.com"
+  subject = "repo:$REPO`:ref:refs/heads/main"
+  audiences = @("api://AzureADTokenExchange")
+} | ConvertTo-Json | Out-File federated-credential.json -Encoding utf8
+
+az ad app federated-credential create --id $APP_ID --parameters federated-credential.json
+
+Write-Output "Set GitHub secret AZURE_CLIENT_ID=$APP_ID"
+Write-Output "Set GitHub secret AZURE_TENANT_ID=$TENANT_ID"
+Write-Output "Set GitHub secret AZURE_SUBSCRIPTION_ID=$SUBSCRIPTION_ID"
 ```
 
 Adres API:
 
 ```text
-https://<nazwa-app-service>.azurewebsites.net
+https://<container-app-fqdn>
 ```
 
 Healthcheck:
 
 ```text
-https://<nazwa-app-service>.azurewebsites.net/health
-https://<nazwa-app-service>.azurewebsites.net/health/db
+https://<container-app-fqdn>/health
+https://<container-app-fqdn>/health/db
 ```
 
 ## Flutter z lokalnym albo publicznym API
@@ -96,17 +175,16 @@ flutter run --dart-define=API_BASE_URL=http://ADRES_IP_KOMPUTERA:8000
 Azure:
 
 ```powershell
-flutter run --dart-define=API_BASE_URL=https://<nazwa-app-service>.azurewebsites.net
+flutter run --dart-define=API_BASE_URL=https://<container-app-fqdn>
 ```
 
 Domyslnie aplikacja Flutter nadal uzywa `http://127.0.0.1:8000`, jesli nie podasz
 `API_BASE_URL`.
 
-## Uwaga o SQL Server ODBC
+## Release flow
 
-Projekt uzywa `mssql+pyodbc`. Jezeli App Service zwroci blad typu `Can't open lib
-'ODBC Driver 18 for SQL Server'`, najprostsze sa dwie sciezki:
-
-1. zmienic driver w `MSSQL_CONN_STR` na dostepny w runtime, np. `ODBC Driver 17 for SQL Server`;
-2. przejsc na kontener w App Service albo Azure Container Apps i zainstalowac sterownik ODBC
-   w Dockerfile.
+1. Commituj zmiany do `main`.
+2. GitHub Actions odpala walidacje backendu.
+3. Workflow buduje obraz z `my_fastapi_project/Dockerfile`.
+4. Obraz trafia do ACR z tagiem commit SHA.
+5. Azure Container Apps tworzy nowa rewizje i smoke test sprawdza `/health`.

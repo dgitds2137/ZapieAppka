@@ -1,0 +1,147 @@
+name: Deploy API to Azure Container Apps
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "my_fastapi_project/**"
+      - ".github/workflows/deploy-api-containerapp.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-api-main
+  cancel-in-progress: true
+
+env:
+  APP_SOURCE_PATH: my_fastapi_project
+  IMAGE_REPOSITORY: zapieapp-api
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  AZURE_CONTAINER_REGISTRY_NAME: ${{ vars.AZURE_CONTAINER_REGISTRY_NAME }}
+  AZURE_CONTAINER_APP_NAME: ${{ vars.AZURE_CONTAINER_APP_NAME }}
+  AZURE_CONTAINER_APP_ENVIRONMENT: ${{ vars.AZURE_CONTAINER_APP_ENVIRONMENT }}
+
+jobs:
+  deploy:
+    name: Build and deploy API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate workflow variables
+        shell: bash
+        run: |
+          missing=0
+          for name in \
+            AZURE_RESOURCE_GROUP \
+            AZURE_CONTAINER_REGISTRY_NAME \
+            AZURE_CONTAINER_APP_NAME \
+            AZURE_CONTAINER_APP_ENVIRONMENT
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error::Set GitHub Actions variable $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate FastAPI package
+        working-directory: my_fastapi_project
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m compileall .
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          import main
+
+          response = TestClient(main.app).get("/health")
+          response.raise_for_status()
+          print(response.json())
+          PY
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Check Azure resources
+        shell: bash
+        run: |
+          az acr show \
+            --name "$AZURE_CONTAINER_REGISTRY_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query loginServer \
+            --output tsv
+
+          az containerapp show \
+            --name "$AZURE_CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query name \
+            --output tsv
+
+          for secret_name in mssql-conn-str jwt-secret-key; do
+            count="$(az containerapp secret list \
+              --name "$AZURE_CONTAINER_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?name=='$secret_name'] | length(@)" \
+              --output tsv)"
+            if [ "$count" != "1" ]; then
+              echo "::error::Missing Container App secret: $secret_name"
+              exit 1
+            fi
+          done
+
+      - name: Build and deploy container app
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          appSourcePath: ${{ github.workspace }}/my_fastapi_project
+          dockerfilePath: Dockerfile
+          acrName: ${{ vars.AZURE_CONTAINER_REGISTRY_NAME }}
+          imageToBuild: ${{ vars.AZURE_CONTAINER_REGISTRY_NAME }}.azurecr.io/zapieapp-api:${{ github.sha }}
+          containerAppName: ${{ vars.AZURE_CONTAINER_APP_NAME }}
+          resourceGroup: ${{ vars.AZURE_RESOURCE_GROUP }}
+          containerAppEnvironment: ${{ vars.AZURE_CONTAINER_APP_ENVIRONMENT }}
+          targetPort: 8000
+          ingress: external
+          environmentVariables: |
+            APP_ENV=production
+            PORT=8000
+            REQUIRE_DATABASE_ON_STARTUP=false
+            MSSQL_CONN_STR=secretref:mssql-conn-str
+            JWT_SECRET_KEY=secretref:jwt-secret-key
+          disableTelemetry: true
+
+      - name: Smoke test deployed API
+        shell: bash
+        run: |
+          fqdn="$(az containerapp show \
+            --name "$AZURE_CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query properties.configuration.ingress.fqdn \
+            --output tsv)"
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --show-error "https://$fqdn/health"; then
+              echo
+              echo "API is healthy at https://$fqdn"
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error::API health check failed at https://$fqdn/health"
+          exit 1
