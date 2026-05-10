@@ -63,6 +63,7 @@ def ensure_database_schema() -> None:
                 ("admin_user.sql", False),
                 ("employee_user.sql", False),
                 ("driver_user.sql", False),
+                ("demo_user.sql", True),
                 ("menu_addons.sql", True),
                 ("checkout_orders.sql", True),
             ):
