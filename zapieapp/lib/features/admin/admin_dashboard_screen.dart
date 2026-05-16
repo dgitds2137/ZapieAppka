@@ -11,6 +11,7 @@ import '../../data/models/auth_session.dart';
 import '../../data/models/checkout_verification.dart';
 import '../../data/repositories/admin_dashboard_repository.dart';
 import '../../data/repositories/checkout_repository.dart';
+import '../shared/opening_hours_banner.dart';
 import '../../router/app_router.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
@@ -364,6 +365,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         onClose: () => Navigator.of(dialogContext).pop(),
       ),
     );
+    if (!mounted) {
+      return;
+    }
+    await _loadDashboard(showLoading: false);
   }
 
   Future<void> _updatePrepTimeSetting(
@@ -535,6 +540,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 onRefresh: _loadDashboard,
                 onLogout: _logout,
               ),
+              const SizedBox(height: 14),
+              OpeningHoursBanner(hours: dashboard.openingHours),
               const SizedBox(height: 18),
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -3148,13 +3155,18 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
 
   AdminCatalogData _copyCatalog({
     required AdminCatalogData current,
+    AdminCatalogData? replacement,
     List<AdminCatalogPosition>? positions,
     List<AdminCatalogAddon>? addons,
   }) {
+    if (replacement != null) {
+      return replacement;
+    }
     return AdminCatalogData(
       deliveryMinimumAmount: current.deliveryMinimumAmount,
       deliveryRadiusKm: current.deliveryRadiusKm,
       deliveryOriginAddress: current.deliveryOriginAddress,
+      openingHours: current.openingHours,
       positions: positions ?? current.positions,
       addons: addons ?? current.addons,
     );
@@ -3449,6 +3461,216 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
       );
     } finally {
       controller.dispose();
+    }
+  }
+
+  String? _normalizeOpeningHoursValue(String rawValue) {
+    final normalized = rawValue.trim();
+    final match =
+        RegExp(r'^([01]\d|2[0-3]):([0-5]\d)$').firstMatch(normalized);
+    if (match == null) {
+      return null;
+    }
+    return normalized;
+  }
+
+  int _openingHoursToMinutes(String value) {
+    final parts = value.split(':');
+    return (int.parse(parts[0]) * 60) + int.parse(parts[1]);
+  }
+
+  Future<({String openTime, String closeTime})?> _showOpeningHoursEditorDialog({
+    required String openTime,
+    required String closeTime,
+  }) async {
+    final openController = TextEditingController(text: openTime);
+    final closeController = TextEditingController(text: closeTime);
+    String? errorText;
+
+    try {
+      return await showDialog<({String openTime, String closeTime})>(
+        context: context,
+        barrierColor: const Color(0xC4000000),
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            backgroundColor: const Color(0xFF181311),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(22),
+            ),
+            title: Text(
+              'Godziny otwarcia lokalu',
+              style: Theme.of(dialogContext).textTheme.titleLarge?.copyWith(
+                    color: const Color(0xFFF8EEE7),
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: openController,
+                  keyboardType: TextInputType.datetime,
+                  autofocus: true,
+                  style: const TextStyle(color: Color(0xFFF8EEE7)),
+                  decoration: InputDecoration(
+                    labelText: 'Otwarcie',
+                    hintText: 'HH:mm',
+                    errorText: errorText,
+                    hintStyle: const TextStyle(color: Color(0x80F8EEE7)),
+                    filled: true,
+                    fillColor: const Color(0xFF26201D),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0x24FFFFFF)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0x24FFFFFF)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0x66FFB061)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: closeController,
+                  keyboardType: TextInputType.datetime,
+                  style: const TextStyle(color: Color(0xFFF8EEE7)),
+                  decoration: InputDecoration(
+                    labelText: 'Zamkniecie',
+                    hintText: 'HH:mm',
+                    hintStyle: const TextStyle(color: Color(0x80F8EEE7)),
+                    filled: true,
+                    fillColor: const Color(0xFF26201D),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0x24FFFFFF)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0x24FFFFFF)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(color: Color(0x66FFB061)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Podaj godziny w formacie HH:mm, np. 12:00 i 21:00.',
+                  style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFFD0C1B5),
+                        height: 1.35,
+                      ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text(
+                  'Anuluj',
+                  style: TextStyle(
+                    color: Color(0xFFD0C1B5),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final normalizedOpen =
+                      _normalizeOpeningHoursValue(openController.text);
+                  final normalizedClose =
+                      _normalizeOpeningHoursValue(closeController.text);
+                  if (normalizedOpen == null || normalizedClose == null) {
+                    setDialogState(() {
+                      errorText = 'Uzyj formatu HH:mm.';
+                    });
+                    return;
+                  }
+                  if (_openingHoursToMinutes(normalizedClose) <=
+                      _openingHoursToMinutes(normalizedOpen)) {
+                    setDialogState(() {
+                      errorText =
+                          'Godzina zamkniecia musi byc pozniejsza niz otwarcia.';
+                    });
+                    return;
+                  }
+                  Navigator.of(dialogContext).pop(
+                    (
+                      openTime: normalizedOpen,
+                      closeTime: normalizedClose,
+                    ),
+                  );
+                },
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFE98B38),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text(
+                  'Zapisz',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      openController.dispose();
+      closeController.dispose();
+    }
+  }
+
+  Future<void> _editOpeningHours() async {
+    final currentHours = _catalog?.openingHours;
+    final nextHours = await _showOpeningHoursEditorDialog(
+      openTime: currentHours?.openTime ?? '12:00',
+      closeTime: currentHours?.closeTime ?? '21:00',
+    );
+    if (nextHours == null) {
+      return;
+    }
+
+    const busyKey = 'opening-hours';
+    setState(() {
+      _busyItems.add(busyKey);
+    });
+
+    try {
+      final updatedCatalog = await widget.repository.updateOpeningHours(
+        authSession: widget.authSession,
+        openTime: nextHours.openTime,
+        closeTime: nextHours.closeTime,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _catalog = updatedCatalog;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Zaktualizowano godziny otwarcia lokalu.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyItems.remove(busyKey);
+        });
+      }
     }
   }
 
@@ -3771,6 +3993,15 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
             busy: _busyItems.contains('delivery-origin-address'),
             onEdit: _editDeliveryOriginAddress,
           ),
+          const SizedBox(height: 10),
+          _CatalogSettingTile(
+            title: 'Godziny otwarcia lokalu',
+            valueLabel: catalog?.openingHours.formattedRange ?? '12:00-21:00',
+            subtitle:
+                'Ten zakres jest pokazywany na dashboardzie klienta oraz panelach admina, pracownika i kierowcy.',
+            busy: _busyItems.contains('opening-hours'),
+            onEdit: _editOpeningHours,
+          ),
           const SizedBox(height: 18),
           _CatalogSectionHeader(
             title: 'Produkty',
@@ -3840,7 +4071,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Administrator moze tutaj sterowac dostepnoscia, cenami i minimum dla dostawy.',
+                    'Administrator moze tutaj sterowac dostepnoscia, cenami, dostawa i godzinami otwarcia.',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                           color: const Color(0xFFD4C4B8),
                           height: 1.35,
@@ -3885,7 +4116,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Administrator moze tutaj sterowac dostepnoscia, cenami i minimum dla dostawy.',
+                          'Administrator moze tutaj sterowac dostepnoscia, cenami, dostawa i godzinami otwarcia.',
                           style:
                               Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: const Color(0xFFD4C4B8),

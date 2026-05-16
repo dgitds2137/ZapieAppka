@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from models import (
     AdminCatalogAddonOut,
     AdminCatalogDeliveryMinimumUpdateIn,
+    AdminCatalogOpeningHoursUpdateIn,
     AdminCatalogDeliveryOriginAddressUpdateIn,
     AdminCatalogDeliveryRadiusUpdateIn,
     AdminCatalogItemUpdateIn,
@@ -30,6 +31,7 @@ from models import (
     DeliveryAddressValidationIn,
     DeliveryAddressValidationOut,
     MenuAddonSchema,
+    OpeningHoursOut,
     PrepTimeSettingOut,
     PrepTimeSettingUpdateIn,
     UserSchema,
@@ -54,6 +56,10 @@ def routes(MenuService, UserService, CheckoutService, get_db):
     @r.get("/positions")
     def get_positions(db: Session = Depends(get_db)):
         return MenuService(db).get_all_positions()
+
+    @r.get("/opening-hours", response_model=OpeningHoursOut)
+    def get_opening_hours(db: Session = Depends(get_db)):
+        return CheckoutService(db).get_opening_hours()
 
     @r.get("/position/{position_id}/addons", response_model=list[MenuAddonSchema])
     def get_position_addons(position_id: int, db: Session = Depends(get_db)):
@@ -269,6 +275,18 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         db: Session = Depends(get_db),
     ):
         return CheckoutService(db).update_delivery_radius(
+            payload=payload,
+        )
+
+    @r.patch(
+        "/admin/catalog/opening-hours",
+        response_model=AdminCatalogOut,
+    )
+    def update_admin_opening_hours(
+        payload: AdminCatalogOpeningHoursUpdateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).update_opening_hours(
             payload=payload,
         )
 

@@ -457,10 +457,18 @@ class AdminCatalogAddonOut(BaseModel):
     is_active: bool = True
 
 
+class OpeningHoursOut(BaseModel):
+    open_time: str
+    close_time: str
+    formatted_range: str
+    is_open_now: bool
+
+
 class AdminCatalogOut(BaseModel):
     delivery_minimum_amount: float
     delivery_radius_km: float
     delivery_origin_address: str
+    opening_hours: OpeningHoursOut
     positions: list[AdminCatalogPositionOut]
     addons: list[AdminCatalogAddonOut]
 
@@ -486,6 +494,13 @@ class AdminCatalogDeliveryRadiusUpdateIn(BaseModel):
 
 class AdminCatalogDeliveryOriginAddressUpdateIn(BaseModel):
     address: str
+    session_token: str | None = None
+    user_email: EmailStr | None = None
+
+
+class AdminCatalogOpeningHoursUpdateIn(BaseModel):
+    open_time: str
+    close_time: str
     session_token: str | None = None
     user_email: EmailStr | None = None
 
@@ -690,6 +705,7 @@ class AdminDashboardOut(BaseModel):
     logged_in_employee_count: int
     active_employees: list[AdminDashboardActiveEmployeeOut]
     prep_time_settings: list[PrepTimeSettingOut]
+    opening_hours: OpeningHoursOut
     oven_load: int = 0
     oven_capacity: int = 6
     udka_oven_load: int = 0

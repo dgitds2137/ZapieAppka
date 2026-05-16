@@ -68,6 +68,12 @@ abstract class AdminDashboardRepository {
     required AuthSession authSession,
     required String address,
   });
+
+  Future<AdminCatalogData> updateOpeningHours({
+    required AuthSession authSession,
+    required String openTime,
+    required String closeTime,
+  });
 }
 
 class HttpAdminDashboardRepository implements AdminDashboardRepository {
@@ -453,6 +459,44 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
     if (decoded is! Map<String, dynamic>) {
       throw Exception(
         'Nieoczekiwany format odpowiedzi z /admin/catalog/delivery-origin-address.',
+      );
+    }
+
+    return AdminCatalogData.fromJson(decoded);
+  }
+
+  @override
+  Future<AdminCatalogData> updateOpeningHours({
+    required AuthSession authSession,
+    required String openTime,
+    required String closeTime,
+  }) async {
+    final response = await _client
+        .patch(
+          Uri.parse('$_apiBaseUrl/admin/catalog/opening-hours'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'open_time': openTime,
+            'close_time': closeTime,
+            'session_token': authSession.sessionToken,
+            'user_email': authSession.email,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Backend zwrocil ${response.statusCode}: ${response.body}',
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception(
+        'Nieoczekiwany format odpowiedzi z /admin/catalog/opening-hours.',
       );
     }
 

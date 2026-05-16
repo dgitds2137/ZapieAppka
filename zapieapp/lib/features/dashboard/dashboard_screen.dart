@@ -9,10 +9,13 @@ import '../../core/config/app_config.dart';
 import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
 import '../../data/models/checkout_verification.dart';
+import '../../data/models/opening_hours.dart';
 import '../../data/repositories/checkout_repository.dart';
+import '../../data/repositories/opening_hours_repository.dart';
 import '../admin/admin_dashboard_screen.dart';
 import '../orders/order_list_screen.dart';
 import '../orders/order_tracking_screen.dart';
+import '../shared/opening_hours_banner.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -28,8 +31,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   static final CheckoutRepository _checkoutRepository = HttpCheckoutRepository(
     apiBaseUrl: _apiBaseUrl,
   );
+  static final OpeningHoursRepository _openingHoursRepository =
+      OpeningHoursRepository(
+    apiBaseUrl: _apiBaseUrl,
+  );
 
   late Future<List<Map<String, dynamic>>> _positionsFuture;
+  late Future<OpeningHoursData?> _openingHoursFuture;
   AuthSession _authSession = const AuthSession();
   String? _authSessionKey;
   final List<_CartEntry> _cart = [];
@@ -42,6 +50,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _positionsFuture = _fetchPositions();
+    _openingHoursFuture = _fetchOpeningHours();
     final storedAuthSession = SessionPersistence.loadAuthSessionSync();
     final storedCheckout = SessionPersistence.loadActiveCheckoutSync();
     final cachedCheckout = _checkoutRepository.cachedActiveCheckout;
@@ -96,9 +105,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _reload() {
     setState(() {
       _positionsFuture = _fetchPositions();
+      _openingHoursFuture = _fetchOpeningHours();
     });
     _loadActiveCheckout();
     _loadLoyaltyPoints();
+  }
+
+  Future<OpeningHoursData?> _fetchOpeningHours() async {
+    try {
+      return await _openingHoursRepository.fetchOpeningHours();
+    } catch (_) {
+      return null;
+    }
   }
 
   void _syncAuthSessionFromRoute() {
@@ -482,8 +500,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       hasBottomModule ? 206 : 110,
                     ),
                     children: [
-                      const _OpeningHoursCard(),
-                      const SizedBox(height: 12),
+                      FutureBuilder<OpeningHoursData?>(
+                        future: _openingHoursFuture,
+                        builder: (context, openingHoursSnapshot) {
+                          final openingHours = openingHoursSnapshot.data;
+                          if (openingHours == null) {
+                            return const SizedBox.shrink();
+                          }
+                          return Column(
+                            children: [
+                              OpeningHoursBanner(hours: openingHours),
+                              const SizedBox(height: 12),
+                            ],
+                          );
+                        },
+                      ),
                       _CategoryBlock(
                         categories: dashboardCategories,
                         crossAxisCount: crossAxisCount,
@@ -604,109 +635,6 @@ class _CategoryBlock extends StatelessWidget {
         onTap: categories[index].items.isEmpty
             ? null
             : () => onCategoryTap(categories[index]),
-      ),
-    );
-  }
-}
-
-class _OpeningHoursCard extends StatelessWidget {
-  const _OpeningHoursCard();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hours = _todayOpeningHours();
-    final statusColor =
-        hours.isOpen ? const Color(0xFF62D48F) : const Color(0xFFF0AA6B);
-    final statusBackground =
-        hours.isOpen ? const Color(0x1E62D48F) : const Color(0x1EF0AA6B);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0x24FFFFFF)),
-        gradient: const LinearGradient(
-          colors: [Color(0xF11A1715), Color(0xEB13100F), Color(0xE1141110)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x16000000),
-            blurRadius: 18,
-            offset: Offset(0, 10),
-          ),
-          BoxShadow(
-            color: Color(0x14FF7A1A),
-            blurRadius: 20,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(14),
-              gradient: const LinearGradient(
-                colors: [Color(0xFFE98A42), Color(0xFFCC5F1A)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: const Icon(
-              Icons.schedule_rounded,
-              size: 20,
-              color: Color(0xFFFFF5EE),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Dzisiaj',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: const Color(0xFFD8C6B9),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  hours.primaryLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: const Color(0xFFFFF4EC),
-                    fontWeight: FontWeight.w900,
-                    height: 1.05,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            decoration: BoxDecoration(
-              color: statusBackground,
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: statusColor.withValues(alpha: 0.35)),
-            ),
-            child: Text(
-              hours.statusLabel,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: statusColor,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -6309,26 +6237,6 @@ class _UdkaPickupEstimate {
   final DateTime scheduledPickupAt;
 }
 
-class _OpeningHoursInfo {
-  const _OpeningHoursInfo({
-    required this.openHour,
-    required this.closeHour,
-    required this.isOpen,
-  });
-
-  final int openHour;
-  final int closeHour;
-  final bool isOpen;
-
-  String get formattedRange =>
-      '${openHour.toString().padLeft(2, '0')}:00-${closeHour.toString().padLeft(2, '0')}:00';
-
-  String get primaryLabel =>
-      isOpen ? 'Dzisiaj otwarte $formattedRange' : 'Dzisiaj $formattedRange';
-
-  String get statusLabel => isOpen ? 'Otwarte' : 'Zamkniete';
-}
-
 String _udkaPickupEtaLabel({DateTime? now}) =>
     _formatScheduledPickupDetailed(_nextUdkaPickupSlot(now: now), now: now);
 
@@ -6380,18 +6288,6 @@ bool _isSameCalendarDay(DateTime left, DateTime right) {
   return left.year == right.year &&
       left.month == right.month &&
       left.day == right.day;
-}
-
-_OpeningHoursInfo _todayOpeningHours({DateTime? now}) {
-  final localNow = (now ?? DateTime.now()).toLocal();
-  const openHour = 12;
-  const closeHour = 21;
-  final isOpen = localNow.hour >= openHour && localNow.hour < closeHour;
-  return _OpeningHoursInfo(
-    openHour: openHour,
-    closeHour: closeHour,
-    isOpen: isOpen,
-  );
 }
 
 DateTime _nextUdkaPickupSlot({DateTime? now}) {

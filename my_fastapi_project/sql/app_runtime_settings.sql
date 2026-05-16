@@ -86,6 +86,18 @@ BEGIN
             N'Adres lokalu dla dostaw' AS label,
             CAST(0.00 AS DECIMAL(10, 2)) AS decimal_value,
             CAST(N'' AS NVARCHAR(500)) AS string_value
+        UNION ALL
+        SELECT
+            N'opening_hours_open_time' AS setting_key,
+            N'Godzina otwarcia lokalu' AS label,
+            CAST(0.00 AS DECIMAL(10, 2)) AS decimal_value,
+            CAST(N'12:00' AS NVARCHAR(500)) AS string_value
+        UNION ALL
+        SELECT
+            N'opening_hours_close_time' AS setting_key,
+            N'Godzina zamkniecia lokalu' AS label,
+            CAST(0.00 AS DECIMAL(10, 2)) AS decimal_value,
+            CAST(N'21:00' AS NVARCHAR(500)) AS string_value
     ) AS source
         ON target.setting_key = source.setting_key
     WHEN MATCHED THEN

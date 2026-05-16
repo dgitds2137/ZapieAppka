@@ -27,6 +27,7 @@ from models import (
     AdminDashboardActiveEmployeeOut,
     AdminCatalogAddonOut,
     AdminCatalogDeliveryMinimumUpdateIn,
+    AdminCatalogOpeningHoursUpdateIn,
     AdminCatalogDeliveryOriginAddressUpdateIn,
     AdminCatalogDeliveryRadiusUpdateIn,
     AdminCatalogItemUpdateIn,
@@ -61,6 +62,7 @@ from models import (
     CheckoutItemPayload,
     MenuAddonDB,
     MenuPositionDB,
+    OpeningHoursOut,
     PrepTimeSettingOut,
     PrepTimeSettingUpdateIn,
     ProductPrepTimeSettingDB,
@@ -88,6 +90,10 @@ class CheckoutService:
     _DEFAULT_DELIVERY_RADIUS_KM = 8.0
     _DELIVERY_RADIUS_SETTING_KEY = "delivery_radius_km"
     _DELIVERY_ORIGIN_ADDRESS_SETTING_KEY = "delivery_origin_address"
+    _DEFAULT_OPENING_TIME = "12:00"
+    _DEFAULT_CLOSING_TIME = "21:00"
+    _OPENING_TIME_SETTING_KEY = "opening_hours_open_time"
+    _CLOSING_TIME_SETTING_KEY = "opening_hours_close_time"
     _DELIVERY_IN_PROGRESS_STAGES = {
         "on_the_way",
         "delivery_started",
@@ -549,6 +555,7 @@ class CheckoutService:
             logged_in_employee_count=0 if is_limited_staff_view else logged_in_employee_count,
             active_employees=[] if is_limited_staff_view else active_employees,
             prep_time_settings=[] if is_driver_view else self._get_prep_time_settings(),
+            opening_hours=self.get_opening_hours(now=now),
             oven_load=current_oven_load,
             oven_capacity=self._OVEN_CAPACITY,
             udka_oven_load=current_udka_oven_load,
@@ -642,6 +649,7 @@ class CheckoutService:
             delivery_minimum_amount=self._get_delivery_minimum_amount(),
             delivery_radius_km=self._get_delivery_radius_km(),
             delivery_origin_address=self._get_delivery_origin_address(),
+            opening_hours=self.get_opening_hours(),
             positions=[
                 AdminCatalogPositionOut(
                     position_id=position.position_id,
@@ -818,6 +826,63 @@ class CheckoutService:
             setting_key=self._DELIVERY_ORIGIN_ADDRESS_SETTING_KEY,
             label="Adres lokalu dla dostaw",
             string_value=geocoded_origin["display_name"],
+            updated_by_user_id=operator.user_id,
+        )
+        return self.get_admin_catalog(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+
+    def get_opening_hours(
+        self,
+        now: datetime | None = None,
+    ) -> OpeningHoursOut:
+        open_time = self._get_opening_time()
+        close_time = self._get_closing_time()
+        is_open_now = self._is_open_now(
+            open_time=open_time,
+            close_time=close_time,
+            now=now,
+        )
+        return OpeningHoursOut(
+            open_time=open_time,
+            close_time=close_time,
+            formatted_range=f"{open_time}-{close_time}",
+            is_open_now=is_open_now,
+        )
+
+    def update_opening_hours(
+        self,
+        payload: AdminCatalogOpeningHoursUpdateIn,
+    ) -> AdminCatalogOut:
+        operator = self._require_admin_role(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+        open_time = self._normalize_opening_hours_time(
+            payload.open_time,
+            field_label="Godzina otwarcia",
+        )
+        close_time = self._normalize_opening_hours_time(
+            payload.close_time,
+            field_label="Godzina zamkniecia",
+        )
+        if self._time_to_minutes(close_time) <= self._time_to_minutes(open_time):
+            raise HTTPException(
+                status_code=400,
+                detail="Godzina zamkniecia musi byc pozniejsza niz godzina otwarcia.",
+            )
+
+        self._set_string_runtime_setting(
+            setting_key=self._OPENING_TIME_SETTING_KEY,
+            label="Godzina otwarcia lokalu",
+            string_value=open_time,
+            updated_by_user_id=operator.user_id,
+        )
+        self._set_string_runtime_setting(
+            setting_key=self._CLOSING_TIME_SETTING_KEY,
+            label="Godzina zamkniecia lokalu",
+            string_value=close_time,
             updated_by_user_id=operator.user_id,
         )
         return self.get_admin_catalog(
@@ -1671,6 +1736,26 @@ class CheckoutService:
             default_value="",
         )
 
+    def _get_opening_time(self) -> str:
+        return self._normalize_opening_hours_time(
+            self._get_string_runtime_setting(
+                setting_key=self._OPENING_TIME_SETTING_KEY,
+                default_value=self._DEFAULT_OPENING_TIME,
+            ),
+            field_label="Godzina otwarcia",
+            fallback_value=self._DEFAULT_OPENING_TIME,
+        )
+
+    def _get_closing_time(self) -> str:
+        return self._normalize_opening_hours_time(
+            self._get_string_runtime_setting(
+                setting_key=self._CLOSING_TIME_SETTING_KEY,
+                default_value=self._DEFAULT_CLOSING_TIME,
+            ),
+            field_label="Godzina zamkniecia",
+            fallback_value=self._DEFAULT_CLOSING_TIME,
+        )
+
     def _get_decimal_runtime_setting(
         self,
         setting_key: str,
@@ -1750,6 +1835,60 @@ class CheckoutService:
         setting.updated_at = datetime.utcnow()
         self.db.commit()
         self.db.refresh(setting)
+
+    def _normalize_opening_hours_time(
+        self,
+        raw_value: str | None,
+        *,
+        field_label: str,
+        fallback_value: str | None = None,
+    ) -> str:
+        normalized = (raw_value or "").strip()
+        if len(normalized) != 5 or normalized[2] != ":":
+            if fallback_value is not None:
+                return fallback_value
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field_label} musi miec format HH:mm.",
+            )
+
+        hour_part = normalized[:2]
+        minute_part = normalized[3:]
+        if not hour_part.isdigit() or not minute_part.isdigit():
+            if fallback_value is not None:
+                return fallback_value
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field_label} musi miec format HH:mm.",
+            )
+
+        hour = int(hour_part)
+        minute = int(minute_part)
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            if fallback_value is not None:
+                return fallback_value
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field_label} musi miescic sie w zakresie 00:00-23:59.",
+            )
+
+        return f"{hour:02d}:{minute:02d}"
+
+    def _time_to_minutes(self, time_value: str) -> int:
+        hour = int(time_value[:2])
+        minute = int(time_value[3:])
+        return (hour * 60) + minute
+
+    def _is_open_now(
+        self,
+        *,
+        open_time: str,
+        close_time: str,
+        now: datetime | None = None,
+    ) -> bool:
+        local_now = self._as_pickup_local_datetime(now or datetime.utcnow())
+        current_minutes = (local_now.hour * 60) + local_now.minute
+        return self._time_to_minutes(open_time) <= current_minutes < self._time_to_minutes(close_time)
 
     def _normalize_delivery_address_query(
         self,

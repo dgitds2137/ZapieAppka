@@ -1,3 +1,5 @@
+import 'opening_hours.dart';
+
 class AdminDashboardTurnoverPoint {
   const AdminDashboardTurnoverPoint({
     required this.dayLabel,
@@ -131,6 +133,7 @@ class AdminCatalogData {
     required this.deliveryMinimumAmount,
     required this.deliveryRadiusKm,
     required this.deliveryOriginAddress,
+    required this.openingHours,
     required this.positions,
     required this.addons,
   });
@@ -138,17 +141,29 @@ class AdminCatalogData {
   final double deliveryMinimumAmount;
   final double deliveryRadiusKm;
   final String deliveryOriginAddress;
+  final OpeningHoursData openingHours;
   final List<AdminCatalogPosition> positions;
   final List<AdminCatalogAddon> addons;
 
   factory AdminCatalogData.fromJson(Map<String, dynamic> json) {
     final positionsJson = json['positions'];
     final addonsJson = json['addons'];
+    final openingHoursJson = json['opening_hours'];
 
     return AdminCatalogData(
       deliveryMinimumAmount: _asDouble(json['delivery_minimum_amount']) ?? 20,
       deliveryRadiusKm: _asDouble(json['delivery_radius_km']) ?? 8,
       deliveryOriginAddress: json['delivery_origin_address']?.toString() ?? '',
+      openingHours: openingHoursJson is Map
+          ? OpeningHoursData.fromJson(
+              Map<String, dynamic>.from(openingHoursJson),
+            )
+          : OpeningHoursData.fromJson(const {
+              'open_time': '12:00',
+              'close_time': '21:00',
+              'formatted_range': '12:00-21:00',
+              'is_open_now': false,
+            }),
       positions: positionsJson is List
           ? positionsJson
               .whereType<Map>()
@@ -316,6 +331,7 @@ class AdminDashboardData {
     required this.loggedInEmployeeCount,
     required this.activeEmployees,
     required this.prepTimeSettings,
+    required this.openingHours,
     required this.ovenLoad,
     required this.ovenCapacity,
     required this.udkaOvenLoad,
@@ -337,6 +353,7 @@ class AdminDashboardData {
   final int loggedInEmployeeCount;
   final List<AdminDashboardActiveEmployee> activeEmployees;
   final List<AdminPrepTimeSetting> prepTimeSettings;
+  final OpeningHoursData openingHours;
   final int ovenLoad;
   final int ovenCapacity;
   final int udkaOvenLoad;
@@ -362,6 +379,7 @@ class AdminDashboardData {
     final inProgressJson = json['in_progress_orders'];
     final closedJson = json['closed_orders'];
     final myTakenJson = json['my_taken_orders'];
+    final openingHoursJson = json['opening_hours'];
 
     final pendingOrders = pendingJson is List
         ? pendingJson
@@ -423,6 +441,16 @@ class AdminDashboardData {
               )
               .toList(growable: false)
           : const [],
+      openingHours: openingHoursJson is Map
+          ? OpeningHoursData.fromJson(
+              Map<String, dynamic>.from(openingHoursJson),
+            )
+          : OpeningHoursData.fromJson(const {
+              'open_time': '12:00',
+              'close_time': '21:00',
+              'formatted_range': '12:00-21:00',
+              'is_open_now': false,
+            }),
       ovenLoad: _asInt(json['oven_load']) ?? fallbackOvenLoad,
       ovenCapacity: _asInt(json['oven_capacity']) ?? fallbackOvenCapacity,
       udkaOvenLoad: _asInt(json['udka_oven_load']) ?? 0,
