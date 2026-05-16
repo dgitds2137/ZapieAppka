@@ -15,11 +15,13 @@ class AuthSession {
   final String authProvider;
   final int loyaltyPoints;
 
-  bool get isAdmin => role == 'admin';
-  bool get isEmployee => role == 'employee';
-  bool get isDriver => role == 'driver';
+  String? get normalizedRole => _normalizeRole(role);
+
+  bool get isAdmin => normalizedRole == 'admin';
+  bool get isEmployee => normalizedRole == 'employee';
+  bool get isDriver => normalizedRole == 'driver';
   bool get isStaff => isAdmin || isEmployee || isDriver;
-  bool get isUser => role == null || role == 'user';
+  bool get isUser => normalizedRole == null || normalizedRole == 'user';
 
   bool get hasIdentity =>
       (sessionToken != null && sessionToken!.isNotEmpty) ||
@@ -37,7 +39,7 @@ class AuthSession {
       email: email ?? this.email,
       jwt: jwt ?? this.jwt,
       sessionToken: sessionToken ?? this.sessionToken,
-      role: role ?? this.role,
+      role: _normalizeRole(role ?? this.role),
       authProvider: authProvider ?? this.authProvider,
       loyaltyPoints: loyaltyPoints ?? this.loyaltyPoints,
     );
@@ -47,7 +49,7 @@ class AuthSession {
         'email': email,
         'jwt': jwt,
         'sessionToken': sessionToken,
-        'role': role,
+        'role': normalizedRole,
         'authProvider': authProvider,
         'loyaltyPoints': loyaltyPoints,
       };
@@ -58,7 +60,7 @@ class AuthSession {
         email: args['email']?.toString(),
         jwt: args['jwt']?.toString(),
         sessionToken: args['sessionToken']?.toString(),
-        role: args['role']?.toString(),
+        role: _normalizeRole(args['role']?.toString()),
         authProvider: args['authProvider']?.toString() ?? 'password',
         loyaltyPoints: _asInt(args['loyaltyPoints']) ?? 0,
       );
@@ -79,4 +81,12 @@ int? _asInt(Object? value) {
     return int.tryParse(value);
   }
   return null;
+}
+
+String? _normalizeRole(String? value) {
+  final normalized = value?.trim().toLowerCase();
+  if (normalized == null || normalized.isEmpty) {
+    return null;
+  }
+  return normalized == 'client' ? 'user' : normalized;
 }

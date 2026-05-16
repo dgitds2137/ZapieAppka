@@ -7,7 +7,6 @@ import '../../core/config/app_config.dart';
 import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
 import '../../router/app_router.dart';
-import 'social_auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -24,7 +23,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
-  final SocialAuthService _socialAuthService = const SocialAuthService();
 
   bool loading = false;
   bool obscurePassword = true;
@@ -141,30 +139,6 @@ class _LoginScreenState extends State<LoginScreen> {
       AppRoutes.dashboard,
       arguments: authSession.toRouteArgs(),
     );
-  }
-
-  Future<void> _startSocialLogin(SocialAuthProvider provider) async {
-    if (loading) {
-      return;
-    }
-
-    try {
-      await _socialAuthService.authenticate(provider);
-    } on SocialAuthUnavailableException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message)),
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
-    }
   }
 
   void fillDemoCredentials() {
@@ -314,61 +288,6 @@ class _LoginScreenState extends State<LoginScreen> {
                               onPressed: loading ? null : submit,
                               child: Text(
                                 loading ? 'Logowanie...' : 'Zaloguj sie',
-                              ),
-                            ),
-                            const SizedBox(height: 18),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Divider(
-                                    color: Colors.white.withValues(alpha: 0.18),
-                                  ),
-                                ),
-                                Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(horizontal: 10),
-                                  child: Text(
-                                    'lub',
-                                    style:
-                                        theme.textTheme.labelMedium?.copyWith(
-                                      color: const Color(0xFFD6C4B8),
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: Divider(
-                                    color: Colors.white.withValues(alpha: 0.18),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 18),
-                            OutlinedButton.icon(
-                              onPressed: loading
-                                  ? null
-                                  : () => _startSocialLogin(
-                                        SocialAuthProvider.google,
-                                      ),
-                              icon: const Icon(Icons.account_circle_outlined),
-                              label: Text(
-                                AppConfig.googleAuthConfigured
-                                    ? 'Kontynuuj z Google'
-                                    : 'Google',
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            OutlinedButton.icon(
-                              onPressed: loading
-                                  ? null
-                                  : () => _startSocialLogin(
-                                        SocialAuthProvider.facebook,
-                                      ),
-                              icon: const Icon(Icons.facebook_outlined),
-                              label: Text(
-                                AppConfig.facebookAuthConfigured
-                                    ? 'Kontynuuj z Facebook'
-                                    : 'Facebook',
                               ),
                             ),
                             const SizedBox(height: 12),

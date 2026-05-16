@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
 import '../../data/models/checkout_verification.dart';
 import '../../data/repositories/checkout_repository.dart';
+import '../../router/app_router.dart';
 import 'order_tracking_screen.dart';
 
 class OrderListScreen extends StatefulWidget {
@@ -156,6 +158,19 @@ class _OrderListScreenState extends State<OrderListScreen> {
     await _refresh();
   }
 
+  Future<void> _logout() async {
+    widget.checkoutRepository.rememberActiveCheckout(null);
+    await SessionPersistence.clearAll();
+    if (!mounted) {
+      return;
+    }
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      AppRoutes.login,
+      (route) => false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeCheckout = widget.activeCheckout;
@@ -204,6 +219,12 @@ class _OrderListScreenState extends State<OrderListScreen> {
                         ],
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    _TopActionButton(
+                      icon: Icons.logout_rounded,
+                      onTap: _logout,
+                    ),
+                    const SizedBox(width: 8),
                     _TopActionButton(
                       icon: Icons.arrow_back_rounded,
                       onTap: () => Navigator.of(context).pop(),

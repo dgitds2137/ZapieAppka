@@ -1,4 +1,4 @@
-package com.example.zapieapp_flutter_starter
+package pl.zapieapp.mobile
 
 import io.flutter.embedding.android.FlutterActivity
 

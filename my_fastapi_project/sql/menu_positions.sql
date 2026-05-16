@@ -34,6 +34,31 @@ BEGIN
 END;
 GO
 
+IF OBJECT_ID(N'dbo.MenuPositions', N'U') IS NOT NULL
+BEGIN
+    UPDATE target
+    SET
+        target.name = source.new_name,
+        target.weight = source.weight,
+        target.calories = source.calories,
+        target.price = source.price
+    FROM dbo.MenuPositions AS target
+    INNER JOIN (VALUES
+        (N'Szynka 25cm', N'Szynka 50cm', 200, 400, CAST(40 AS DECIMAL(18, 0))),
+        (N'Pieczarka 25cm', N'Pieczarka 50cm', 200, 400, CAST(40 AS DECIMAL(18, 0))),
+        (N'Salame 25cm', N'Salame 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0))),
+        (N'Jalapeno Salame 25cm', N'Jalapeno Salame 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0))),
+        (N'Serowa 25cm', N'Serowa 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)))
+    ) AS source(old_name, new_name, weight, calories, price)
+        ON target.name = source.old_name
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM dbo.MenuPositions AS existing
+        WHERE existing.name = source.new_name
+    );
+END;
+GO
+
 ;WITH PositionSeed AS (
     SELECT
         seed.position_type,
@@ -42,26 +67,36 @@ GO
         seed.calories,
         seed.price,
         seed.description,
-        seed.photo_url
+        seed.photo_url,
+        seed.is_active
     FROM (VALUES
-        (N'zapiekanki', N'Szynka 25cm', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, szynka 15g', N'https://restaumatic-production.imgix.net/uploads/accounts/304057/media_library/3b2b6633-9a7b-4ba3-aff4-a51a5ef320ef.jpg?auto=compress%2Cformat&blur=0&crop=focalpoint&fit=max&fp-x=0.5&fp-y=0.5&h=auto&rect=0%2C0%2C2000%2C1333&w=1920'),
-        (N'zapiekanki', N'Pieczarka 25cm', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g', N'https://restaumatic-production.imgix.net/uploads/accounts/304057/media_library/ae8dd6c5-c026-4669-b918-285c0e138ba5.jpg?auto=compress%2Cformat&blur=0&crop=focalpoint&fit=max&fp-x=0.5&fp-y=0.5&h=auto&rect=0%2C0%2C2000%2C1333&w=1920'),
-        (N'zapiekanki', N'Salame 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g', N'https://restaumatic-production.imgix.net/uploads/accounts/304057/media_library/03f058b5-5184-4ce7-80ae-52f502b3acac.jpg?auto=compress%2Cformat&blur=0&crop=focalpoint&fit=max&fp-x=0.5&fp-y=0.5&h=auto&rect=0%2C0%2C2000%2C1333&w=1920'),
-        (N'zapiekanki', N'Jalapeno Salame 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g, jalapeno 10g, cebula czerwona 5g', N'https://restaumatic-production.imgix.net/uploads/accounts/304057/media_library/e20874a6-4dc0-4156-82f2-ccd41e326c67.jpg?auto=compress%2Cformat&blur=0&crop=focalpoint&fit=max&fp-x=0.5&fp-y=0.5&h=auto&rect=0%2C0%2C2000%2C1333&w=1920'),
-        (N'zapiekanki', N'Serowa 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, ser plesniowy camembert 12g, ser plesniowy lazur 12g', N'https://restaumatic-production.imgix.net/uploads/accounts/304057/media_library/6d147b4e-7608-4241-975b-25db4f34917a.jpg?auto=compress%2Cformat&blur=0&crop=focalpoint&fit=max&fp-x=0.5&fp-y=0.5&h=auto&rect=0%2C0%2C2000%2C1333&w=1920'),
-        (N'zapiekanki_frozen', N'Szynka 25cm Mrozona', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, szynka 15g.', N'assets/images/paperBox.png'),
-        (N'zapiekanki_frozen', N'Pieczarka 25cm Mrozona', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g.', N'assets/images/paperBox.png'),
-        (N'zapiekanki_frozen', N'Salame 25cm Mrozona', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g.', N'assets/images/paperBox.png'),
-        (N'zapiekanki_frozen', N'Jalapeno Salame 25cm Mrozona', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g, jalapeno 10g, cebula czerwona 5g.', N'assets/images/paperBox.png'),
-        (N'zapiekanki_frozen', N'Serowa 25cm Mrozona', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, ser plesniowy camembert 12g, ser plesniowy lazur 12g.', N'assets/images/paperBox.png'),
-        (N'dodatki', N'Frytki', 150, 420, CAST(10 AS DECIMAL(18, 0)), N'Chrupiace frytki podawane na cieplo.', N'assets/images/fries.png'),
-        (N'napoje', N'Coca Cola puszka 0.33', 330, 139, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Coca Cola w puszce 0.33 l.', NULL),
-        (N'napoje', N'Fanta puszka 0.33', 330, 144, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Fanta w puszce 0.33 l.', NULL),
-        (N'napoje', N'Sprite puszka 0.33', 330, 126, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Sprite w puszce 0.33 l.', NULL),
-        (N'lody', N'Lody smietankowe', 90, 180, CAST(10 AS DECIMAL(18, 0)), N'Porcja klasycznych lodow smietankowych.', N'assets/images/whiteIceCream.png'),
-        (N'lody', N'Lody czekoladowe', 90, 190, CAST(10 AS DECIMAL(18, 0)), N'Porcja lodow czekoladowych.', N'assets/images/chocolateIceCream.png'),
-        (N'lody', N'Lody truskawkowe', 90, 170, CAST(10 AS DECIMAL(18, 0)), N'Porcja lodow truskawkowych.', N'assets/images/strawberryIceCream.png')
-    ) AS seed(position_type, name, weight, calories, price, description, photo_url)
+        (N'zapiekanki', N'Szynka 50cm', 200, 400, CAST(40 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, szynka 30g', N'assets/images/zapMeat.png', CAST(1 AS BIT)),
+        (N'zapiekanki', N'Pieczarka 50cm', 200, 400, CAST(40 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g', N'assets/images/zapMushroom.png', CAST(1 AS BIT)),
+        (N'zapiekanki', N'Salame 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, salame spianata 30g', N'assets/images/zapSalame.png', CAST(0 AS BIT)),
+        (N'zapiekanki', N'Jalapeno Salame 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, salame spianata 30g, jalapeno 20g, cebula czerwona 10g', N'assets/images/zapJalapengoSalame.png', CAST(0 AS BIT)),
+        (N'zapiekanki', N'Serowa 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, ser plesniowy camembert 25g, ser plesniowy lazur 25g', N'assets/images/zapCheese.png', CAST(1 AS BIT)),
+        (N'zapiekanki', N'Goralska 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, a''la oscypek 30g, zurawina 40g', N'assets/images/zapCheese.png', CAST(0 AS BIT)),
+        (N'zapiekanki', N'Szarpana 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, szarpane udko z rozna 140g', N'assets/images/zapMeat.png', CAST(0 AS BIT)),
+        (N'zapiekanki', N'Rukola 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, szynka dlugodojrzewajaca 30g, pomidorki koktajlowe 40g, rukola 10g', N'assets/images/zapMeat.png', CAST(0 AS BIT)),
+        (N'kids', N'Kids Szynka 25cm', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, szynka 15g', N'assets/images/zapMeat.png', CAST(1 AS BIT)),
+        (N'kids', N'Kids Pieczarka 25cm', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g', N'assets/images/zapMushroom.png', CAST(1 AS BIT)),
+        (N'kids', N'Kids Salame 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g', N'assets/images/zapSalame.png', CAST(1 AS BIT)),
+        (N'kids', N'Kids Jalapeno Salame 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g, jalapeno 10g, cebula czerwona 5g', N'assets/images/zapJalapengoSalame.png', CAST(1 AS BIT)),
+        (N'kids', N'Kids Serowa 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, ser plesniowy camembert 12g, ser plesniowy lazur 12g', N'assets/images/zapCheese.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', N'Szynka 25cm Mrozona', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, szynka 15g.', N'assets/images/zapMeatFrozen.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', N'Pieczarka 25cm Mrozona', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g.', N'assets/images/zapMushroomFrozen.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', N'Salame 25cm Mrozona', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g.', N'assets/images/zapSalameFrozen.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', N'Jalapeno Salame 25cm Mrozona', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g, jalapeno 10g, cebula czerwona 5g.', N'assets/images/zapJalapengoSalame.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', N'Serowa 25cm Mrozona', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, ser plesniowy camembert 12g, ser plesniowy lazur 12g.', N'assets/images/zapCheeseFrozen.png', CAST(1 AS BIT)),
+        (N'udka', N'Udka z kurczaka (3 szt.)', 300, 600, CAST(20 AS DECIMAL(18, 0)), N'Pakiet 3 pieczonych udek z kurczaka. Kazda kolejna sztuka w koszyku dodaje kolejny pakiet 3 udek.', N'assets/images/chickenLeg.png', CAST(1 AS BIT)),
+        (N'dodatki', N'Frytki', 150, 420, CAST(10 AS DECIMAL(18, 0)), N'Chrupiace frytki podawane na cieplo.', N'assets/images/fries.png', CAST(1 AS BIT)),
+        (N'napoje', N'Coca Cola puszka 0.33', 330, 139, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Coca Cola w puszce 0.33 l.', NULL, CAST(1 AS BIT)),
+        (N'napoje', N'Fanta puszka 0.33', 330, 144, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Fanta w puszce 0.33 l.', NULL, CAST(1 AS BIT)),
+        (N'napoje', N'Sprite puszka 0.33', 330, 126, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Sprite w puszce 0.33 l.', NULL, CAST(1 AS BIT)),
+        (N'lody', N'Lody smietankowe', 90, 180, CAST(10 AS DECIMAL(18, 0)), N'Porcja klasycznych lodow smietankowych.', N'assets/images/whiteIceCream.png', CAST(1 AS BIT)),
+        (N'lody', N'Lody czekoladowe', 90, 190, CAST(10 AS DECIMAL(18, 0)), N'Porcja lodow czekoladowych.', N'assets/images/chocolateIceCream.png', CAST(1 AS BIT)),
+        (N'lody', N'Lody truskawkowe', 90, 170, CAST(10 AS DECIMAL(18, 0)), N'Porcja lodow truskawkowych.', N'assets/images/strawberryIceCream.png', CAST(1 AS BIT))
+    ) AS seed(position_type, name, weight, calories, price, description, photo_url, is_active)
 )
 MERGE dbo.MenuPositions AS target
 USING PositionSeed AS source
@@ -73,7 +108,8 @@ WHEN MATCHED THEN
         calories = source.calories,
         price = source.price,
         description = source.description,
-        photo_url = source.photo_url
+        photo_url = source.photo_url,
+        is_active = source.is_active
 WHEN NOT MATCHED THEN
     INSERT (
         position_type,
@@ -93,6 +129,6 @@ WHEN NOT MATCHED THEN
         source.price,
         source.description,
         source.photo_url,
-        1
+        source.is_active
     );
 GO

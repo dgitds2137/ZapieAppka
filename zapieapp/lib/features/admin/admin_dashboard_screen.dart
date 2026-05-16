@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/config/app_config.dart';
@@ -310,6 +311,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     );
   }
 
+  Future<void> _openStaffPresenceDialog() async {
+    await showDialog<void>(
+      context: context,
+      barrierColor: const Color(0xC4000000),
+      builder: (dialogContext) => _StaffPresenceDialog(
+        authSession: widget.authSession,
+        repository: _repository,
+        onClose: () => Navigator.of(dialogContext).pop(),
+      ),
+    );
+  }
+
   Future<void> _scrollToSection(GlobalKey sectionKey) async {
     final context = sectionKey.currentContext;
     if (context == null) {
@@ -443,6 +456,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               isDriver ? 'Przypisane\nDo Ciebie' : 'Zamowienia w\nrealizacji',
           onTap: () => _scrollToSection(_inProgressOrdersSectionKey),
         ),
+        if (!isDriver)
+          _StatCardData(
+            icon: Icons.local_fire_department_outlined,
+            value: '${dashboard.ovenLoad}/${dashboard.ovenCapacity}',
+            label: 'Piec\nzapiekanek',
+          ),
+        if (!isDriver)
+          _StatCardData(
+            icon: Icons.set_meal_outlined,
+            value: '${dashboard.udkaOvenLoad}/${dashboard.udkaOvenCapacity}',
+            label: dashboard.udkaSlotLabel.isEmpty
+                ? 'Piec udek'
+                : 'Piec udek\n${dashboard.udkaSlotLabel}',
+          ),
         _StatCardData(
           icon: Icons.history_outlined,
           value: dashboard.orderHistoryCount.toString(),
@@ -464,6 +491,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             value: dashboard.loggedInEmployeeCount.toString(),
             label: 'Zalogowani\npracownicy',
             activeEmployees: dashboard.activeEmployees,
+            onTap: _openStaffPresenceDialog,
           ),
         );
         statCards.addAll([
@@ -1480,6 +1508,7 @@ class _AdminOrderCard extends StatelessWidget {
     final theme = Theme.of(context);
     final notes = order.notes?.trim();
     final itemPreview = order.itemNames.take(3).join(', ');
+    final showDriverDeliveryReminder = _needsDriverDeliveryReminder(order);
     final pendingAgeMinutes = order.isPending
         ? DateTime.now().toUtc().difference(order.createdAt.toUtc()).inMinutes
         : null;
@@ -1546,7 +1575,9 @@ class _AdminOrderCard extends StatelessWidget {
               ),
               _MetaChip(
                 icon: Icons.timelapse_outlined,
-                label: 'ETA ${order.remainingEtaMinutes} min',
+                label: showDriverDeliveryReminder
+                    ? 'ETA przekroczone'
+                    : 'ETA ${order.remainingEtaMinutes} min',
               ),
               _MetaChip(
                 icon: Icons.receipt_long_outlined,
@@ -1581,6 +1612,39 @@ class _AdminOrderCard extends StatelessWidget {
             _InfoRow(
               icon: Icons.sticky_note_2_outlined,
               label: notes,
+            ),
+          ],
+          if (showDriverDeliveryReminder) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0x26FFB15D),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0x55FFB15D)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.notification_important_outlined,
+                    color: Color(0xFFFFC891),
+                    size: 20,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Przekroczono przewidywany czas dostawy. Sprawdz, czy zamowienie #${order.checkoutOrderId} zostalo dostarczone i domknij je, jesli tak.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFFFFD7B5),
+                        fontWeight: FontWeight.w700,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
           const SizedBox(height: 14),
@@ -1865,8 +1929,8 @@ class _ClosedOrdersHistoryDialogBodyState
                   : ListView.separated(
                       controller: _scrollController,
                       physics: const BouncingScrollPhysics(),
-                      itemCount:
-                          _orders.length + ((_hasMore || _error != null) ? 1 : 0),
+                      itemCount: _orders.length +
+                          ((_hasMore || _error != null) ? 1 : 0),
                       separatorBuilder: (_, __) => const SizedBox(height: 12),
                       itemBuilder: (context, index) {
                         if (index >= _orders.length) {
@@ -2565,6 +2629,7 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
     final deltaSummary = _summarizeOrderAddonChanges(order);
     final stageLabel = _operatorStageLabel(order);
     final assignedOperatorEmail = order.assignedOperatorEmail?.trim();
+    final showDriverDeliveryReminder = _needsDriverDeliveryReminder(order);
     final canManageWorkflow = order.assignedToMe && order.isInProgress;
     final hasIntermediateWorkflow = onMarkInOven != null ||
         onMarkReadyForDispatch != null ||
@@ -2673,10 +2738,21 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
                     if (showOvenCapacityNotice) ...[
                       const SizedBox(height: 10),
                       Text(
-                        'Piec jest aktualnie zajety (${order.ovenLoad}/${order.ovenCapacity}). To zamowienie potrzebuje ${order.ovenSlotCount} ${order.ovenSlotCount == 1 ? 'miejsca' : 'miejsc'}, wiec poczeka na wolny wsad.',
+                        '${order.ovenKind == 'udka' ? 'Piec udek' : 'Piec zapiekanek'} jest aktualnie zajety (${order.ovenLoad}/${order.ovenCapacity}). To zamowienie potrzebuje ${order.ovenSlotCount} ${order.ovenSlotCount == 1 ? 'miejsca' : 'miejsc'}, wiec poczeka na wolny wsad.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: const Color(0xFFFFC891),
                               fontWeight: FontWeight.w700,
+                              height: 1.35,
+                            ),
+                      ),
+                    ],
+                    if (showDriverDeliveryReminder) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        'Przekroczono ETA tej dostawy. Potwierdz z klientem, czy zamowienie #${order.checkoutOrderId} zostalo dostarczone.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFFFFC891),
+                              fontWeight: FontWeight.w800,
                               height: 1.35,
                             ),
                       ),
@@ -3070,6 +3146,20 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
   bool _isLoading = true;
   final Set<String> _busyItems = <String>{};
 
+  AdminCatalogData _copyCatalog({
+    required AdminCatalogData current,
+    List<AdminCatalogPosition>? positions,
+    List<AdminCatalogAddon>? addons,
+  }) {
+    return AdminCatalogData(
+      deliveryMinimumAmount: current.deliveryMinimumAmount,
+      deliveryRadiusKm: current.deliveryRadiusKm,
+      deliveryOriginAddress: current.deliveryOriginAddress,
+      positions: positions ?? current.positions,
+      addons: addons ?? current.addons,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -3126,13 +3216,12 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
         if (current == null) {
           return;
         }
-        _catalog = AdminCatalogData(
-          deliveryMinimumAmount: current.deliveryMinimumAmount,
+        _catalog = _copyCatalog(
+          current: current,
           positions: current.positions
               .map((item) =>
                   item.positionId == updated.positionId ? updated : item)
               .toList(growable: false),
-          addons: current.addons,
         );
       });
     } catch (error) {
@@ -3171,9 +3260,8 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
         if (current == null) {
           return;
         }
-        _catalog = AdminCatalogData(
-          deliveryMinimumAmount: current.deliveryMinimumAmount,
-          positions: current.positions,
+        _catalog = _copyCatalog(
+          current: current,
           addons: current.addons
               .map((item) => item.addonId == updated.addonId ? updated : item)
               .toList(growable: false),
@@ -3280,6 +3368,90 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
     }
   }
 
+  Future<String?> _showTextEditorDialog({
+    required String title,
+    required String hintText,
+    required String initialValue,
+    int maxLines = 3,
+  }) async {
+    final controller = TextEditingController(text: initialValue);
+
+    try {
+      return await showDialog<String>(
+        context: context,
+        barrierColor: const Color(0xC4000000),
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: const Color(0xFF181311),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          title: Text(
+            title,
+            style: Theme.of(dialogContext).textTheme.titleLarge?.copyWith(
+                  color: const Color(0xFFF8EEE7),
+                  fontWeight: FontWeight.w900,
+                ),
+          ),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 1,
+            maxLines: maxLines,
+            style: const TextStyle(color: Color(0xFFF8EEE7)),
+            decoration: InputDecoration(
+              hintText: hintText,
+              hintStyle: const TextStyle(color: Color(0x80F8EEE7)),
+              filled: true,
+              fillColor: const Color(0xFF26201D),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Color(0x24FFFFFF)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Color(0x24FFFFFF)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: Color(0x66FFB061)),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text(
+                'Anuluj',
+                style: TextStyle(
+                  color: Color(0xFFD0C1B5),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            FilledButton(
+              onPressed: () {
+                final normalized = controller.text.trim();
+                if (normalized.isEmpty) {
+                  return;
+                }
+                Navigator.of(dialogContext).pop(normalized);
+              },
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFFE98B38),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text(
+                'Zapisz',
+                style: TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
   Future<void> _editPositionPrice(AdminCatalogPosition position) async {
     final nextPrice = await _showAmountEditorDialog(
       title: 'Cena produktu',
@@ -3309,13 +3481,12 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
         if (current == null) {
           return;
         }
-        _catalog = AdminCatalogData(
-          deliveryMinimumAmount: current.deliveryMinimumAmount,
+        _catalog = _copyCatalog(
+          current: current,
           positions: current.positions
               .map((item) =>
                   item.positionId == updated.positionId ? updated : item)
               .toList(growable: false),
-          addons: current.addons,
         );
       });
     } catch (error) {
@@ -3363,9 +3534,8 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
         if (current == null) {
           return;
         }
-        _catalog = AdminCatalogData(
-          deliveryMinimumAmount: current.deliveryMinimumAmount,
-          positions: current.positions,
+        _catalog = _copyCatalog(
+          current: current,
           addons: current.addons
               .map((item) => item.addonId == updated.addonId ? updated : item)
               .toList(growable: false),
@@ -3404,9 +3574,98 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
     });
 
     try {
-      final updatedCatalog = await widget.repository.updateDeliveryMinimumAmount(
+      final updatedCatalog =
+          await widget.repository.updateDeliveryMinimumAmount(
         authSession: widget.authSession,
         amount: nextAmount,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _catalog = updatedCatalog;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyItems.remove(busyKey);
+        });
+      }
+    }
+  }
+
+  Future<void> _editDeliveryRadius() async {
+    final currentRadius = _catalog?.deliveryRadiusKm ?? 8;
+    final nextRadius = await _showAmountEditorDialog(
+      title: 'Promien dostawy',
+      hintText: 'np. 8.00',
+      initialValue: currentRadius,
+    );
+    if (nextRadius == null) {
+      return;
+    }
+
+    const busyKey = 'delivery-radius';
+    setState(() {
+      _busyItems.add(busyKey);
+    });
+
+    try {
+      final updatedCatalog = await widget.repository.updateDeliveryRadius(
+        authSession: widget.authSession,
+        radiusKm: nextRadius,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _catalog = updatedCatalog;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyItems.remove(busyKey);
+        });
+      }
+    }
+  }
+
+  Future<void> _editDeliveryOriginAddress() async {
+    final currentAddress = _catalog?.deliveryOriginAddress ?? '';
+    final nextAddress = await _showTextEditorDialog(
+      title: 'Adres lokalu dla dostaw',
+      hintText: 'np. ul. Marszalkowska 1, 00-001 Warszawa',
+      initialValue: currentAddress,
+      maxLines: 4,
+    );
+    if (nextAddress == null) {
+      return;
+    }
+
+    const busyKey = 'delivery-origin-address';
+    setState(() {
+      _busyItems.add(busyKey);
+    });
+
+    try {
+      final updatedCatalog =
+          await widget.repository.updateDeliveryOriginAddress(
+        authSession: widget.authSession,
+        address: nextAddress,
       );
       if (!mounted) {
         return;
@@ -3433,6 +3692,9 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
   @override
   Widget build(BuildContext context) {
     final catalog = _catalog;
+    final media = MediaQuery.of(context);
+    final compactLayout = media.size.width < 640;
+    final deliveryOriginAddress = catalog?.deliveryOriginAddress ?? '';
 
     Widget body;
     if (_isLoading && catalog == null) {
@@ -3476,7 +3738,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
           _CatalogSectionHeader(
             title: 'Ustawienia dostawy',
             subtitle:
-                'To minimum blokuje zbyt male zamowienia z dostawa po stronie checkoutu.',
+                'Tutaj ustawisz minimum, promien i punkt odniesienia dla walidacji dostaw.',
           ),
           const SizedBox(height: 12),
           _CatalogSettingTile(
@@ -3487,6 +3749,27 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
                 'Przy zamowieniach ponizej tego progu klient dostanie komunikat i nie sfinalizuje dostawy.',
             busy: _busyItems.contains('delivery-minimum'),
             onEdit: _editDeliveryMinimumAmount,
+          ),
+          const SizedBox(height: 10),
+          _CatalogSettingTile(
+            title: 'Promien dostawy',
+            valueLabel:
+                '${(catalog?.deliveryRadiusKm ?? 8).toStringAsFixed(2)} km',
+            subtitle:
+                'Nowe adresy dostawy sa akceptowane tylko w tym promieniu od adresu lokalu.',
+            busy: _busyItems.contains('delivery-radius'),
+            onEdit: _editDeliveryRadius,
+          ),
+          const SizedBox(height: 10),
+          _CatalogSettingTile(
+            title: 'Adres lokalu dla dostaw',
+            valueLabel: deliveryOriginAddress.trim().isNotEmpty
+                ? deliveryOriginAddress
+                : 'Nie ustawiono',
+            subtitle:
+                'Ten adres jest geokodowany i stanowi punkt odniesienia dla promienia dostawy.',
+            busy: _busyItems.contains('delivery-origin-address'),
+            onEdit: _editDeliveryOriginAddress,
           ),
           const SizedBox(height: 18),
           _CatalogSectionHeader(
@@ -3525,10 +3808,16 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
     }
 
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: compactLayout ? 8 : 24,
+        vertical: compactLayout ? 8 : 24,
+      ),
       backgroundColor: Colors.transparent,
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 760, maxHeight: 760),
+        constraints: BoxConstraints(
+          maxWidth: compactLayout ? media.size.width - 16 : 760,
+          maxHeight: compactLayout ? media.size.height - 16 : 760,
+        ),
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
         decoration: BoxDecoration(
           color: const Color(0xF0141414),
@@ -3538,42 +3827,85 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Repozytorium produktow',
-                        style:
-                            Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                  color: const Color(0xFFF8EEE6),
-                                  fontWeight: FontWeight.w900,
-                                ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Administrator moze tutaj sterowac dostepnoscia, cenami i minimum dla dostawy.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: const Color(0xFFD4C4B8),
-                              height: 1.35,
-                            ),
-                      ),
-                    ],
+            if (compactLayout)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Repozytorium produktow',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                          color: const Color(0xFFF8EEE6),
+                          fontWeight: FontWeight.w900,
+                        ),
                   ),
-                ),
-                _TopIconButton(
-                  icon: Icons.refresh_rounded,
-                  onTap: _loadCatalog,
-                ),
-                const SizedBox(width: 8),
-                _TopIconButton(
-                  icon: Icons.close_rounded,
-                  onTap: widget.onClose,
-                ),
-              ],
-            ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Administrator moze tutaj sterowac dostepnoscia, cenami i minimum dla dostawy.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFFD4C4B8),
+                          height: 1.35,
+                        ),
+                  ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _TopIconButton(
+                          icon: Icons.refresh_rounded,
+                          onTap: _loadCatalog,
+                        ),
+                        const SizedBox(width: 8),
+                        _TopIconButton(
+                          icon: Icons.close_rounded,
+                          onTap: widget.onClose,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Repozytorium produktow',
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineSmall
+                              ?.copyWith(
+                                color: const Color(0xFFF8EEE6),
+                                fontWeight: FontWeight.w900,
+                              ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Administrator moze tutaj sterowac dostepnoscia, cenami i minimum dla dostawy.',
+                          style:
+                              Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color: const Color(0xFFD4C4B8),
+                                    height: 1.35,
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  _TopIconButton(
+                    icon: Icons.refresh_rounded,
+                    onTap: _loadCatalog,
+                  ),
+                  const SizedBox(width: 8),
+                  _TopIconButton(
+                    icon: Icons.close_rounded,
+                    onTap: widget.onClose,
+                  ),
+                ],
+              ),
             const SizedBox(height: 16),
             Expanded(
               child: ScrollConfiguration(
@@ -3710,97 +4042,569 @@ class _CatalogEntryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final statusColor =
         isActive ? const Color(0xFF79F5B8) : const Color(0xFFF29F60);
+    final statusBadge = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: statusColor.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: statusColor.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Text(
+        isActive ? 'Aktywny' : 'Ukryty',
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: statusColor,
+              fontWeight: FontWeight.w900,
+            ),
+      ),
+    );
+    final actionControls = Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        statusBadge,
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          onPressed: busy ? null : onEditPrice,
+          icon: const Icon(Icons.edit_outlined, size: 18),
+          label: const Text('Cena'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFFFD7B5),
+            side: const BorderSide(color: Color(0x40FFB061)),
+          ),
+        ),
+        const SizedBox(height: 10),
+        busy
+            ? const SizedBox(
+                height: 24,
+                width: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.2,
+                  color: Color(0xFFE98B38),
+                ),
+              )
+            : Switch.adaptive(
+                value: isActive,
+                onChanged: (_) => onToggle(),
+                activeThumbColor: const Color(0xFF79F5B8),
+              ),
+      ],
+    );
 
     return Container(
-      width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: const Color(0x1FFFFFFF)),
       ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 520;
+          final details = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: const Color(0xFFF7EEE6),
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                metaLabel,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: const Color(0xFFE7D0BB),
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                maxLines: compact ? 4 : 3,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFD4C4B8),
+                      height: 1.35,
+                    ),
+              ),
+            ],
+          );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                details,
+                const SizedBox(height: 12),
+                actionControls,
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: details),
+              const SizedBox(width: 14),
+              actionControls,
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+}
+
+class _StaffPresenceDialog extends StatefulWidget {
+  const _StaffPresenceDialog({
+    required this.authSession,
+    required this.repository,
+    required this.onClose,
+  });
+
+  final AuthSession authSession;
+  final AdminDashboardRepository repository;
+  final VoidCallback onClose;
+
+  @override
+  State<_StaffPresenceDialog> createState() => _StaffPresenceDialogState();
+}
+
+class _StaffPresenceDialogState extends State<_StaffPresenceDialog> {
+  final TextEditingController _searchController = TextEditingController();
+  Timer? _debounce;
+  AdminStaffPresenceData? _data;
+  Object? _error;
+  bool _isLoading = true;
+  String _query = '';
+
+  bool get _isSearchActive => _query.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPresence();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 280), () {
+      final nextQuery = _searchController.text.trim();
+      if (nextQuery == _query) {
+        return;
+      }
+      if (mounted) {
+        setState(() {
+          _query = nextQuery;
+        });
+      }
+      _loadPresence(showLoading: false);
+    });
+  }
+
+  Future<void> _loadPresence({bool showLoading = true}) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
+
+    try {
+      final presence = await widget.repository.fetchStaffPresence(
+        authSession: widget.authSession,
+        query: _query,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _data = presence;
+        _error = null;
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _error = error;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final data = _data;
+    final searchResults = data?.allResults ?? const <AdminStaffPresencePerson>[];
+    final currentlyAvailable =
+        data?.currentlyAvailable ?? const <AdminStaffPresencePerson>[];
+    final recentlyAvailable =
+        data?.recentlyAvailable ?? const <AdminStaffPresencePerson>[];
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+      backgroundColor: Colors.transparent,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 760),
+        decoration: BoxDecoration(
+          color: const Color(0xF01C1A19),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0x2AFFFFFF)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x70000000),
+              blurRadius: 40,
+              offset: Offset(0, 18),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Obecnosc pracownikow',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            color: const Color(0xFFF8F0E8),
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Dostepni teraz, aktywni w ostatniej godzinie i wyszukiwarka calego personelu.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFFD3C4B8),
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  _TopIconButton(
+                    icon: Icons.close_rounded,
+                    onTap: widget.onClose,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              CupertinoSearchTextField(
+                controller: _searchController,
+                placeholder: 'Szukaj wszystkich pracownikow',
+                style: const TextStyle(color: Color(0xFFF7EEE6)),
+                placeholderStyle: const TextStyle(color: Color(0xFF9F9389)),
+                backgroundColor: const Color(0xFF2A2624),
+                itemColor: const Color(0xFFF4E7DC),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: Builder(
+                  builder: (context) {
+                    if (_isLoading && data == null) {
+                      return const Center(
+                        child: CircularProgressIndicator(
+                          color: Color(0xFFE98B38),
+                        ),
+                      );
+                    }
+                    if (_error != null && data == null) {
+                      return _StaffPresenceEmptyState(
+                        icon: Icons.error_outline_rounded,
+                        title: 'Nie udalo sie pobrac listy pracownikow',
+                        subtitle: _error.toString(),
+                      );
+                    }
+
+                    if (_isSearchActive) {
+                      if (searchResults.isEmpty) {
+                        return const _StaffPresenceEmptyState(
+                          icon: Icons.search_off_rounded,
+                          title: 'Brak wynikow',
+                          subtitle: 'Nie znaleziono pracownikow dla podanej frazy.',
+                        );
+                      }
+                      return _StaffPresenceSection(
+                        title: 'Wyniki wyszukiwania',
+                        people: searchResults,
+                      );
+                    }
+
+                    return ListView(
+                      physics: const BouncingScrollPhysics(),
+                      children: [
+                        _StaffPresenceSection(
+                          title: 'Dostepni teraz',
+                          people: currentlyAvailable,
+                          emptyLabel: 'Brak aktualnie dostepnych pracownikow.',
+                        ),
+                        const SizedBox(height: 18),
+                        _StaffPresenceSection(
+                          title: 'Dostepni w ostatniej godzinie',
+                          people: recentlyAvailable,
+                          emptyLabel:
+                              'Nikt nie byl dostepny w ostatniej godzinie poza aktywnymi teraz.',
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StaffPresenceSection extends StatelessWidget {
+  const _StaffPresenceSection({
+    required this.title,
+    required this.people,
+    this.emptyLabel,
+  });
+
+  final String title;
+  final List<AdminStaffPresencePerson> people;
+  final String? emptyLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: const Color(0xFFF7EFE6),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (people.isEmpty)
+          _StaffPresenceEmptyState(
+            icon: Icons.groups_rounded,
+            title: emptyLabel ?? 'Brak danych',
+            subtitle: '',
+            compact: true,
+          )
+        else
+          ...people.map(
+            (person) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _StaffPresencePersonTile(person: person),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _StaffPresencePersonTile extends StatelessWidget {
+  const _StaffPresencePersonTile({
+    required this.person,
+  });
+
+  final AdminStaffPresencePerson person;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = person.displayName.trim().isEmpty ? person.email : person.displayName;
+    final subtitle = person.email.trim().isNotEmpty &&
+            person.email.trim().toLowerCase() != title.trim().toLowerCase()
+        ? person.email
+        : null;
+    final activityLabel = person.lastSeenAt == null
+        ? 'Brak historii dostepnosci'
+        : 'Ostatnio dostepny: ${_formatDateTime(person.lastSeenAt!)}';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xC9262321),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: person.isCurrentlyAvailable
+              ? const Color(0x5533D17A)
+              : const Color(0x1EFFFFFF),
+        ),
+      ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            height: 42,
+            width: 42,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _staffPresenceBadgeColor(person),
+            ),
+            alignment: Alignment.center,
+            child: Text(
+              person.initials.isEmpty ? '?' : person.initials,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: const Color(0xFFF7EEE6),
-                        fontWeight: FontWeight.w800,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                              color: const Color(0xFFF8F0E8),
+                              fontWeight: FontWeight.w800,
+                            ),
                       ),
+                    ),
+                    if (person.isCurrentlyAvailable) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0x2233D17A),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: const Color(0x6633D17A)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.circle,
+                              size: 8,
+                              color: Color(0xFF33D17A),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              'Dostepny',
+                              style:
+                                  Theme.of(context).textTheme.labelSmall?.copyWith(
+                                        color: const Color(0xFFBFF2D3),
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFFD0C0B5),
+                        ),
+                  ),
+                ],
                 const SizedBox(height: 6),
                 Text(
-                  metaLabel,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: const Color(0xFFE7D0BB),
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  subtitle,
+                  activityLabel,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFFD4C4B8),
-                        height: 1.35,
+                        color: const Color(0xFFAA9D92),
                       ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 14),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: statusColor.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(
-                    color: statusColor.withValues(alpha: 0.4),
-                  ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StaffPresenceEmptyState extends StatelessWidget {
+  const _StaffPresenceEmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.compact = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: 14,
+        vertical: compact ? 16 : 28,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xA922201F),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0x1FFFFFFF)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: const Color(0xFFD1C0B3), size: compact ? 24 : 30),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: const Color(0xFFF5ECE4),
+                  fontWeight: FontWeight.w800,
                 ),
-                child: Text(
-                  isActive ? 'Aktywny' : 'Ukryty',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        color: statusColor,
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: busy ? null : onEditPrice,
-                icon: const Icon(Icons.edit_outlined, size: 18),
-                label: const Text('Cena'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFFFFD7B5),
-                  side: const BorderSide(color: Color(0x40FFB061)),
-                ),
-              ),
-              const SizedBox(height: 10),
-              busy
-                  ? const SizedBox(
-                      height: 24,
-                      width: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
-                        color: Color(0xFFE98B38),
-                      ),
-                    )
-                  : Switch.adaptive(
-                      value: isActive,
-                      onChanged: (_) => onToggle(),
-                      activeThumbColor: const Color(0xFF79F5B8),
-                    ),
-            ],
           ),
+          if (subtitle.trim().isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFC8B9AF),
+                    height: 1.35,
+                  ),
+            ),
+          ],
         ],
       ),
     );
@@ -3825,48 +4629,48 @@ class _CatalogSettingTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: const Color(0x1FFFFFFF)),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: const Color(0xFFF7EEE6),
-                        fontWeight: FontWeight.w800,
-                      ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  valueLabel,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: const Color(0xFFFFD7B5),
-                        fontWeight: FontWeight.w900,
-                      ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFFD4C4B8),
-                        height: 1.35,
-                      ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 14),
-          busy
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 520;
+          final content = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: compact ? 3 : 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: const Color(0xFFF7EEE6),
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                valueLabel,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: const Color(0xFFFFD7B5),
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                subtitle,
+                maxLines: compact ? 4 : 3,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFD4C4B8),
+                      height: 1.35,
+                    ),
+              ),
+            ],
+          );
+          final action = busy
               ? const SizedBox(
                   height: 24,
                   width: 24,
@@ -3883,8 +4687,28 @@ class _CatalogSettingTile extends StatelessWidget {
                     foregroundColor: const Color(0xFFFFD7B5),
                     side: const BorderSide(color: Color(0x40FFB061)),
                   ),
-                ),
-        ],
+                );
+
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                content,
+                const SizedBox(height: 12),
+                action,
+              ],
+            );
+          }
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: content),
+              const SizedBox(width: 14),
+              action,
+            ],
+          );
+        },
       ),
     );
   }
@@ -4111,6 +4935,28 @@ bool _isReadyForDeliveryStage(AdminDashboardOrder order) {
   return order.verificationStage.trim().toLowerCase() == 'ready_for_delivery';
 }
 
+bool _needsDriverDeliveryReminder(AdminDashboardOrder order) {
+  if (!_isDeliveryOrder(order) || !order.assignedToMe) {
+    return false;
+  }
+
+  final lifecycleStatus = order.lifecycleStatus.trim().toLowerCase();
+  if (lifecycleStatus == 'completed') {
+    return false;
+  }
+
+  final verificationStage = order.verificationStage.trim().toLowerCase();
+  if (!{
+    'on_the_way',
+    'delivery_started',
+    'delivery_extended',
+  }.contains(verificationStage)) {
+    return false;
+  }
+
+  return order.remainingEtaMinutes <= 0;
+}
+
 String _boardStatusLabelForOrder(
   AdminDashboardOrder order, {
   required bool isDriverView,
@@ -4158,6 +5004,12 @@ _AddonChangeCounts _parseAddonChangeCounts(String? description) {
 
 Color _employeeBadgeColor(AdminDashboardActiveEmployee employee) {
   final seed = employee.userId == 0 ? employee.email.hashCode : employee.userId;
+  final hue = (seed.abs() * 37) % 360;
+  return HSLColor.fromAHSL(1, hue.toDouble(), 0.58, 0.46).toColor();
+}
+
+Color _staffPresenceBadgeColor(AdminStaffPresencePerson person) {
+  final seed = person.userId == 0 ? person.email.hashCode : person.userId;
   final hue = (seed.abs() * 37) % 360;
   return HSLColor.fromAHSL(1, hue.toDouble(), 0.58, 0.46).toColor();
 }

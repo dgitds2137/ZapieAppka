@@ -129,11 +129,15 @@ class AdminCatalogAddon {
 class AdminCatalogData {
   const AdminCatalogData({
     required this.deliveryMinimumAmount,
+    required this.deliveryRadiusKm,
+    required this.deliveryOriginAddress,
     required this.positions,
     required this.addons,
   });
 
   final double deliveryMinimumAmount;
+  final double deliveryRadiusKm;
+  final String deliveryOriginAddress;
   final List<AdminCatalogPosition> positions;
   final List<AdminCatalogAddon> addons;
 
@@ -142,8 +146,9 @@ class AdminCatalogData {
     final addonsJson = json['addons'];
 
     return AdminCatalogData(
-      deliveryMinimumAmount:
-          _asDouble(json['delivery_minimum_amount']) ?? 20,
+      deliveryMinimumAmount: _asDouble(json['delivery_minimum_amount']) ?? 20,
+      deliveryRadiusKm: _asDouble(json['delivery_radius_km']) ?? 8,
+      deliveryOriginAddress: json['delivery_origin_address']?.toString() ?? '',
       positions: positionsJson is List
           ? positionsJson
               .whereType<Map>()
@@ -190,6 +195,7 @@ class AdminDashboardOrder {
     required this.addressSubtitle,
     this.notes,
     bool? supportsProgressUpdates = true,
+    this.ovenKind = 'none',
     this.canMarkInOven = true,
     this.ovenSlotCount = 0,
     this.ovenLoad = 0,
@@ -219,6 +225,7 @@ class AdminDashboardOrder {
   final String addressSubtitle;
   final String? notes;
   final bool? _supportsProgressUpdates;
+  final String ovenKind;
   final bool canMarkInOven;
   final int ovenSlotCount;
   final int ovenLoad;
@@ -268,6 +275,7 @@ class AdminDashboardOrder {
       addressSubtitle: json['address_subtitle']?.toString() ?? '',
       notes: json['notes']?.toString(),
       supportsProgressUpdates: json['supports_progress_updates'] != false,
+      ovenKind: json['oven_kind']?.toString() ?? 'none',
       canMarkInOven: json['can_mark_in_oven'] != false,
       ovenSlotCount: _asInt(json['oven_slot_count']) ?? 0,
       ovenLoad: _asInt(json['oven_load']) ?? 0,
@@ -308,6 +316,11 @@ class AdminDashboardData {
     required this.loggedInEmployeeCount,
     required this.activeEmployees,
     required this.prepTimeSettings,
+    required this.ovenLoad,
+    required this.ovenCapacity,
+    required this.udkaOvenLoad,
+    required this.udkaOvenCapacity,
+    required this.udkaSlotLabel,
     required this.pendingOrderCount,
     required this.inProgressOrderCount,
     required this.newUsersThisMonth,
@@ -324,6 +337,11 @@ class AdminDashboardData {
   final int loggedInEmployeeCount;
   final List<AdminDashboardActiveEmployee> activeEmployees;
   final List<AdminPrepTimeSetting> prepTimeSettings;
+  final int ovenLoad;
+  final int ovenCapacity;
+  final int udkaOvenLoad;
+  final int udkaOvenCapacity;
+  final String udkaSlotLabel;
   final int pendingOrderCount;
   final int inProgressOrderCount;
   final int newUsersThisMonth;
@@ -344,6 +362,44 @@ class AdminDashboardData {
     final inProgressJson = json['in_progress_orders'];
     final closedJson = json['closed_orders'];
     final myTakenJson = json['my_taken_orders'];
+
+    final pendingOrders = pendingJson is List
+        ? pendingJson
+            .whereType<Map>()
+            .map((item) => AdminDashboardOrder.fromJson(
+                  Map<String, dynamic>.from(item),
+                ))
+            .toList(growable: false)
+        : const <AdminDashboardOrder>[];
+    final inProgressOrders = inProgressJson is List
+        ? inProgressJson
+            .whereType<Map>()
+            .map((item) => AdminDashboardOrder.fromJson(
+                  Map<String, dynamic>.from(item),
+                ))
+            .toList(growable: false)
+        : const <AdminDashboardOrder>[];
+    final closedOrders = closedJson is List
+        ? closedJson
+            .whereType<Map>()
+            .map((item) => AdminDashboardOrder.fromJson(
+                  Map<String, dynamic>.from(item),
+                ))
+            .toList(growable: false)
+        : const <AdminDashboardOrder>[];
+    final myTakenOrders = myTakenJson is List
+        ? myTakenJson
+            .whereType<Map>()
+            .map(
+              (item) => AdminDashboardOrder.fromJson(
+                Map<String, dynamic>.from(item),
+              ),
+            )
+            .toList(growable: false)
+        : const <AdminDashboardOrder>[];
+    final fallbackOvenCapacity =
+        _ovenCapacityFromOrders(inProgressOrders) ?? 6;
+    final fallbackOvenLoad = _ovenLoadFromOrders(inProgressOrders);
 
     return AdminDashboardData(
       loggedInEmployeeCount: _asInt(json['logged_in_employee_count']) ?? 0,
@@ -367,6 +423,11 @@ class AdminDashboardData {
               )
               .toList(growable: false)
           : const [],
+      ovenLoad: _asInt(json['oven_load']) ?? fallbackOvenLoad,
+      ovenCapacity: _asInt(json['oven_capacity']) ?? fallbackOvenCapacity,
+      udkaOvenLoad: _asInt(json['udka_oven_load']) ?? 0,
+      udkaOvenCapacity: _asInt(json['udka_oven_capacity']) ?? 16,
+      udkaSlotLabel: json['udka_slot_label']?.toString() ?? '',
       pendingOrderCount: _asInt(json['pending_order_count']) ?? 0,
       inProgressOrderCount: _asInt(json['in_progress_order_count']) ?? 0,
       newUsersThisMonth: _asInt(json['new_users_this_month']) ?? 0,
@@ -380,43 +441,97 @@ class AdminDashboardData {
                   ))
               .toList(growable: false)
           : const [],
-      pendingOrders: pendingJson is List
-          ? pendingJson
-              .whereType<Map>()
-              .map((item) => AdminDashboardOrder.fromJson(
-                    Map<String, dynamic>.from(item),
-                  ))
-              .toList(growable: false)
-          : const [],
-      inProgressOrders: inProgressJson is List
-          ? inProgressJson
-              .whereType<Map>()
-              .map((item) => AdminDashboardOrder.fromJson(
-                    Map<String, dynamic>.from(item),
-                  ))
-              .toList(growable: false)
-          : const [],
-      closedOrders: closedJson is List
-          ? closedJson
-              .whereType<Map>()
-              .map((item) => AdminDashboardOrder.fromJson(
-                    Map<String, dynamic>.from(item),
-                  ))
-              .toList(growable: false)
-          : const [],
+      pendingOrders: pendingOrders,
+      inProgressOrders: inProgressOrders,
+      closedOrders: closedOrders,
       closedOrdersHasMore: json['closed_orders_has_more'] == true,
-      myTakenOrders: myTakenJson is List
-          ? myTakenJson
-              .whereType<Map>()
-              .map(
-                (item) => AdminDashboardOrder.fromJson(
-                  Map<String, dynamic>.from(item),
-                ),
-              )
-              .toList(growable: false)
-          : const [],
+      myTakenOrders: myTakenOrders,
     );
   }
+}
+
+class AdminStaffPresencePerson {
+  const AdminStaffPresencePerson({
+    required this.userId,
+    required this.email,
+    required this.displayName,
+    required this.initials,
+    required this.lastSeenAt,
+    required this.isCurrentlyAvailable,
+  });
+
+  final int userId;
+  final String email;
+  final String displayName;
+  final String initials;
+  final DateTime? lastSeenAt;
+  final bool isCurrentlyAvailable;
+
+  factory AdminStaffPresencePerson.fromJson(Map<String, dynamic> json) {
+    return AdminStaffPresencePerson(
+      userId: _asInt(json['user_id']) ?? 0,
+      email: json['email']?.toString() ?? '',
+      displayName: json['display_name']?.toString() ?? '',
+      initials: json['initials']?.toString() ?? '',
+      lastSeenAt: DateTime.tryParse(json['last_seen_at']?.toString() ?? ''),
+      isCurrentlyAvailable: json['is_currently_available'] == true,
+    );
+  }
+}
+
+class AdminStaffPresenceData {
+  const AdminStaffPresenceData({
+    required this.currentlyAvailable,
+    required this.recentlyAvailable,
+    required this.allResults,
+  });
+
+  final List<AdminStaffPresencePerson> currentlyAvailable;
+  final List<AdminStaffPresencePerson> recentlyAvailable;
+  final List<AdminStaffPresencePerson> allResults;
+
+  factory AdminStaffPresenceData.fromJson(Map<String, dynamic> json) {
+    List<AdminStaffPresencePerson> parseList(String key) {
+      final raw = json[key];
+      if (raw is! List) {
+        return const [];
+      }
+      return raw
+          .whereType<Map>()
+          .map(
+            (item) => AdminStaffPresencePerson.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
+          .toList(growable: false);
+    }
+
+    return AdminStaffPresenceData(
+      currentlyAvailable: parseList('currently_available'),
+      recentlyAvailable: parseList('recently_available'),
+      allResults: parseList('all_results'),
+    );
+  }
+}
+
+int _ovenLoadFromOrders(List<AdminDashboardOrder> orders) {
+  return orders
+      .where(_isOrderInOven)
+      .fold(0, (total, order) => total + order.ovenSlotCount);
+}
+
+int? _ovenCapacityFromOrders(List<AdminDashboardOrder> orders) {
+  for (final order in orders) {
+    if (order.ovenCapacity > 0) {
+      return order.ovenCapacity;
+    }
+  }
+  return null;
+}
+
+bool _isOrderInOven(AdminDashboardOrder order) {
+  final stage = order.verificationStage.trim().toLowerCase();
+  return stage == 'in_oven' || stage == 'oven';
 }
 
 class AdminClosedOrdersPage {
