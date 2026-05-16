@@ -19,7 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   static const _backgroundAsset =
       'assets/images/background_big_ingredients_darker.png';
   static const _heroAsset =
-      'assets/images/BrancMadeImages/bannerHorizontal.png';
+      'assets/images/BrancMadeImages/bannerVertical.png';
   static const _watermarkAsset =
       'assets/images/BrancMadeImages/LogoCorner.png';
   static const _apiBaseUrl = AppConfig.apiBaseUrl;
@@ -170,7 +170,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final theme = Theme.of(context);
     final media = MediaQuery.of(context);
     final compact = media.size.width < 420;
-    final heroHeight = compact ? 172.0 : 196.0;
+    final heroHeight = compact ? 248.0 : 292.0;
 
     return Scaffold(
       body: Container(
@@ -251,7 +251,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       Image.asset(
                                         _heroAsset,
                                         fit: BoxFit.cover,
-                                        alignment: Alignment.center,
+                                        alignment: const Alignment(0, -0.78),
                                       ),
                                       const DecoratedBox(
                                         decoration: BoxDecoration(
