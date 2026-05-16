@@ -41,6 +41,67 @@ flutter run -d <device-id> --profile --dart-define=API_BASE_URL=http://127.0.0.1
 This mode uses `adb reverse`. `127.0.0.1` and `localhost` point to the phone itself,
 not to the computer, so a plain USB tethering connection is not enough on its own.
 
+## USB Run With Azure Backend
+
+Use this flow when the backend is already deployed and reachable on Azure Container Apps.
+
+Current backend used in our runs:
+
+```text
+https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io
+```
+
+1. On the phone, enable Developer Options and `USB debugging`.
+2. Connect the phone by USB, unlock the screen, and accept the RSA authorization prompt if it appears.
+3. Verify that ADB sees the device:
+
+```powershell
+C:\Users\User\AppData\Local\Android\sdk\platform-tools\adb.exe devices -l
+```
+
+Expected state:
+
+```text
+<device-id>    device
+```
+
+If Windows sees the phone as `MTP` or `ADB Interface` but `adb devices` is still empty:
+
+1. On the phone, switch USB mode to `File transfer`.
+2. Revoke USB debugging authorizations.
+3. Disable and enable `USB debugging` again.
+4. Reconnect the cable and accept the RSA prompt again.
+
+4. Run Flutter on that exact device with the Azure API URL.
+
+This project currently needs Java 17 for Android Gradle Plugin, so set it in the shell before `flutter run`:
+
+```powershell
+cd C:\FFApi\zapieapp
+$env:JAVA_HOME='C:\Program Files\Java\jdk-17'
+$env:Path="$env:JAVA_HOME\bin;$env:Path"
+flutter run -d <device-id> --dart-define=API_BASE_URL=https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io
+```
+
+Example from our run:
+
+```powershell
+flutter run -d 42c63095 --dart-define=API_BASE_URL=https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io
+```
+
+5. If you want to confirm that the public backend is alive before the run:
+
+```powershell
+Invoke-RestMethod -Uri 'https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io/health'
+Invoke-RestMethod -Uri 'https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io/health/db'
+```
+
+Notes for this mode:
+
+- `flutter run` installs `app-debug.apk` on the phone.
+- If the app launches and later `flutter run` prints `Lost connection to device`, the install and launch may still have succeeded; this usually means the USB/ADB session dropped after startup.
+- If `flutter run` picks Java 11 and fails with `Android Gradle plugin requires Java 17`, repeat the run in a shell where `JAVA_HOME` points to `C:\Program Files\Java\jdk-17`.
+
 ## Wi-Fi Testing
 
 1. Connect the phone and the computer to the same network.

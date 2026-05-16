@@ -174,6 +174,7 @@ class CheckoutVerificationResponse {
     this.deliveryExtensionCount = 0,
     this.awardedPoints = 0,
     this.userPointsBalance = 0,
+    this.scheduledPickupAt,
     required this.receivedOrder,
   });
 
@@ -193,6 +194,7 @@ class CheckoutVerificationResponse {
   final int deliveryExtensionCount;
   final int awardedPoints;
   final int userPointsBalance;
+  final DateTime? scheduledPickupAt;
   final CheckoutVerificationRequest receivedOrder;
 
   Map<String, dynamic> toJson() => {
@@ -213,6 +215,7 @@ class CheckoutVerificationResponse {
         'delivery_extension_count': deliveryExtensionCount,
         'awarded_points': awardedPoints,
         'user_points_balance': userPointsBalance,
+        'scheduled_pickup_at': scheduledPickupAt?.toUtc().toIso8601String(),
         'received_order': receivedOrder.toJson(),
       };
 
@@ -242,6 +245,8 @@ class CheckoutVerificationResponse {
       deliveryExtensionCount: _asInt(json['delivery_extension_count']) ?? 0,
       awardedPoints: _asInt(json['awarded_points']) ?? 0,
       userPointsBalance: _asInt(json['user_points_balance']) ?? 0,
+      scheduledPickupAt:
+          DateTime.tryParse(json['scheduled_pickup_at']?.toString() ?? ''),
       receivedOrder: receivedOrderJson is Map<String, dynamic>
           ? CheckoutVerificationRequest.fromJson(receivedOrderJson)
           : CheckoutVerificationRequest(

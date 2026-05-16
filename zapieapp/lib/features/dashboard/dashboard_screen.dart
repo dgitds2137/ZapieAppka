@@ -13,7 +13,6 @@ import '../../data/repositories/checkout_repository.dart';
 import '../admin/admin_dashboard_screen.dart';
 import '../orders/order_list_screen.dart';
 import '../orders/order_tracking_screen.dart';
-import '../../router/app_router.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -139,7 +138,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   String _authSessionStorageKey(AuthSession authSession) {
-    return '${authSession.email ?? ''}|${authSession.sessionToken ?? ''}|${authSession.jwt ?? ''}|${authSession.loyaltyPoints}';
+    return '${authSession.email ?? ''}|${authSession.sessionToken ?? ''}|${authSession.jwt ?? ''}|${authSession.normalizedRole ?? ''}|${authSession.loyaltyPoints}';
   }
 
   Future<void> _loadLoyaltyPoints() async {
@@ -172,8 +171,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       final loyaltyPoints = _asInt(decoded['loyalty_points']) ?? 0;
-      final updatedSession =
-          _authSession.copyWith(loyaltyPoints: loyaltyPoints);
+      final updatedSession = _authSession.copyWith(
+        role: decoded['role']?.toString(),
+        loyaltyPoints: loyaltyPoints,
+      );
       await SessionPersistence.saveAuthSession(updatedSession);
 
       if (!mounted) {
@@ -221,18 +222,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return;
       }
 
-      final existingCheckout =
-          _activeCheckout ?? _checkoutRepository.cachedActiveCheckout;
-      CheckoutVerificationResponse? resolvedCheckout;
       setState(() {
-        resolvedCheckout = activeCheckout ??
-            (_isCheckoutStillActive(existingCheckout)
-                ? existingCheckout
-                : null);
-        _activeCheckout = resolvedCheckout;
+        _activeCheckout = activeCheckout;
         _isLoadingActiveCheckout = false;
       });
-      SessionPersistence.saveActiveCheckout(resolvedCheckout);
+      SessionPersistence.saveActiveCheckout(activeCheckout);
     } catch (_) {
       final existingCheckout =
           _activeCheckout ?? _checkoutRepository.cachedActiveCheckout;
@@ -402,10 +396,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final resolvedCartEntries = _resolvedCartEntries(positions);
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => _CategoryProductsScreen(
+      builder: (_) => _CategoryProductsScreen(
           categories: _buildDashboardCategories(positions),
           initialCategoryKey: category.key,
           initialCartEntries: resolvedCartEntries,
+          authSession: _authSession,
           hasActiveCheckout: _activeCheckout != null &&
               _isCheckoutStillActive(_activeCheckout),
           onCartChanged: _replaceCart,
@@ -482,31 +477,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                     padding: EdgeInsets.fromLTRB(
                       horizontalPadding,
-                      12,
+                      18,
                       horizontalPadding,
                       hasBottomModule ? 206 : 110,
                     ),
                     children: [
-                      _TopBar(
-                        onReload: _reload,
-                        onLogout: () async {
-                          _checkoutRepository.rememberActiveCheckout(null);
-                          await SessionPersistence.clearAll();
-                          if (!context.mounted) {
-                            return;
-                          }
-                          Navigator.pushReplacementNamed(
-                            context,
-                            AppRoutes.login,
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      _DashboardHeroCard(
-                        categoryCount: dashboardCategories.length,
-                        productCount: positions.length,
-                      ),
-                      const SizedBox(height: 18),
                       _CategoryBlock(
                         categories: dashboardCategories,
                         crossAxisCount: crossAxisCount,
@@ -597,139 +572,6 @@ class _Background extends StatelessWidget {
   }
 }
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({required this.onReload, required this.onLogout});
-
-  final VoidCallback onReload;
-  final VoidCallback onLogout;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        const Spacer(),
-        _IconCircle(icon: Icons.refresh_rounded, onTap: onReload),
-        const SizedBox(width: 8),
-        _IconCircle(icon: Icons.logout_rounded, onTap: onLogout),
-      ],
-    );
-  }
-}
-
-class _DashboardHeroCard extends StatelessWidget {
-  const _DashboardHeroCard({
-    required this.categoryCount,
-    required this.productCount,
-  });
-
-  final int categoryCount;
-  final int productCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(18, 18, 18, 18),
-      decoration: BoxDecoration(
-        color: const Color(0xD9161312),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: const Color(0x1BFFFFFF)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x2A000000),
-            blurRadius: 28,
-            offset: Offset(0, 16),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0x1CFFFFFF),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              'Dashboard',
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: const Color(0xFFF6E7D9),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'Wybierz kategorie i wejdz prosto do produktow.',
-            style: theme.textTheme.headlineSmall?.copyWith(
-              color: const Color(0xFFF8EEE7),
-              fontWeight: FontWeight.w900,
-              height: 1.05,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Menu zaczyna sie od kategorii. Mniej szumu na starcie, szybsze wejscie w to, czego faktycznie szukasz.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: const Color(0xD8D3C3B7),
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              _HeroMetricPill(
-                icon: Icons.grid_view_rounded,
-                label: '$categoryCount kategorie',
-              ),
-              const SizedBox(width: 10),
-              _HeroMetricPill(
-                icon: Icons.fastfood_rounded,
-                label: '$productCount pozycji',
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeroMetricPill extends StatelessWidget {
-  const _HeroMetricPill({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: const Color(0x14131110),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x1AFFFFFF)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: const Color(0xFFFFC58B)),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: const Color(0xFFF7EBDD),
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _CategoryBlock extends StatelessWidget {
   const _CategoryBlock({
     required this.categories,
@@ -745,41 +587,22 @@ class _CategoryBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Kategorie',
-            style: theme.textTheme.titleLarge?.copyWith(
-                color: const Color(0xFFF8EEE7), fontWeight: FontWeight.w800)),
-        const SizedBox(height: 4),
-        Text(
-          'Przegladaj menu po kategoriach. Produkty sa widoczne dopiero po wejsciu do konkretnej sekcji.',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: const Color(0xCCCFBBAE),
-            height: 1.35,
-          ),
-        ),
-        const SizedBox(height: 12),
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: categories.length,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: childAspectRatio,
-          ),
-          itemBuilder: (context, index) => _CategoryTile(
-            category: categories[index],
-            onTap: categories[index].items.isEmpty
-                ? null
-                : () => onCategoryTap(categories[index]),
-          ),
-        ),
-      ],
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: categories.length,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: childAspectRatio,
+      ),
+      itemBuilder: (context, index) => _CategoryTile(
+        category: categories[index],
+        onTap: categories[index].items.isEmpty
+            ? null
+            : () => onCategoryTap(categories[index]),
+      ),
     );
   }
 }
@@ -798,10 +621,11 @@ class _CategoryTile extends StatelessWidget {
     final theme = Theme.of(context);
     final previewItem = category.items.isEmpty ? null : category.items.first;
     final previewTitle = category.title;
-    final previewPhoto = previewItem == null ? null : _photo(previewItem);
-    final productCountLabel = category.items.length == 1
-        ? '1 pozycja'
-        : '${category.items.length} pozycji';
+    final previewPhoto = _categoryPreviewPhoto(
+      category: category,
+      previewItem: previewItem,
+    );
+    final categoryEtaLabel = _categoryEtaLabel(category);
 
     return Material(
       color: Colors.transparent,
@@ -847,29 +671,13 @@ class _CategoryTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        const Spacer(),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0x2B0E0D0C),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: const Color(0x18FFFFFF)),
-                          ),
-                          child: Text(
-                            productCountLabel,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: const Color(0xFFF8EEE7),
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                    if (categoryEtaLabel != null)
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: _CategoryEtaBadge(
+                          label: categoryEtaLabel,
                         ),
-                      ],
-                    ),
+                      ),
                     const Spacer(),
                     Text(
                       category.title,
@@ -902,11 +710,27 @@ class _CategoryTile extends StatelessWidget {
   }
 }
 
+String? _categoryPreviewPhoto({
+  required _DashboardCategory category,
+  required Map<String, dynamic>? previewItem,
+}) {
+  switch (category.key) {
+    case 'zapiekanki':
+    case 'kids':
+      return 'assets/images/zapMeat.png';
+    case 'udka':
+      return 'assets/images/chickenLeg.png';
+    default:
+      return previewItem == null ? null : _photo(previewItem);
+  }
+}
+
 class _CategoryProductsScreen extends StatefulWidget {
   const _CategoryProductsScreen({
     required this.categories,
     required this.initialCategoryKey,
     required this.initialCartEntries,
+    required this.authSession,
     required this.hasActiveCheckout,
     required this.onCartChanged,
   });
@@ -914,6 +738,7 @@ class _CategoryProductsScreen extends StatefulWidget {
   final List<_DashboardCategory> categories;
   final String initialCategoryKey;
   final List<_CartEntry> initialCartEntries;
+  final AuthSession authSession;
   final bool hasActiveCheckout;
   final ValueChanged<List<_CartEntry>> onCartChanged;
 
@@ -925,6 +750,7 @@ class _CategoryProductsScreen extends StatefulWidget {
 class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
   late String _selectedCategoryKey;
   late List<_CartEntry> _entries;
+  _UdkaPickupEstimate? _udkaPickupEstimate;
   int _nextCartEntryId = 1;
   int _activeFooterIndex = 0;
 
@@ -938,6 +764,7 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
           (maxId, entry) => entry.id > maxId ? entry.id : maxId,
         ) +
         1;
+    _refreshUdkaPickupEstimate();
   }
 
   _DashboardCategory get _selectedCategory {
@@ -963,6 +790,27 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
     widget.onCartChanged(List<_CartEntry>.from(_entries));
   }
 
+  Future<void> _refreshUdkaPickupEstimate() async {
+    if (!_containsUdkaCartEntries(_entries)) {
+      if (mounted && _udkaPickupEstimate != null) {
+        setState(() => _udkaPickupEstimate = null);
+      }
+      return;
+    }
+
+    try {
+      final estimate = await _fetchUdkaPickupEstimateForEntries(_entries);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _udkaPickupEstimate = estimate);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _udkaPickupEstimate = null);
+      }
+    }
+  }
+
   void _addToCart(Map<String, dynamic> position) {
     if (widget.hasActiveCheckout) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -985,6 +833,7 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
       );
     });
     _syncCart();
+    _refreshUdkaPickupEstimate();
   }
 
   void _removeFromCart(Map<String, dynamic> position) {
@@ -998,6 +847,20 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
       _entries.removeAt(index);
     });
     _syncCart();
+    _refreshUdkaPickupEstimate();
+  }
+
+  void _removeEntryById(int id) {
+    final index = _entries.indexWhere((entry) => entry.id == id);
+    if (index < 0) {
+      return;
+    }
+
+    setState(() {
+      _entries.removeAt(index);
+    });
+    _syncCart();
+    _refreshUdkaPickupEstimate();
   }
 
   void _openProductPreview(Map<String, dynamic> position) {
@@ -1011,12 +874,73 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
     );
   }
 
+  int _estimatedPrepMinutesForEntries() {
+    final prepMinutes = _entries
+        .map((entry) => _prepMinutes(entry.position))
+        .whereType<int>()
+        .where((minutes) => minutes > 0)
+        .toList(growable: false);
+
+    if (prepMinutes.isEmpty) {
+      return 15;
+    }
+
+    return prepMinutes.reduce(math.max);
+  }
+
+  String _liveCartEtaLabelForEntries() {
+    if (_containsUdkaCartEntries(_entries)) {
+      final estimate = _udkaPickupEstimate;
+      if (estimate != null) {
+        return _formatScheduledPickupCompact(estimate.scheduledPickupAt);
+      }
+      return _udkaPickupCompactLabel();
+    }
+    return '${_estimatedPrepMinutesForEntries()} min';
+  }
+
+  Future<void> _openCartSummary() async {
+    if (_entries.isEmpty || widget.hasActiveCheckout) {
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => _CartSummaryScreen(
+          initialEntries: List<_CartEntry>.from(_entries),
+          onCartChanged: (entries) {
+            if (!mounted) {
+              return;
+            }
+            setState(() {
+              _entries = List<_CartEntry>.from(entries);
+              _nextCartEntryId = _entries.fold<int>(
+                    0,
+                    (maxId, entry) => entry.id > maxId ? entry.id : maxId,
+                  ) +
+                  1;
+            });
+            _syncCart();
+            _refreshUdkaPickupEstimate();
+          },
+          authSession: widget.authSession,
+        ),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+    _refreshUdkaPickupEstimate();
+  }
+
   @override
   Widget build(BuildContext context) {
     final category = _selectedCategory;
     final items = category.items;
     final itemCountLabel =
         items.length == 1 ? '1 produkt' : '${items.length} produktow';
+    final hasLiveCart = _entries.isNotEmpty;
 
     return Scaffold(
       extendBody: true,
@@ -1027,7 +951,7 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
             physics: const BouncingScrollPhysics(
               parent: AlwaysScrollableScrollPhysics(),
             ),
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 110),
+            padding: EdgeInsets.fromLTRB(14, 14, 14, hasLiveCart ? 186 : 110),
             children: [
               Row(
                 children: [
@@ -1177,18 +1101,33 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
         top: false,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-          child: _DashboardFooterBar(
-            activeIndex: _activeFooterIndex,
-            onTap: (index, label) {
-              if (index == 0) {
-                Navigator.of(context).pop();
-                return;
-              }
-              setState(() => _activeFooterIndex = index);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('$label jest w przygotowaniu.')),
-              );
-            },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (hasLiveCart) ...[
+                _CartOverviewBar(
+                  entries: _entries,
+                  etaLabel: _liveCartEtaLabelForEntries(),
+                  onSelect: _openProductPreview,
+                  onRemove: _removeEntryById,
+                  onContinue: _openCartSummary,
+                ),
+                const SizedBox(height: 8),
+              ],
+              _DashboardFooterBar(
+                activeIndex: _activeFooterIndex,
+                onTap: (index, label) {
+                  if (index == 0) {
+                    Navigator.of(context).pop();
+                    return;
+                  }
+                  setState(() => _activeFooterIndex = index);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('$label jest w przygotowaniu.')),
+                  );
+                },
+              ),
+            ],
           ),
         ),
       ),
@@ -1368,6 +1307,10 @@ class _CategoryProductRow extends StatelessWidget {
                             color: const Color(0xFFD1C0B5),
                             height: 1.3,
                           ),
+                    ),
+                    const SizedBox(height: 8),
+                    _PrepTimeBadge(
+                      minutes: _prepMinutesOrFallback(position),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -1584,15 +1527,6 @@ class _BottomChrome extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final total = cartEntries.fold<double>(
-      0,
-      (sum, entry) => sum + _entryPrice(entry),
-    );
-    final estimatedPrepMinutes = cartEntries
-        .map((entry) => _prepMinutes(entry.position))
-        .whereType<int>()
-        .where((minutes) => minutes > 0)
-        .fold<int>(15, math.max);
     final footer = [
       (Icons.receipt_long_outlined, 'Menu'),
       (Icons.emoji_events_outlined, 'Nagrody'),
@@ -1643,109 +1577,12 @@ class _BottomChrome extends StatelessWidget {
                 ),
               )
             else if (cartEntries.isNotEmpty)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-                    decoration: BoxDecoration(
-                        color: const Color(0xED2A231E),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0x2BFFFFFF))),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(children: [
-                                const Icon(Icons.shopping_cart_outlined,
-                                    size: 16, color: Color(0xFFF0D7C7)),
-                                const SizedBox(width: 6),
-                                Text('Koszyk',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelLarge
-                                        ?.copyWith(
-                                            color: const Color(0xFFF7E7DD),
-                                            fontWeight: FontWeight.w700))
-                              ]),
-                              const SizedBox(height: 10),
-                              SizedBox(
-                                height: 104,
-                                child: ListView.separated(
-                                  scrollDirection: Axis.horizontal,
-                                  itemCount: cartEntries.length,
-                                  separatorBuilder: (_, __) =>
-                                      const SizedBox(width: 8),
-                                  itemBuilder: (context, index) => _CartThumb(
-                                    entry: cartEntries[index],
-                                    onTap: () =>
-                                        onSelect(cartEntries[index].position),
-                                    onRemove: () =>
-                                        onRemove(cartEntries[index].id),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          width: 1,
-                          height: 92,
-                          margin: const EdgeInsets.symmetric(horizontal: 12),
-                          color: const Color(0x33FFF3EA),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text('PLN ${_fmt(total)}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(
-                                        color: const Color(0xFFFFF3EA),
-                                        fontWeight: FontWeight.w900)),
-                            const SizedBox(height: 6),
-                            Text('${cartEntries.length} szt.',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelMedium
-                                    ?.copyWith(
-                                        color: const Color(0xFFF0DDCF),
-                                        fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 4),
-                            Row(mainAxisSize: MainAxisSize.min, children: [
-                              const Icon(Icons.access_time_rounded,
-                                  size: 15, color: Color(0xFFEBD7C8)),
-                              const SizedBox(width: 4),
-                              Text('$estimatedPrepMinutes min',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodySmall
-                                      ?.copyWith(
-                                          color: const Color(0xFFEBD7C8)))
-                            ]),
-                            const SizedBox(height: 10),
-                            FilledButton(
-                              onPressed: onContinue,
-                              style: FilledButton.styleFrom(
-                                  minimumSize: const Size(96, 42),
-                                  backgroundColor: const Color(0xFFDD6B1F),
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(8))),
-                              child: const Text('DALEJ',
-                                  style:
-                                      TextStyle(fontWeight: FontWeight.w800)),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+              _CartOverviewBar(
+                entries: cartEntries,
+                etaLabel: '${_cartEstimatedPrepMinutes(cartEntries)} min',
+                onSelect: onSelect,
+                onRemove: onRemove,
+                onContinue: onContinue,
               ),
             const SizedBox(height: 8),
             Container(
@@ -1866,6 +1703,7 @@ class _ActiveOrderBar extends StatelessWidget {
     final leadItem = itemCount == 0
         ? 'Aktywne zamowienie'
         : checkout.receivedOrder.items.first.name;
+    final etaDisplay = _activeCheckoutEtaDisplay(checkout);
 
     return Material(
       color: Colors.transparent,
@@ -1936,7 +1774,7 @@ class _ActiveOrderBar extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        '${remainingEta.clamp(0, 999)} min',
+                        etaDisplay,
                         style:
                             Theme.of(context).textTheme.titleMedium?.copyWith(
                                   color: const Color(0xFFF8F3EE),
@@ -2013,6 +1851,8 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   late List<_CartEntry> _entries;
   late final List<({String title, String subtitle})> _addresses;
   final TextEditingController _noteController = TextEditingController();
+  _UdkaPickupEstimate? _udkaPickupEstimate;
+  String _pickupLocationAddress = '';
   int _fulfillmentIndex = 0;
   int _addressIndex = 0;
   String? _selectedPaymentMethod;
@@ -2036,7 +1876,10 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     _entries = List<_CartEntry>.from(widget.initialEntries);
     _addresses =
         List<({String title, String subtitle})>.from(_defaultAddresses);
+    _enforceUdkaFulfillment();
     _loadDeliveryEstimate();
+    _refreshUdkaPickupEstimate();
+    _loadPickupLocationAddress();
   }
 
   @override
@@ -2047,6 +1890,50 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
 
   void _syncEntries() {
     widget.onCartChanged(List<_CartEntry>.from(_entries));
+  }
+
+  Future<void> _refreshUdkaPickupEstimate() async {
+    if (!_cartContainsUdka()) {
+      if (mounted && _udkaPickupEstimate != null) {
+        setState(() => _udkaPickupEstimate = null);
+      }
+      return;
+    }
+
+    try {
+      final estimate = await _fetchUdkaPickupEstimateForEntries(_entries);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _udkaPickupEstimate = estimate);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _udkaPickupEstimate = null);
+      }
+    }
+  }
+
+  bool _cartContainsUdka() => _containsUdkaCartEntries(_entries);
+
+  void _enforceUdkaFulfillment() {
+    if (_cartContainsUdka()) {
+      _fulfillmentIndex = 2;
+    }
+  }
+
+  void _setFulfillmentIndex(int index) {
+    if (_cartContainsUdka() && index != 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Udka z kurczaka sa dostepne tylko w opcji Zaplanuj odbior o 12:00, 15:00 albo 18:00.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _fulfillmentIndex = index);
   }
 
   Future<void> _loadDeliveryEstimate() async {
@@ -2076,12 +1963,41 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     }
   }
 
+  Future<void> _loadPickupLocationAddress() async {
+    try {
+      final response = await http.get(
+        Uri.parse('${AppConfig.apiBaseUrl}/checkout/pickup-location'),
+        headers: const {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 6));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return;
+      }
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        return;
+      }
+
+      final address = decoded['address']?.toString().trim() ?? '';
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _pickupLocationAddress = address);
+    } catch (_) {
+      // The backend still writes pickup address to the order on submit.
+    }
+  }
+
   void _removeEntry(int id) {
     setState(() {
       _entries.removeWhere((entry) => entry.id == id);
+      _enforceUdkaFulfillment();
       _redeemedPoints = _effectiveRedeemedPoints();
     });
     _syncEntries();
+    _refreshUdkaPickupEstimate();
   }
 
   Future<void> _openPersonalization(_CartEntry entry) async {
@@ -2103,6 +2019,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
       _redeemedPoints = _effectiveRedeemedPoints();
     });
     _syncEntries();
+    _refreshUdkaPickupEstimate();
   }
 
   Future<void> _showAddAddressDialog() async {
@@ -2119,7 +2036,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     setState(() {
       _addresses.add(newAddress);
       _addressIndex = _addresses.length - 1;
-      _fulfillmentIndex = 0;
+      _fulfillmentIndex = _cartContainsUdka() ? 2 : 0;
     });
   }
 
@@ -2179,6 +2096,9 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   bool _usesDeliveryBuffer() => _fulfillmentIndex == 0;
 
   int _summaryEtaMinutes(int prepMinutes) {
+    if (_cartContainsUdka()) {
+      return _udkaPickupEstimate?.etaMinutes ?? _udkaPickupEtaMinutes();
+    }
     if (!_usesDeliveryBuffer()) {
       return prepMinutes;
     }
@@ -2186,6 +2106,13 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   }
 
   String _summaryEtaLabel(int prepMinutes) {
+    if (_cartContainsUdka()) {
+      final estimate = _udkaPickupEstimate;
+      if (estimate != null) {
+        return _formatScheduledPickupCompact(estimate.scheduledPickupAt);
+      }
+      return _udkaPickupCompactLabel();
+    }
     return '${_summaryEtaMinutes(prepMinutes)} min.';
   }
 
@@ -2194,6 +2121,13 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   }
 
   String _addressEtaLabelForIndex(int prepMinutes, int _) {
+    if (_cartContainsUdka()) {
+      final estimate = _udkaPickupEstimate;
+      if (estimate != null) {
+        return _formatScheduledPickupDetailed(estimate.scheduledPickupAt);
+      }
+      return _udkaPickupEtaLabel();
+    }
     final totalMinutes =
         _usesDeliveryBuffer() ? _deliveryEtaMinutes : prepMinutes;
     return '~$totalMinutes min.';
@@ -2228,7 +2162,14 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   }
 
   CheckoutVerificationRequest _buildOrderPayload(String paymentMethod) {
-    final selectedAddress = _addresses[_addressIndex];
+    final selectedAddress = _usesDeliveryBuffer()
+        ? _addresses[_addressIndex]
+        : (
+            title: _pickupLocationAddress.isNotEmpty
+                ? _pickupLocationAddress
+                : 'Adres odbioru zostanie potwierdzony przy zamowieniu',
+            subtitle: _fulfillmentOptions[_fulfillmentIndex].label,
+          );
     final subtotal = _entries.fold<double>(
       0,
       (sum, entry) => sum + _entryPrice(entry),
@@ -2287,6 +2228,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     final double total = math.max(0.0, subtotal - redeemedAmount);
     final maxRedeemablePoints = _maxRedeemablePoints(subtotal);
     final estimatedPrepMinutes = _estimatedPrepMinutes();
+    final udkaOnlyScheduledPickup = _cartContainsUdka();
 
     return Scaffold(
       extendBody: true,
@@ -2368,24 +2310,53 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: [
-                              for (var index = 0;
-                                  index < _fulfillmentOptions.length;
-                                  index++) ...[
-                                if (index > 0) const SizedBox(width: 8),
-                                Expanded(
-                                  child: _FulfillmentTile(
-                                    label: _fulfillmentOptions[index].label,
-                                    icon: _fulfillmentOptions[index].icon,
-                                    isSelected: _fulfillmentIndex == index,
-                                    onTap: () => setState(
-                                        () => _fulfillmentIndex = index),
+                          if (udkaOnlyScheduledPickup)
+                            _FulfillmentTile(
+                              label: _fulfillmentOptions[2].label,
+                              icon: _fulfillmentOptions[2].icon,
+                              isSelected: true,
+                              onTap: () {},
+                            )
+                          else
+                            Row(
+                              children: [
+                                for (var index = 0;
+                                    index < _fulfillmentOptions.length;
+                                    index++) ...[
+                                  if (index > 0) const SizedBox(width: 8),
+                                  Expanded(
+                                    child: _FulfillmentTile(
+                                      label: _fulfillmentOptions[index].label,
+                                      icon: _fulfillmentOptions[index].icon,
+                                      isSelected: _fulfillmentIndex == index,
+                                      onTap: () => _setFulfillmentIndex(index),
+                                    ),
                                   ),
-                                ),
+                                ],
                               ],
-                            ],
-                          ),
+                            ),
+                          if (udkaOnlyScheduledPickup) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              'Udka wydajemy tylko w zaplanowanym odbiorze. Najblizszy termin: ${_summaryEtaLabel(estimatedPrepMinutes)}.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: const Color(0xFFD5C7BA),
+                                    height: 1.35,
+                                  ),
+                            ),
+                          ],
+                          if (!_usesDeliveryBuffer()) ...[
+                            const SizedBox(height: 16),
+                            _PickupLocationCard(
+                              address: _pickupLocationAddress,
+                              etaLabel: _addressEtaLabel(estimatedPrepMinutes),
+                              fulfillmentLabel:
+                                  _fulfillmentOptions[_fulfillmentIndex].label,
+                            ),
+                          ],
                           if (_usesDeliveryBuffer()) ...[
                             const SizedBox(height: 16),
                             Text(
@@ -3172,6 +3143,10 @@ class _ProductPreviewDialog extends StatelessWidget {
                     spacing: 10,
                     runSpacing: 10,
                     children: [
+                      _DetailChip(
+                        icon: Icons.access_time_rounded,
+                        label: '${_prepMinutesOrFallback(position)} min',
+                      ),
                       _DetailChip(
                         icon: Icons.local_fire_department_outlined,
                         label: _kcal(position),
@@ -4525,6 +4500,8 @@ class _AddAddressDialogState extends State<_AddAddressDialog> {
   final _streetController = TextEditingController();
   final _postalController = TextEditingController();
   final _cityController = TextEditingController(text: 'Warszawa');
+  bool _isSubmitting = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -4534,16 +4511,80 @@ class _AddAddressDialogState extends State<_AddAddressDialog> {
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (_formKey.currentState?.validate() != true) {
       return;
     }
 
-    Navigator.of(context).pop((
-      title: _streetController.text.trim(),
-      subtitle:
-          '${_postalController.text.trim()}, ${_cityController.text.trim()}',
-    ));
+    final street = _streetController.text.trim();
+    final postal = _postalController.text.trim();
+    final city = _cityController.text.trim();
+
+    setState(() {
+      _isSubmitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse(
+              '${AppConfig.apiBaseUrl}/checkout/validate-delivery-address',
+            ),
+            headers: const {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'street': street,
+              'postal': postal,
+              'city': city,
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+
+      if (!mounted) {
+        return;
+      }
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        setState(() {
+          _errorMessage = _extractBackendDetail(response.body) ??
+              'Nie udalo sie potwierdzic adresu dostawy.';
+          _isSubmitting = false;
+        });
+        return;
+      }
+
+      Navigator.of(context).pop((
+        title: street,
+        subtitle: '$postal, $city',
+      ));
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _errorMessage =
+            'Nie udalo sie sprawdzic adresu. Sprobuj ponownie za chwile.';
+        _isSubmitting = false;
+      });
+    }
+  }
+
+  String? _extractBackendDetail(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        final detail = decoded['detail']?.toString().trim();
+        if (detail != null && detail.isNotEmpty) {
+          return detail;
+        }
+      }
+    } catch (_) {
+      // Ignore malformed error payloads and fall back to a generic message.
+    }
+    return null;
   }
 
   @override
@@ -4572,6 +4613,7 @@ class _AddAddressDialogState extends State<_AddAddressDialog> {
                   controller: _streetController,
                   autofocus: true,
                   textInputAction: TextInputAction.next,
+                  enabled: !_isSubmitting,
                   decoration: const InputDecoration(
                     labelText: 'Ulica i numer',
                     prefixIcon: Icon(Icons.location_on_outlined),
@@ -4588,6 +4630,7 @@ class _AddAddressDialogState extends State<_AddAddressDialog> {
                   controller: _postalController,
                   keyboardType: TextInputType.text,
                   textInputAction: TextInputAction.next,
+                  enabled: !_isSubmitting,
                   decoration: const InputDecoration(
                     labelText: 'Kod pocztowy',
                     prefixIcon: Icon(Icons.local_post_office_outlined),
@@ -4603,6 +4646,7 @@ class _AddAddressDialogState extends State<_AddAddressDialog> {
                 TextFormField(
                   controller: _cityController,
                   textInputAction: TextInputAction.done,
+                  enabled: !_isSubmitting,
                   decoration: const InputDecoration(
                     labelText: 'Miasto',
                     prefixIcon: Icon(Icons.location_city_outlined),
@@ -4615,6 +4659,20 @@ class _AddAddressDialogState extends State<_AddAddressDialog> {
                   },
                   onFieldSubmitted: (_) => _submit(),
                 ),
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _errorMessage!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: const Color(0xFFFF9F9F),
+                        fontWeight: FontWeight.w700,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -4622,14 +4680,162 @@ class _AddAddressDialogState extends State<_AddAddressDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: _isSubmitting ? null : () => Navigator.of(context).pop(),
           child: const Text('Anuluj'),
         ),
         FilledButton(
-          onPressed: _submit,
-          child: const Text('Dodaj adres'),
+          onPressed: _isSubmitting ? null : _submit,
+          child: _isSubmitting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Dodaj adres'),
         ),
       ],
+    );
+  }
+}
+
+class _CartOverviewBar extends StatelessWidget {
+  const _CartOverviewBar({
+    required this.entries,
+    required this.etaLabel,
+    required this.onSelect,
+    required this.onRemove,
+    required this.onContinue,
+  });
+
+  final List<_CartEntry> entries;
+  final String etaLabel;
+  final ValueChanged<Map<String, dynamic>> onSelect;
+  final ValueChanged<int> onRemove;
+  final VoidCallback onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = entries.fold<double>(
+      0,
+      (sum, entry) => sum + _entryPrice(entry),
+    );
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            color: const Color(0xED2A231E),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0x2BFFFFFF)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.shopping_cart_outlined,
+                          size: 16,
+                          color: Color(0xFFF0D7C7),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Koszyk',
+                          style:
+                              Theme.of(context).textTheme.labelLarge?.copyWith(
+                                    color: const Color(0xFFF7E7DD),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 104,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: entries.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 8),
+                        itemBuilder: (context, index) => _CartThumb(
+                          entry: entries[index],
+                          onTap: () => onSelect(entries[index].position),
+                          onRemove: () => onRemove(entries[index].id),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                width: 1,
+                height: 92,
+                margin: const EdgeInsets.symmetric(horizontal: 12),
+                color: const Color(0x33FFF3EA),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'PLN ${_fmt(total)}',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: const Color(0xFFFFF3EA),
+                          fontWeight: FontWeight.w900,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${entries.length} szt.',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: const Color(0xFFF0DDCF),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.access_time_rounded,
+                        size: 15,
+                        color: Color(0xFFEBD7C8),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        etaLabel,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: const Color(0xFFEBD7C8),
+                            ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton(
+                    onPressed: onContinue,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(96, 42),
+                      backgroundColor: const Color(0xFFDD6B1F),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    child: const Text(
+                      'DALEJ',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -4796,6 +5002,82 @@ class _ProductStateBadge extends StatelessWidget {
               color: const Color(0xFFBEEAFF),
               fontWeight: FontWeight.w800,
             ),
+      ),
+    );
+  }
+}
+
+class _PrepTimeBadge extends StatelessWidget {
+  const _PrepTimeBadge({
+    required this.minutes,
+  });
+
+  final int minutes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFF251E19),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x33FFD6AB)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.access_time_rounded,
+            size: 13,
+            color: Color(0xFFFFCB93),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            '$minutes min',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: const Color(0xFFFFD8B2),
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryEtaBadge extends StatelessWidget {
+  const _CategoryEtaBadge({
+    required this.label,
+  });
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFF251E19),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x33FFD6AB)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.access_time_rounded,
+            size: 13,
+            color: Color(0xFFFFCB93),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: const Color(0xFFFFD8B2),
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+        ],
       ),
     );
   }
@@ -5004,8 +5286,8 @@ class _ThumbActionButton extends StatelessWidget {
           onTap: onTap,
           borderRadius: BorderRadius.circular(999),
           child: Container(
-            height: 22,
-            width: 22,
+            height: 32,
+            width: 32,
             decoration: BoxDecoration(
               color: const Color(0xE81B1512),
               borderRadius: BorderRadius.circular(999),
@@ -5013,11 +5295,88 @@ class _ThumbActionButton extends StatelessWidget {
             ),
             child: Icon(
               icon,
-              size: 13,
+              size: 18,
               color: const Color(0xFFFFE9DA),
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PickupLocationCard extends StatelessWidget {
+  const _PickupLocationCard({
+    required this.address,
+    required this.etaLabel,
+    required this.fulfillmentLabel,
+  });
+
+  final String address;
+  final String etaLabel;
+  final String fulfillmentLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedAddress = address.trim().isEmpty
+        ? 'Adres lokalu zostanie pokazany po zatwierdzeniu ustawienia w panelu administratora.'
+        : address.trim();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161311),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0x22FFFFFF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.storefront_rounded,
+                size: 18,
+                color: Color(0xFFFFC38D),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Miejsce odbioru',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: const Color(0xFFF8EEDF),
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              Text(
+                etaLabel,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: const Color(0xFFF0DDD0),
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            resolvedAddress,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: const Color(0xFFF6E8D9),
+                  height: 1.35,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            fulfillmentLabel,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFD6C5B9),
+                  height: 1.3,
+                ),
+          ),
+        ],
       ),
     );
   }
@@ -5084,18 +5443,23 @@ class _PositionImage extends StatelessWidget {
     if (photoUrl != null && photoUrl!.trim().isNotEmpty) {
       final resolvedPhotoUrl = photoUrl!.trim();
       if (_isBundledAssetPhoto(resolvedPhotoUrl)) {
-        return Container(
-          color: const Color(0xFF1B1715),
-          padding: const EdgeInsets.all(6),
+        return _FadedPositionImage(
           child: Image.asset(
             _normalizeBundledAssetPhoto(resolvedPhotoUrl),
-            fit: BoxFit.contain,
+            fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
             errorBuilder: (_, __, ___) => _fallback(context),
           ),
         );
       }
-      return Image.network(resolvedPhotoUrl,
-          fit: BoxFit.cover, errorBuilder: (_, __, ___) => _fallback(context));
+      return _FadedPositionImage(
+        child: Image.network(
+          resolvedPhotoUrl,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+          errorBuilder: (_, __, ___) => _fallback(context),
+        ),
+      );
     }
     return Container(
       decoration: const BoxDecoration(
@@ -5112,28 +5476,42 @@ class _PositionImage extends StatelessWidget {
       builder: (context, constraints) {
         final isCompact =
             constraints.maxHeight <= 64 || constraints.maxWidth <= 64;
+        final iconSize = isCompact
+            ? math.max(
+                14.0,
+                math.min(constraints.maxWidth, constraints.maxHeight) * 0.42,
+              )
+            : 26.0;
+        final showTitle =
+            !isCompact && constraints.maxHeight >= 96 && constraints.maxWidth >= 88;
+
         return Center(
           child: Padding(
-            padding: EdgeInsets.all(isCompact ? 4 : 10),
+            padding: const EdgeInsets.all(10),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   Icons.fastfood_rounded,
-                  size: isCompact ? 20 : 26,
+                  size: iconSize,
                   color: const Color(0xFFFFE9D9),
                 ),
-                if (!isCompact) ...[
+                if (showTitle) ...[
                   const SizedBox(height: 6),
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: const Color(0xFFFFF0E6),
-                          fontWeight: FontWeight.w700,
-                        ),
+                  SizedBox(
+                    height: 18,
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        title,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                              color: const Color(0xFFFFF0E6),
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ),
                   ),
                 ],
               ],
@@ -5141,6 +5519,51 @@ class _PositionImage extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _FadedPositionImage extends StatelessWidget {
+  const _FadedPositionImage({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        child,
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Color(0x78080706),
+                Color(0x00080706),
+                Color(0xD8080706),
+              ],
+              stops: [0, 0.5, 1],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+        ),
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Color(0x9A080706),
+                Color(0x00080706),
+                Color(0x00080706),
+                Color(0x9A080706),
+              ],
+              stops: [0, 0.16, 0.84, 1],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -5449,6 +5872,20 @@ List<_DashboardCategory> _buildDashboardCategories(
       Color(0xFFCC5C1F),
     ),
     (
+      'kids',
+      'Kids',
+      Icons.child_care_rounded,
+      Color(0xFF9D7CFF),
+      Color(0xFF6A48D7),
+    ),
+    (
+      'udka',
+      'Udka',
+      Icons.set_meal_rounded,
+      Color(0xFFFF9B5C),
+      Color(0xFFD05E2A),
+    ),
+    (
       'lody',
       'Lody',
       Icons.icecream_rounded,
@@ -5464,7 +5901,7 @@ List<_DashboardCategory> _buildDashboardCategories(
     ),
     (
       'dodatki',
-      'Dodatki',
+      'Frytki',
       Icons.lunch_dining_rounded,
       Color(0xFFE1662A),
       Color(0xFFB83B18),
@@ -5496,6 +5933,20 @@ String _categoryKeyForPosition(Map<String, dynamic> position) {
   final title = _title(position, 0).trim().toLowerCase();
   final description = _description(position).trim().toLowerCase();
   final haystack = '$positionType $prepGroup $title $description';
+
+  if (positionType.contains('kids') ||
+      prepGroup.contains('kids') ||
+      haystack.contains('dziec') ||
+      haystack.contains('kids')) {
+    return 'kids';
+  }
+  if (prepGroup.contains('udka') ||
+      positionType.contains('udk') ||
+      haystack.contains('udk') ||
+      haystack.contains('kurczak') ||
+      haystack.contains('chicken')) {
+    return 'udka';
+  }
 
   if (prepGroup.contains('zapiek') ||
       positionType.contains('zapiek') ||
@@ -5534,13 +5985,37 @@ String _categorySubtitle(String categoryKey) {
   switch (categoryKey) {
     case 'zapiekanki':
       return 'Klasyczne i mrozone warianty do szybkiego wyboru.';
+    case 'kids':
+      return 'Mniejsze zapiekanki 25 cm dla dzieci.';
+    case 'udka':
+      return 'Pakiety udek z kurczaka przygotowywane w transzach.';
     case 'lody':
       return 'Chlodne pozycje na deser i szybka przerwe.';
     case 'napoje':
       return 'Puszki i napoje do kompletu zamowienia.';
     default:
-      return 'Dodatki, ktore domykaja zestaw.';
+      return 'Chrupiace frytki do domkniecia zestawu.';
   }
+}
+
+String? _categoryEtaLabel(_DashboardCategory category) {
+  if (category.key == 'udka') {
+    return _udkaPickupCompactLabel();
+  }
+
+  if (category.items.isEmpty) {
+    return null;
+  }
+
+  final minutes = category.items
+      .map(_prepMinutes)
+      .whereType<int>()
+      .where((value) => value > 0)
+      .toList(growable: false);
+  if (minutes.isEmpty) {
+    return null;
+  }
+  return 'do ${minutes.reduce(math.max)} min';
 }
 
 String _title(Map<String, dynamic> item, int fallbackIndex) =>
@@ -5556,12 +6031,255 @@ String _description(Map<String, dynamic> item) {
 }
 
 String? _photo(Map<String, dynamic> item) {
+  final categoryKey = _categoryKeyForPosition(item);
   final value = item['photo_url']?.toString().trim();
+
+  if (categoryKey == 'zapiekanki' || categoryKey == 'kids') {
+    if (value != null && value.isNotEmpty && _isBundledAssetPhoto(value)) {
+      return _normalizeBundledAssetPhoto(value);
+    }
+    return _deriveZapiekankaAssetPath(item) ?? 'assets/images/zapMeat.png';
+  }
+
+  if (categoryKey == 'udka') {
+    if (value != null && value.isNotEmpty) {
+      return _normalizePhotoValue(value);
+    }
+    return 'assets/images/chickenLeg.png';
+  }
+
   if (value != null && value.isNotEmpty) {
-    return value;
+    return _normalizePhotoValue(value);
   }
 
   return _deriveDrinkAssetPath(item);
+}
+
+String _normalizePhotoValue(String value) {
+  return _isBundledAssetPhoto(value)
+      ? _normalizeBundledAssetPhoto(value)
+      : value;
+}
+
+class _UdkaPickupEstimate {
+  const _UdkaPickupEstimate({
+    required this.etaMinutes,
+    required this.etaLabel,
+    required this.scheduledPickupAt,
+  });
+
+  final int etaMinutes;
+  final String etaLabel;
+  final DateTime scheduledPickupAt;
+}
+
+String _udkaPickupEtaLabel({DateTime? now}) =>
+    _formatScheduledPickupDetailed(_nextUdkaPickupSlot(now: now), now: now);
+
+String _udkaPickupCompactLabel({DateTime? now}) =>
+    _formatScheduledPickupCompact(_nextUdkaPickupSlot(now: now), now: now);
+
+int _udkaPickupEtaMinutes({DateTime? now}) {
+  final localNow = now ?? DateTime.now();
+  final nextSlot = _nextUdkaPickupSlot(now: localNow);
+  final deltaSeconds = nextSlot.difference(localNow).inSeconds;
+  return ((math.max(0, deltaSeconds) + 59) / 60).floor();
+}
+
+String _formatScheduledPickupDetailed(
+  DateTime scheduledPickupAt, {
+  DateTime? now,
+}) {
+  final localSlot = scheduledPickupAt.toLocal();
+  final localNow = (now ?? DateTime.now()).toLocal();
+  final hour = localSlot.hour.toString().padLeft(2, '0');
+  final minute = localSlot.minute.toString().padLeft(2, '0');
+  if (_isSameCalendarDay(localSlot, localNow)) {
+    return 'Odbior o $hour:$minute';
+  }
+  return 'Odbior ${_pickupDateLabel(localSlot)} $hour:$minute';
+}
+
+String _formatScheduledPickupCompact(
+  DateTime scheduledPickupAt, {
+  DateTime? now,
+}) {
+  final localSlot = scheduledPickupAt.toLocal();
+  final localNow = (now ?? DateTime.now()).toLocal();
+  final hour = localSlot.hour.toString().padLeft(2, '0');
+  final minute = localSlot.minute.toString().padLeft(2, '0');
+  if (_isSameCalendarDay(localSlot, localNow)) {
+    return '$hour:$minute';
+  }
+  return '${_pickupDateLabel(localSlot)} $hour:$minute';
+}
+
+String _pickupDateLabel(DateTime value) {
+  final day = value.day.toString().padLeft(2, '0');
+  final month = value.month.toString().padLeft(2, '0');
+  return '$day.$month';
+}
+
+bool _isSameCalendarDay(DateTime left, DateTime right) {
+  return left.year == right.year &&
+      left.month == right.month &&
+      left.day == right.day;
+}
+
+DateTime _nextUdkaPickupSlot({DateTime? now}) {
+  final localNow = now ?? DateTime.now();
+  const slotHours = <int>[12, 15, 18];
+  for (final slotHour in slotHours) {
+    final candidate = DateTime(
+      localNow.year,
+      localNow.month,
+      localNow.day,
+      slotHour,
+    );
+    if (!candidate.isBefore(localNow)) {
+      return candidate;
+    }
+  }
+
+  final nextDay = localNow.add(const Duration(days: 1));
+  return DateTime(nextDay.year, nextDay.month, nextDay.day, slotHours.first);
+}
+
+bool _containsUdkaCartEntries(Iterable<_CartEntry> entries) =>
+    entries.any((entry) => _categoryKeyForPosition(entry.position) == 'udka');
+
+int _cartEstimatedPrepMinutes(List<_CartEntry> entries) {
+  return entries
+      .map((entry) => _prepMinutes(entry.position))
+      .whereType<int>()
+      .where((minutes) => minutes > 0)
+      .fold<int>(15, math.max);
+}
+
+Future<_UdkaPickupEstimate?> _fetchUdkaPickupEstimateForEntries(
+  Iterable<_CartEntry> entries,
+) async {
+  final normalizedEntries = entries.toList(growable: false);
+  if (!_containsUdkaCartEntries(normalizedEntries)) {
+    return null;
+  }
+
+  final response = await http
+      .post(
+        Uri.parse('${AppConfig.apiBaseUrl}/checkout/pickup-slot-estimate'),
+        headers: const {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'items': normalizedEntries
+              .map(
+                (entry) => {
+                  'cart_entry_id': entry.id,
+                  'position_id': _positionId(entry.position),
+                  'name': _title(entry.position, 0),
+                  'description': _description(entry.position),
+                },
+              )
+              .toList(growable: false),
+        }),
+      )
+      .timeout(const Duration(seconds: 6));
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(
+      'Backend zwrocil ${response.statusCode}: ${response.body}',
+    );
+  }
+
+  final decoded = jsonDecode(response.body);
+  if (decoded is! Map<String, dynamic>) {
+    throw Exception(
+      'Nieoczekiwany format odpowiedzi z /checkout/pickup-slot-estimate.',
+    );
+  }
+
+  final scheduledPickupAt = DateTime.tryParse(
+    decoded['scheduled_pickup_at']?.toString() ?? '',
+  );
+  if (scheduledPickupAt == null) {
+    throw Exception(
+      'Brak scheduled_pickup_at w odpowiedzi z /checkout/pickup-slot-estimate.',
+    );
+  }
+
+  return _UdkaPickupEstimate(
+    etaMinutes: _asInt(decoded['eta_minutes']) ?? 0,
+    etaLabel: decoded['eta_label']?.toString() ?? '',
+    scheduledPickupAt: scheduledPickupAt,
+  );
+}
+
+DateTime? _scheduledPickupDateTimeForCheckout(
+  CheckoutVerificationResponse checkout,
+) {
+  return checkout.scheduledPickupAt ?? checkout.activeUntil;
+}
+
+String _activeCheckoutEtaDisplay(CheckoutVerificationResponse checkout) {
+  if (_checkoutContainsUdka(checkout)) {
+    final scheduledPickupAt = _scheduledPickupDateTimeForCheckout(checkout);
+    if (scheduledPickupAt != null) {
+      return _formatScheduledPickupCompact(scheduledPickupAt);
+    }
+  }
+
+  final totalEta =
+      checkout.receivedOrder.etaMinutes <= 0 ? 1 : checkout.receivedOrder.etaMinutes;
+  final remainingEta = checkout.remainingEtaMinutes ?? totalEta;
+  return '${remainingEta.clamp(0, 999)} min';
+}
+
+bool _checkoutContainsUdka(CheckoutVerificationResponse checkout) {
+  return checkout.receivedOrder.items.any((item) {
+    final signature =
+        '${item.name} ${item.description ?? ''}'.trim().toLowerCase();
+    return signature.contains('udk') || signature.contains('chicken leg');
+  });
+}
+
+String? _deriveZapiekankaAssetPath(Map<String, dynamic> item) {
+  final categoryKey = _categoryKeyForPosition(item);
+  if (categoryKey != 'zapiekanki' && categoryKey != 'kids') {
+    return null;
+  }
+
+  final title = _title(item, 0).trim().toLowerCase();
+  if (title.isEmpty) {
+    return null;
+  }
+
+  final isFrozen = _isFrozenPosition(item);
+  if (title.contains('jalape') && title.contains('salame')) {
+    return 'assets/images/zapJalapengoSalame.png';
+  }
+  if (title.contains('szynk') || title.contains('meat')) {
+    return isFrozen
+        ? 'assets/images/zapMeatFrozen.png'
+        : 'assets/images/zapMeat.png';
+  }
+  if (title.contains('pieczark') || title.contains('mushroom')) {
+    return isFrozen
+        ? 'assets/images/zapMushroomFrozen.png'
+        : 'assets/images/zapMushroom.png';
+  }
+  if (title.contains('serow') || title.contains('cheese')) {
+    return isFrozen
+        ? 'assets/images/zapCheeseFrozen.png'
+        : 'assets/images/zapCheese.png';
+  }
+  if (title.contains('salame')) {
+    return isFrozen
+        ? 'assets/images/zapSalameFrozen.png'
+        : 'assets/images/zapSalame.png';
+  }
+
+  return null;
 }
 
 String? _deriveDrinkAssetPath(Map<String, dynamic> item) {
@@ -5685,6 +6403,14 @@ int? _prepMinutes(Map<String, dynamic> item) {
     return int.tryParse(raw);
   }
   return null;
+}
+
+int _prepMinutesOrFallback(Map<String, dynamic> item, {int fallback = 15}) {
+  final minutes = _prepMinutes(item);
+  if (minutes == null || minutes <= 0) {
+    return fallback;
+  }
+  return minutes;
 }
 
 int? _positionId(Map<String, dynamic> item) {

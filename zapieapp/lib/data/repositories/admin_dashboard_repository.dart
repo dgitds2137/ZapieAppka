@@ -11,6 +11,11 @@ abstract class AdminDashboardRepository {
     required AuthSession authSession,
   });
 
+  Future<AdminStaffPresenceData> fetchStaffPresence({
+    required AuthSession authSession,
+    String? query,
+  });
+
   Future<AdminCatalogData> fetchCatalog({
     required AuthSession authSession,
   });
@@ -53,6 +58,16 @@ abstract class AdminDashboardRepository {
     required AuthSession authSession,
     required double amount,
   });
+
+  Future<AdminCatalogData> updateDeliveryRadius({
+    required AuthSession authSession,
+    required double radiusKm,
+  });
+
+  Future<AdminCatalogData> updateDeliveryOriginAddress({
+    required AuthSession authSession,
+    required String address,
+  });
 }
 
 class HttpAdminDashboardRepository implements AdminDashboardRepository {
@@ -89,6 +104,36 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
     }
 
     return AdminDashboardData.fromJson(decoded);
+  }
+
+  @override
+  Future<AdminStaffPresenceData> fetchStaffPresence({
+    required AuthSession authSession,
+    String? query,
+  }) async {
+    final response = await _client.get(
+      Uri.parse('$_apiBaseUrl/admin/staff-presence').replace(
+        queryParameters: {
+          ..._identityQueryParameters(authSession),
+          if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+        },
+      ),
+      headers: const {
+        'Accept': 'application/json',
+      },
+    ).timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Nieoczekiwany format odpowiedzi z /admin/staff-presence.');
+    }
+
+    return AdminStaffPresenceData.fromJson(decoded);
   }
 
   @override
@@ -338,6 +383,76 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
     if (decoded is! Map<String, dynamic>) {
       throw Exception(
         'Nieoczekiwany format odpowiedzi z /admin/catalog/delivery-minimum.',
+      );
+    }
+
+    return AdminCatalogData.fromJson(decoded);
+  }
+
+  @override
+  Future<AdminCatalogData> updateDeliveryRadius({
+    required AuthSession authSession,
+    required double radiusKm,
+  }) async {
+    final response = await _client
+        .patch(
+          Uri.parse('$_apiBaseUrl/admin/catalog/delivery-radius'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'radius_km': radiusKm,
+            'session_token': authSession.sessionToken,
+            'user_email': authSession.email,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception(
+        'Nieoczekiwany format odpowiedzi z /admin/catalog/delivery-radius.',
+      );
+    }
+
+    return AdminCatalogData.fromJson(decoded);
+  }
+
+  @override
+  Future<AdminCatalogData> updateDeliveryOriginAddress({
+    required AuthSession authSession,
+    required String address,
+  }) async {
+    final response = await _client
+        .patch(
+          Uri.parse('$_apiBaseUrl/admin/catalog/delivery-origin-address'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'address': address,
+            'session_token': authSession.sessionToken,
+            'user_email': authSession.email,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception(
+        'Nieoczekiwany format odpowiedzi z /admin/catalog/delivery-origin-address.',
       );
     }
 

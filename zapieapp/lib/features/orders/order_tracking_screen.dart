@@ -122,7 +122,24 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
         email: widget.authSession.email,
       );
 
-      if (!mounted || checkout == null) {
+      if (!mounted) {
+        return;
+      }
+
+      if (checkout == null) {
+        await SessionPersistence.saveActiveCheckout(null);
+        widget.checkoutRepository.rememberActiveCheckout(null);
+        if (!mounted || widget.isHistoryView) {
+          return;
+        }
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          AppRoutes.dashboard,
+          (route) => false,
+          arguments: <String, dynamic>{
+            ...widget.authSession.toRouteArgs(),
+          },
+        );
         return;
       }
 
@@ -224,6 +241,24 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     return fulfillmentMethod == 'dostawa' || fulfillmentMethod == 'delivery';
   }
 
+  String _locationCardTitle(CheckoutVerificationResponse checkout) {
+    return _isDeliveryCheckout(checkout) ? 'Dostawa' : 'Miejsce odbioru';
+  }
+
+  String _locationCardContent(CheckoutVerificationResponse checkout) {
+    final address = checkout.receivedOrder.address;
+    if (_isDeliveryCheckout(checkout)) {
+      return '${address.title}\n${address.subtitle}\n${address.etaLabel}';
+    }
+
+    final lines = <String>[
+      if (address.title.trim().isNotEmpty) address.title.trim(),
+      if (address.etaLabel.trim().isNotEmpty) address.etaLabel.trim(),
+      if (address.subtitle.trim().isNotEmpty) address.subtitle.trim(),
+    ];
+    return lines.join('\n');
+  }
+
   bool _supportsOvenStageForCheckout(CheckoutVerificationResponse checkout) {
     if (checkout.receivedOrder.items.isEmpty) {
       return true;
@@ -252,6 +287,42 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
       ];
       return !noOvenKeywords.any(signature.contains);
     });
+  }
+
+  bool _isUdkaCheckout(CheckoutVerificationResponse checkout) {
+    return checkout.receivedOrder.items.any((item) {
+      final signature =
+          '${item.name.toLowerCase()} ${(item.description ?? '').toLowerCase()}';
+      return signature.contains('udk') || signature.contains('chicken leg');
+    });
+  }
+
+  bool _isSameCalendarDay(DateTime left, DateTime right) {
+    return left.year == right.year &&
+        left.month == right.month &&
+        left.day == right.day;
+  }
+
+  String _pickupDateLabel(DateTime value) {
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    return '$day.$month';
+  }
+
+  String _scheduledPickupHeroLabel(CheckoutVerificationResponse checkout) {
+    final scheduledPickupAt = checkout.scheduledPickupAt ?? checkout.activeUntil;
+    if (!_isUdkaCheckout(checkout) || scheduledPickupAt == null) {
+      return '${checkout.receivedOrder.etaMinutes} min';
+    }
+
+    final localSlot = scheduledPickupAt.toLocal();
+    final now = DateTime.now().toLocal();
+    final hour = localSlot.hour.toString().padLeft(2, '0');
+    final minute = localSlot.minute.toString().padLeft(2, '0');
+    if (_isSameCalendarDay(localSlot, now)) {
+      return '$hour:$minute';
+    }
+    return '${_pickupDateLabel(localSlot)} $hour:$minute';
   }
 
   List<String> _stageLabelsForCheckout(CheckoutVerificationResponse checkout) {
@@ -373,6 +444,21 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     }
   }
 
+  bool _canCustomerConfirmDelivered(CheckoutVerificationResponse checkout) {
+    if (!_isDeliveryCheckout(checkout)) {
+      return false;
+    }
+
+    final verificationStage = checkout.verificationStage.trim().toLowerCase();
+    return checkout.requiresReceiptConfirmation ||
+        {
+          'on_the_way',
+          'delivery_started',
+          'delivery_extended',
+          'awaiting_receipt_confirmation',
+        }.contains(verificationStage);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -488,7 +574,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                         Expanded(
                           child: _HeroStat(
                             icon: Icons.schedule_rounded,
-                            title: '${request.etaMinutes} min',
+                            title: _scheduledPickupHeroLabel(order),
                             subtitle: request.fulfillmentMethod,
                           ),
                         ),
@@ -594,9 +680,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                 children: [
                   Expanded(
                     child: _InfoCard(
-                      title: 'Dostawa',
-                      content:
-                          '${request.address.title}\n${request.address.subtitle}\n${request.address.etaLabel}',
+                      title: _locationCardTitle(order),
+                      content: _locationCardContent(order),
                       icon: Icons.place_rounded,
                     ),
                   ),
@@ -611,7 +696,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                   ),
                 ],
               ),
-              if (order.requiresReceiptConfirmation) ...[
+              if (_canCustomerConfirmDelivered(order)) ...[
                 const SizedBox(height: 16),
                 Container(
                   decoration: BoxDecoration(
@@ -632,7 +717,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        order.message,
+                        order.requiresReceiptConfirmation
+                            ? order.message
+                            : 'Jesli kierowca dostarczyl juz zamowienie, mozesz potwierdzic odbior i samodzielnie zamknac sledzenie.',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: const Color(0xFFD3C1B5),
                           height: 1.35,
@@ -650,59 +737,87 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                             ),
                           ),
                         ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: _isSubmittingReceiptConfirmation
-                                  ? null
-                                  : () => _confirmReceipt(true),
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size.fromHeight(50),
-                                backgroundColor: const Color(0xFF2E8F57),
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
+                      if (order.requiresReceiptConfirmation)
+                        Row(
+                          children: [
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: _isSubmittingReceiptConfirmation
+                                    ? null
+                                    : () => _confirmReceipt(true),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(50),
+                                  backgroundColor: const Color(0xFF2E8F57),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                 ),
-                              ),
-                              child: const Text(
-                                'Tak',
-                                style: TextStyle(fontWeight: FontWeight.w800),
+                                child: const Text(
+                                  'Tak',
+                                  style: TextStyle(fontWeight: FontWeight.w800),
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: _isSubmittingReceiptConfirmation
-                                  ? null
-                                  : () => _confirmReceipt(false),
-                              style: FilledButton.styleFrom(
-                                minimumSize: const Size.fromHeight(50),
-                                backgroundColor: const Color(0xFFFF8B00),
-                                foregroundColor: const Color(0xFF2B1808),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: FilledButton(
+                                onPressed: _isSubmittingReceiptConfirmation
+                                    ? null
+                                    : () => _confirmReceipt(false),
+                                style: FilledButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(50),
+                                  backgroundColor: const Color(0xFFFF8B00),
+                                  foregroundColor: const Color(0xFF2B1808),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                 ),
-                              ),
-                              child: _isSubmittingReceiptConfirmation
-                                  ? const SizedBox(
-                                      height: 18,
-                                      width: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.2,
-                                        color: Color(0xFF2B1808),
+                                child: _isSubmittingReceiptConfirmation
+                                    ? const SizedBox(
+                                        height: 18,
+                                        width: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.2,
+                                          color: Color(0xFF2B1808),
+                                        ),
+                                      )
+                                    : const Text(
+                                        'Nie',
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.w800),
                                       ),
-                                    )
-                                  : const Text(
-                                      'Nie',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.w800),
-                                    ),
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        FilledButton(
+                          onPressed: _isSubmittingReceiptConfirmation
+                              ? null
+                              : () => _confirmReceipt(true),
+                          style: FilledButton.styleFrom(
+                            minimumSize: const Size.fromHeight(50),
+                            backgroundColor: const Color(0xFF2E8F57),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                        ],
-                      ),
+                          child: _isSubmittingReceiptConfirmation
+                              ? const SizedBox(
+                                  height: 18,
+                                  width: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  'Potwierdzam odbior',
+                                  style: TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                        ),
                     ],
                   ),
                 ),

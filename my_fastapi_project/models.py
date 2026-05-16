@@ -125,6 +125,7 @@ class AppRuntimeSettingDB(Base):
     setting_key = Column(String(80), nullable=False, unique=True, index=True)
     label = Column(String(160), nullable=False)
     decimal_value = Column(Numeric(10, 2), nullable=False, default=0)
+    string_value = Column(String(500), nullable=True)
     updated_by_user_id = Column(Integer, ForeignKey("Users.user_id"), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -458,6 +459,8 @@ class AdminCatalogAddonOut(BaseModel):
 
 class AdminCatalogOut(BaseModel):
     delivery_minimum_amount: float
+    delivery_radius_km: float
+    delivery_origin_address: str
     positions: list[AdminCatalogPositionOut]
     addons: list[AdminCatalogAddonOut]
 
@@ -473,6 +476,35 @@ class AdminCatalogDeliveryMinimumUpdateIn(BaseModel):
     amount: float
     session_token: str | None = None
     user_email: EmailStr | None = None
+
+
+class AdminCatalogDeliveryRadiusUpdateIn(BaseModel):
+    radius_km: float
+    session_token: str | None = None
+    user_email: EmailStr | None = None
+
+
+class AdminCatalogDeliveryOriginAddressUpdateIn(BaseModel):
+    address: str
+    session_token: str | None = None
+    user_email: EmailStr | None = None
+
+
+class DeliveryAddressValidationIn(BaseModel):
+    street: str
+    postal: str
+    city: str
+
+
+class DeliveryAddressValidationOut(BaseModel):
+    is_within_radius: bool
+    distance_km: float
+    radius_km: float
+    normalized_address: str
+
+
+class CheckoutPickupLocationOut(BaseModel):
+    address: str
 
 
 class CheckoutItemPayload(BaseModel):
@@ -510,6 +542,16 @@ class CheckoutVerificationIn(BaseModel):
     notes: str | None = None
 
 
+class CheckoutPickupSlotEstimateIn(BaseModel):
+    items: list[CheckoutItemPayload]
+
+
+class CheckoutPickupSlotEstimateOut(BaseModel):
+    eta_minutes: int
+    eta_label: str
+    scheduled_pickup_at: datetime
+
+
 class CheckoutVerificationOut(BaseModel):
     verification_id: str
     saved_order_id: int
@@ -527,6 +569,7 @@ class CheckoutVerificationOut(BaseModel):
     delivery_extension_count: int = 0
     awarded_points: int = 0
     user_points_balance: int = 0
+    scheduled_pickup_at: datetime | None = None
     received_order: CheckoutVerificationIn
 
 
@@ -590,6 +633,21 @@ class AdminDashboardActiveEmployeeOut(BaseModel):
     last_seen_at: datetime
 
 
+class AdminStaffPresencePersonOut(BaseModel):
+    user_id: int
+    email: str
+    display_name: str
+    initials: str
+    last_seen_at: datetime | None = None
+    is_currently_available: bool = False
+
+
+class AdminStaffPresenceOut(BaseModel):
+    currently_available: list[AdminStaffPresencePersonOut]
+    recently_available: list[AdminStaffPresencePersonOut]
+    all_results: list[AdminStaffPresencePersonOut]
+
+
 class AdminDashboardOrderItemOut(BaseModel):
     name: str
     quantity: int
@@ -618,6 +676,7 @@ class AdminDashboardOrderOut(BaseModel):
     address_subtitle: str
     notes: str | None = None
     supports_progress_updates: bool = True
+    oven_kind: str = "none"
     can_mark_in_oven: bool = True
     oven_slot_count: int = 0
     oven_load: int = 0
@@ -631,6 +690,11 @@ class AdminDashboardOut(BaseModel):
     logged_in_employee_count: int
     active_employees: list[AdminDashboardActiveEmployeeOut]
     prep_time_settings: list[PrepTimeSettingOut]
+    oven_load: int = 0
+    oven_capacity: int = 6
+    udka_oven_load: int = 0
+    udka_oven_capacity: int = 16
+    udka_slot_label: str = ""
     pending_order_count: int
     in_progress_order_count: int
     new_users_this_month: int

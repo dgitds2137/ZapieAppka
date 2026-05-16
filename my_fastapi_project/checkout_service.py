@@ -1,5 +1,10 @@
 from datetime import datetime, timedelta, timezone
+import json
+import math
 import uuid
+from urllib.parse import quote_plus
+from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
@@ -22,6 +27,8 @@ from models import (
     AdminDashboardActiveEmployeeOut,
     AdminCatalogAddonOut,
     AdminCatalogDeliveryMinimumUpdateIn,
+    AdminCatalogDeliveryOriginAddressUpdateIn,
+    AdminCatalogDeliveryRadiusUpdateIn,
     AdminCatalogItemUpdateIn,
     AdminCatalogOut,
     AdminClosedOrdersPageOut,
@@ -31,6 +38,8 @@ from models import (
     AdminDashboardOut,
     AdminDashboardTurnoverPoint,
     AdminOrderStatusUpdateIn,
+    AdminStaffPresenceOut,
+    AdminStaffPresencePersonOut,
     CheckoutOrderMessageCreateIn,
     CheckoutOrderMessageDB,
     CheckoutOrderMessageOut,
@@ -42,8 +51,13 @@ from models import (
     CheckoutVerificationIn,
     CheckoutHistoryPageOut,
     CheckoutVerificationOut,
+    CheckoutPickupSlotEstimateIn,
+    CheckoutPickupLocationOut,
+    CheckoutPickupSlotEstimateOut,
     CheckoutReceiptConfirmationIn,
     CheckoutAddressPayload,
+    DeliveryAddressValidationIn,
+    DeliveryAddressValidationOut,
     CheckoutItemPayload,
     MenuAddonDB,
     MenuPositionDB,
@@ -61,6 +75,8 @@ class CheckoutService:
     _STANDARD_DELIVERY_ETA_MINUTES = 30
     _BUSY_DELIVERY_ETA_MINUTES = 60
     _OVEN_CAPACITY = 6
+    _UDKA_OVEN_CAPACITY = 16
+    _UDKA_PIECES_PER_ITEM = 3
     _OVEN_QUEUE_DELAY_MINUTES = 8
     _CHECKOUT_HISTORY_DEFAULT_PAGE_SIZE = 10
     _CHECKOUT_HISTORY_MAX_PAGE_SIZE = 25
@@ -69,12 +85,19 @@ class CheckoutService:
     _ADMIN_HISTORY_MAX_PAGE_SIZE = 30
     _DEFAULT_DELIVERY_MINIMUM_AMOUNT = 20.0
     _DELIVERY_MINIMUM_SETTING_KEY = "delivery_minimum_amount"
+    _DEFAULT_DELIVERY_RADIUS_KM = 8.0
+    _DELIVERY_RADIUS_SETTING_KEY = "delivery_radius_km"
+    _DELIVERY_ORIGIN_ADDRESS_SETTING_KEY = "delivery_origin_address"
     _DELIVERY_IN_PROGRESS_STAGES = {
         "on_the_way",
         "delivery_started",
         "delivery_extended",
         "awaiting_receipt_confirmation",
     }
+    _NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+    _NOMINATIM_USER_AGENT = "ZapieApp/1.0 (delivery-radius-validation)"
+    _PICKUP_SLOT_HOURS = (12, 15, 18)
+    _PICKUP_SLOT_TIMEZONE = ZoneInfo("Europe/Warsaw")
 
     _METHOD_MESSAGES = {
         "BLIK": "Platnosc BLIK zostala zasymulowana jako udana. Zamowienie jest aktywne.",
@@ -92,6 +115,12 @@ class CheckoutService:
             return value.replace(tzinfo=timezone.utc)
         return value.astimezone(timezone.utc)
 
+    def _as_naive_utc(self, value: datetime | None) -> datetime | None:
+        utc_value = self._as_utc(value)
+        if utc_value is None:
+            return None
+        return utc_value.replace(tzinfo=None)
+
     def create_checkout_verification(
         self,
         payload: CheckoutVerificationIn,
@@ -99,14 +128,39 @@ class CheckoutService:
         verification_id = f"chk_{uuid.uuid4().hex[:12]}"
         created_at = datetime.utcnow()
         self._ensure_checkout_items_are_available(payload.items)
+        checkout_positions = self._resolve_checkout_positions(payload.items)
+        if self._contains_udka_positions(checkout_positions) and not self._is_planned_pickup_fulfillment(
+            payload.fulfillment_method,
+            payload.fulfillment_option_index,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Udka z kurczaka sa dostepne tylko w opcji Zaplanuj odbior "
+                    "w transzach 12:00, 15:00 i 18:00."
+                ),
+            )
+        pickup_slot_datetime = None
+        if self._is_pickup_slot_order(
+            positions=checkout_positions,
+            fulfillment_method=payload.fulfillment_method,
+            fulfillment_option_index=payload.fulfillment_option_index,
+        ):
+            pickup_slot_datetime = self._resolve_pickup_slot_datetime(
+                now=created_at,
+                positions=checkout_positions,
+            )
         effective_eta_minutes = self._calculate_checkout_eta_minutes(
             payload.items,
             fallback_minutes=payload.eta_minutes,
             fulfillment_method=payload.fulfillment_method,
             fulfillment_option_index=payload.fulfillment_option_index,
             now=created_at,
+            positions=checkout_positions,
+            pickup_slot_datetime=pickup_slot_datetime,
         )
         effective_address = payload.address
+        pickup_location_address = self._get_delivery_origin_address().strip()
         if self._is_delivery_fulfillment(
             payload.fulfillment_method,
             payload.fulfillment_option_index,
@@ -114,7 +168,33 @@ class CheckoutService:
             effective_address = payload.address.model_copy(
                 update={"eta_label": self._delivery_eta_label(effective_eta_minutes)}
             )
-        active_until = created_at + timedelta(minutes=max(effective_eta_minutes, 1))
+        elif self._is_pickup_slot_order(
+            positions=checkout_positions,
+            fulfillment_method=payload.fulfillment_method,
+            fulfillment_option_index=payload.fulfillment_option_index,
+        ):
+            effective_address = payload.address.model_copy(
+                update={
+                    "title": pickup_location_address or payload.address.title,
+                    "subtitle": payload.fulfillment_method,
+                    "eta_label": self._pickup_slot_eta_label(
+                        now=created_at,
+                        slot_datetime=pickup_slot_datetime,
+                    ),
+                }
+            )
+        else:
+            effective_address = payload.address.model_copy(
+                update={
+                    "title": pickup_location_address or payload.address.title,
+                    "subtitle": payload.fulfillment_method,
+                }
+            )
+        active_until = (
+            self._as_naive_utc(pickup_slot_datetime)
+            if pickup_slot_datetime is not None
+            else created_at + timedelta(minutes=max(effective_eta_minutes, 1))
+        )
         user_id = self._resolve_user_id(
             session_token=payload.session_token,
             user_email=payload.user_email,
@@ -237,6 +317,7 @@ class CheckoutService:
             remaining_eta_minutes=effective_eta_minutes,
             awarded_points=awarded_points,
             user_points_balance=int(user.loyalty_points or 0) if user is not None else 0,
+            scheduled_pickup_at=self._as_utc(pickup_slot_datetime),
             received_order=response_payload,
         )
 
@@ -251,6 +332,40 @@ class CheckoutService:
             "eta_minutes": eta_minutes,
             "has_delivery_in_progress": has_delivery_in_progress,
         }
+
+    def get_pickup_location(self) -> CheckoutPickupLocationOut:
+        return CheckoutPickupLocationOut(
+            address=self._get_delivery_origin_address(),
+        )
+
+    def get_pickup_slot_estimate(
+        self,
+        payload: CheckoutPickupSlotEstimateIn,
+    ) -> CheckoutPickupSlotEstimateOut:
+        self._ensure_checkout_items_are_available(payload.items)
+        checkout_positions = self._resolve_checkout_positions(payload.items)
+        if not self._contains_udka_positions(checkout_positions):
+            raise HTTPException(
+                status_code=409,
+                detail="Ten podglad transzy dotyczy wyłącznie zamowien z udkami.",
+            )
+
+        now = datetime.utcnow()
+        pickup_slot_datetime = self._resolve_pickup_slot_datetime(
+            now=now,
+            positions=checkout_positions,
+        )
+        return CheckoutPickupSlotEstimateOut(
+            eta_minutes=self._pickup_slot_eta_minutes(
+                now=now,
+                slot_datetime=pickup_slot_datetime,
+            ),
+            eta_label=self._pickup_slot_eta_label(
+                now=now,
+                slot_datetime=pickup_slot_datetime,
+            ),
+            scheduled_pickup_at=self._as_utc(pickup_slot_datetime),
+        )
 
     def get_admin_dashboard(
         self,
@@ -272,6 +387,8 @@ class CheckoutService:
         turnover_start = day_start - timedelta(days=4)
         active_employees = [] if is_limited_staff_view else self._get_active_employees(now=now)
         current_oven_load = self._get_current_oven_load()
+        next_udka_slot = self._next_pickup_slot_datetime(now=now)
+        current_udka_oven_load = self._get_udka_slot_load(next_udka_slot)
         active_checkout_rows = (
             self.db.query(CheckoutOrderDB, UserDB.email)
             .outerjoin(UserDB, UserDB.user_id == CheckoutOrderDB.user_id)
@@ -370,6 +487,7 @@ class CheckoutService:
                     checkout_order.assigned_to_user_id,
                 ),
                 current_oven_load=current_oven_load,
+                current_udka_oven_load=current_udka_oven_load,
             )
             for checkout_order in closed_preview_rows
         ]
@@ -390,6 +508,7 @@ class CheckoutService:
                     checkout_order.assigned_to_user_id,
                 ),
                 current_oven_load=current_oven_load,
+                current_udka_oven_load=current_udka_oven_load,
             )
             is_ready_for_delivery = self._is_ready_for_delivery_stage(checkout_order)
 
@@ -430,6 +549,14 @@ class CheckoutService:
             logged_in_employee_count=0 if is_limited_staff_view else logged_in_employee_count,
             active_employees=[] if is_limited_staff_view else active_employees,
             prep_time_settings=[] if is_driver_view else self._get_prep_time_settings(),
+            oven_load=current_oven_load,
+            oven_capacity=self._OVEN_CAPACITY,
+            udka_oven_load=current_udka_oven_load,
+            udka_oven_capacity=self._UDKA_OVEN_CAPACITY,
+            udka_slot_label=self._pickup_slot_dashboard_label(
+                now=now,
+                slot_datetime=next_udka_slot,
+            ),
             pending_order_count=len(pending_orders),
             in_progress_order_count=len(in_progress_orders),
             new_users_this_month=0 if is_limited_staff_view else new_users_this_month,
@@ -453,6 +580,36 @@ class CheckoutService:
             user_email=user_email,
         )
         return self._get_prep_time_settings()
+
+    def get_admin_staff_presence(
+        self,
+        session_token: str | None = None,
+        user_email: str | None = None,
+        query: str | None = None,
+    ) -> AdminStaffPresenceOut:
+        self._require_admin_role(
+            session_token=session_token,
+            user_email=user_email,
+        )
+
+        now = datetime.utcnow()
+        currently_available = self._get_currently_available_staff_presence(now=now)
+        current_user_ids = {
+            person.user_id for person in currently_available
+        }
+        recently_available = self._get_recently_available_staff_presence(
+            now=now,
+            exclude_user_ids=current_user_ids,
+        )
+        all_results = self._search_staff_presence(
+            query=query,
+            current_user_ids=current_user_ids,
+        )
+        return AdminStaffPresenceOut(
+            currently_available=currently_available,
+            recently_available=recently_available,
+            all_results=all_results,
+        )
 
     def get_admin_catalog(
         self,
@@ -483,6 +640,8 @@ class CheckoutService:
 
         return AdminCatalogOut(
             delivery_minimum_amount=self._get_delivery_minimum_amount(),
+            delivery_radius_km=self._get_delivery_radius_km(),
+            delivery_origin_address=self._get_delivery_origin_address(),
             positions=[
                 AdminCatalogPositionOut(
                     position_id=position.position_id,
@@ -607,6 +766,121 @@ class CheckoutService:
             user_email=payload.user_email,
         )
 
+    def update_delivery_radius(
+        self,
+        payload: AdminCatalogDeliveryRadiusUpdateIn,
+    ) -> AdminCatalogOut:
+        operator = self._require_admin_role(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+        radius_km = round(float(payload.radius_km), 2)
+        if radius_km < 0.5 or radius_km > 50:
+            raise HTTPException(
+                status_code=400,
+                detail="Promien dostawy musi miescic sie w zakresie 0.5-50 km.",
+            )
+
+        self._set_decimal_runtime_setting(
+            setting_key=self._DELIVERY_RADIUS_SETTING_KEY,
+            label="Promien dostawy",
+            decimal_value=radius_km,
+            updated_by_user_id=operator.user_id,
+        )
+        return self.get_admin_catalog(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+
+    def update_delivery_origin_address(
+        self,
+        payload: AdminCatalogDeliveryOriginAddressUpdateIn,
+    ) -> AdminCatalogOut:
+        operator = self._require_admin_role(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+        normalized_address = " ".join((payload.address or "").strip().split())
+        if not normalized_address:
+            raise HTTPException(
+                status_code=400,
+                detail="Adres lokalu dla dostaw nie moze byc pusty.",
+            )
+
+        geocoded_origin = self._geocode_address(normalized_address)
+        if geocoded_origin is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Nie udalo sie potwierdzic adresu lokalu. Sprawdz wpis i sprobuj ponownie.",
+            )
+
+        self._set_string_runtime_setting(
+            setting_key=self._DELIVERY_ORIGIN_ADDRESS_SETTING_KEY,
+            label="Adres lokalu dla dostaw",
+            string_value=geocoded_origin["display_name"],
+            updated_by_user_id=operator.user_id,
+        )
+        return self.get_admin_catalog(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+
+    def validate_delivery_address(
+        self,
+        payload: DeliveryAddressValidationIn,
+    ) -> DeliveryAddressValidationOut:
+        origin_address = self._get_delivery_origin_address()
+        if not origin_address:
+            raise HTTPException(
+                status_code=409,
+                detail="Adres lokalu dla dostaw nie jest jeszcze ustawiony w panelu administratora.",
+            )
+
+        normalized_query = self._normalize_delivery_address_query(
+            street=payload.street,
+            postal=payload.postal,
+            city=payload.city,
+        )
+        if not normalized_query:
+            raise HTTPException(
+                status_code=400,
+                detail="Podaj ulice, kod pocztowy i miasto.",
+            )
+
+        client_geocode = self._geocode_address(normalized_query)
+        if client_geocode is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Nie udalo sie potwierdzic adresu dostawy. Sprawdz ulice, kod i miasto.",
+            )
+
+        origin_geocode = self._geocode_address(origin_address)
+        if origin_geocode is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Nie udalo sie potwierdzic adresu lokalu dla dostaw. Popraw go w panelu administratora.",
+            )
+
+        distance_km = self._haversine_distance_km(
+            lat1=origin_geocode["lat"],
+            lon1=origin_geocode["lon"],
+            lat2=client_geocode["lat"],
+            lon2=client_geocode["lon"],
+        )
+        radius_km = self._get_delivery_radius_km()
+        if distance_km > radius_km:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Adres jest poza strefa dostawy ({radius_km:.1f} km).",
+            )
+
+        return DeliveryAddressValidationOut(
+            is_within_radius=True,
+            distance_km=distance_km,
+            radius_km=radius_km,
+            normalized_address=client_geocode["display_name"],
+        )
+
     def update_prep_time_setting(
         self,
         group_key: str,
@@ -717,13 +991,26 @@ class CheckoutService:
             )
 
         if verification_stage == "in_oven":
-            oven_load_without_current = self._get_current_oven_load(
-                exclude_checkout_order_id=checkout_order.checkout_order_id,
-            )
+            oven_kind = self._order_oven_kind(checkout_order)
+            if oven_kind == "udka":
+                slot_datetime = self._scheduled_pickup_at_for_order(checkout_order)
+                oven_load_without_current = (
+                    self._get_udka_slot_load(
+                        slot_datetime,
+                        exclude_checkout_order_id=checkout_order.checkout_order_id,
+                    )
+                    if slot_datetime is not None
+                    else 0
+                )
+            else:
+                oven_load_without_current = self._get_current_oven_load(
+                    exclude_checkout_order_id=checkout_order.checkout_order_id,
+                )
             order_oven_slot_count = self._order_oven_slot_count(checkout_order)
+            oven_capacity = self._oven_capacity_for_kind(oven_kind)
             if (
                 order_oven_slot_count <= 0
-                or oven_load_without_current + order_oven_slot_count > self._OVEN_CAPACITY
+                or oven_load_without_current + order_oven_slot_count > oven_capacity
             ):
                 raise HTTPException(
                     status_code=409,
@@ -826,11 +1113,19 @@ class CheckoutService:
                     detail="Kierowca moze zakonczyc tylko dostawe przypisana do siebie.",
                 )
             now = datetime.utcnow()
-            checkout_order.status = "completed"
-            checkout_order.verification_stage = "completed_by_admin"
-            checkout_order.active_until = now
-            if checkout_order.receipt_confirmed_at is None:
-                checkout_order.receipt_confirmed_at = now
+            if normalized_role == DRIVER_ROLE and is_delivery_order:
+                checkout_order.status = "awaiting_receipt_confirmation"
+                checkout_order.processing_status = CHECKOUT_ORDER_STATUS_COMPLETED
+                checkout_order.verification_stage = "awaiting_receipt_confirmation"
+                checkout_order.active_until = now
+                if checkout_order.receipt_confirmation_requested_at is None:
+                    checkout_order.receipt_confirmation_requested_at = now
+            else:
+                checkout_order.status = "completed"
+                checkout_order.verification_stage = "completed_by_admin"
+                checkout_order.active_until = now
+                if checkout_order.receipt_confirmed_at is None:
+                    checkout_order.receipt_confirmed_at = now
 
         self.db.commit()
         self.db.refresh(checkout_order)
@@ -840,6 +1135,9 @@ class CheckoutService:
             customer = self.db.query(UserDB).filter(UserDB.user_id == checkout_order.user_id).first()
             customer_email = customer.email if customer is not None else None
         current_oven_load = self._get_current_oven_load()
+        current_udka_oven_load = self._get_udka_slot_load(
+            self._next_pickup_slot_datetime(now=datetime.utcnow()),
+        )
 
         return self._build_admin_order(
             checkout_order,
@@ -850,6 +1148,7 @@ class CheckoutService:
             if checkout_order.assigned_to_user_id == operator.user_id
             else None,
             current_oven_load=current_oven_load,
+            current_udka_oven_load=current_udka_oven_load,
         )
 
     def get_active_checkout(
@@ -1277,6 +1576,7 @@ class CheckoutService:
                 float(checkout_order.subtotal_amount),
             ),
             user_points_balance=self._get_user_loyalty_points(checkout_order.user_id),
+            scheduled_pickup_at=self._scheduled_pickup_at_for_order(checkout_order),
             received_order=payload,
         )
 
@@ -1359,6 +1659,18 @@ class CheckoutService:
             default_value=self._DEFAULT_DELIVERY_MINIMUM_AMOUNT,
         )
 
+    def _get_delivery_radius_km(self) -> float:
+        return self._get_decimal_runtime_setting(
+            setting_key=self._DELIVERY_RADIUS_SETTING_KEY,
+            default_value=self._DEFAULT_DELIVERY_RADIUS_KM,
+        )
+
+    def _get_delivery_origin_address(self) -> str:
+        return self._get_string_runtime_setting(
+            setting_key=self._DELIVERY_ORIGIN_ADDRESS_SETTING_KEY,
+            default_value="",
+        )
+
     def _get_decimal_runtime_setting(
         self,
         setting_key: str,
@@ -1399,6 +1711,125 @@ class CheckoutService:
         self.db.commit()
         self.db.refresh(setting)
 
+    def _get_string_runtime_setting(
+        self,
+        setting_key: str,
+        default_value: str,
+    ) -> str:
+        setting = (
+            self.db.query(AppRuntimeSettingDB)
+            .filter(AppRuntimeSettingDB.setting_key == setting_key)
+            .first()
+        )
+        if setting is None or setting.string_value is None:
+            return default_value
+        return str(setting.string_value).strip()
+
+    def _set_string_runtime_setting(
+        self,
+        setting_key: str,
+        label: str,
+        string_value: str,
+        updated_by_user_id: int | None,
+    ) -> None:
+        setting = (
+            self.db.query(AppRuntimeSettingDB)
+            .filter(AppRuntimeSettingDB.setting_key == setting_key)
+            .first()
+        )
+        if setting is None:
+            setting = AppRuntimeSettingDB(
+                setting_key=setting_key,
+                label=label,
+            )
+            self.db.add(setting)
+
+        setting.label = label
+        setting.string_value = string_value.strip()
+        setting.updated_by_user_id = updated_by_user_id
+        setting.updated_at = datetime.utcnow()
+        self.db.commit()
+        self.db.refresh(setting)
+
+    def _normalize_delivery_address_query(
+        self,
+        street: str,
+        postal: str,
+        city: str,
+    ) -> str:
+        parts = [
+            " ".join((street or "").strip().split()),
+            " ".join((postal or "").strip().split()),
+            " ".join((city or "").strip().split()),
+        ]
+        return ", ".join(part for part in parts if part)
+
+    def _geocode_address(self, query: str) -> dict[str, float | str] | None:
+        normalized_query = " ".join((query or "").strip().split())
+        if not normalized_query:
+            return None
+
+        url = (
+            f"{self._NOMINATIM_SEARCH_URL}?q={quote_plus(normalized_query)}"
+            "&format=jsonv2&limit=1&countrycodes=pl"
+        )
+        request = Request(
+            url,
+            headers={
+                "User-Agent": self._NOMINATIM_USER_AGENT,
+                "Accept": "application/json",
+            },
+        )
+
+        try:
+            with urlopen(request, timeout=8) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Nie udalo sie polaczyc z usluga weryfikacji adresow.",
+            ) from exc
+
+        if not isinstance(payload, list) or not payload:
+            return None
+
+        top_result = payload[0]
+        try:
+            lat = float(top_result["lat"])
+            lon = float(top_result["lon"])
+            display_name = str(top_result["display_name"]).strip()
+        except (KeyError, TypeError, ValueError):
+            return None
+
+        return {
+            "lat": lat,
+            "lon": lon,
+            "display_name": display_name,
+        }
+
+    def _haversine_distance_km(
+        self,
+        *,
+        lat1: float,
+        lon1: float,
+        lat2: float,
+        lon2: float,
+    ) -> float:
+        earth_radius_km = 6371.0
+        lat1_rad = math.radians(lat1)
+        lon1_rad = math.radians(lon1)
+        lat2_rad = math.radians(lat2)
+        lon2_rad = math.radians(lon2)
+        delta_lat = lat2_rad - lat1_rad
+        delta_lon = lon2_rad - lon1_rad
+
+        a = (
+            math.sin(delta_lat / 2) ** 2
+            + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2) ** 2
+        )
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return round(earth_radius_km * c, 2)
+
     def _normalize_catalog_price(self, price: float) -> float:
         normalized_price = round(float(price), 2)
         if normalized_price < 0 or normalized_price > 999:
@@ -1415,6 +1846,8 @@ class CheckoutService:
         fulfillment_method: str,
         fulfillment_option_index: int,
         now: datetime,
+        positions: list[MenuPositionDB] | None = None,
+        pickup_slot_datetime: datetime | None = None,
     ) -> int:
         if self._is_delivery_fulfillment(
             fulfillment_method,
@@ -1427,28 +1860,30 @@ class CheckoutService:
             )
 
         safe_fallback = max(1, int(fallback_minutes or 0))
-        position_ids = [
-            item.position_id
-            for item in items
-            if item.position_id is not None
-        ]
-        if not position_ids:
+        resolved_positions = positions or self._resolve_checkout_positions(items)
+        if not resolved_positions:
             return safe_fallback
 
-        positions = (
-            self.db.query(MenuPositionDB)
-            .filter(MenuPositionDB.position_id.in_(position_ids))
-            .all()
-        )
-        if not positions:
-            return safe_fallback
+        if self._is_pickup_slot_order(
+            positions=resolved_positions,
+            fulfillment_method=fulfillment_method,
+            fulfillment_option_index=fulfillment_option_index,
+        ):
+            return self._pickup_slot_eta_minutes(
+                now=now,
+                slot_datetime=pickup_slot_datetime
+                or self._resolve_pickup_slot_datetime(
+                    now=now,
+                    positions=resolved_positions,
+                ),
+            )
 
         prep_settings_by_group = {
             setting.group_key: setting
             for setting in self._get_prep_time_settings_rows()
         }
         prep_minutes: list[int] = []
-        for position in positions:
+        for position in resolved_positions:
             group_key = infer_prep_group_key(position.position_type, position.name)
             if not group_key:
                 continue
@@ -1470,6 +1905,17 @@ class CheckoutService:
     ) -> bool:
         normalized_method = (fulfillment_method or "").strip().lower()
         return fulfillment_option_index == 0 or normalized_method in {"dostawa", "delivery"}
+
+    def _is_planned_pickup_fulfillment(
+        self,
+        fulfillment_method: str | None,
+        fulfillment_option_index: int | None,
+    ) -> bool:
+        normalized_method = (fulfillment_method or "").strip().lower()
+        return fulfillment_option_index == 2 or normalized_method in {
+            "zaplanuj odbior",
+            "scheduled pickup",
+        }
 
     def _is_driver_order(self, checkout_order: CheckoutOrderDB) -> bool:
         return self._is_delivery_fulfillment(
@@ -1497,6 +1943,238 @@ class CheckoutService:
 
     def _delivery_eta_label(self, eta_minutes: int) -> str:
         return f"~{eta_minutes} min."
+
+    def _pickup_slot_eta_label(
+        self,
+        now: datetime,
+        slot_datetime: datetime | None = None,
+    ) -> str:
+        next_slot = slot_datetime or self._next_pickup_slot_datetime(now=now)
+        same_day = self._as_pickup_local_datetime(now=now).date() == next_slot.date()
+        if same_day:
+            return f"Odbior o {next_slot.strftime('%H:%M')}"
+        return f"Odbior {next_slot.strftime('%d.%m %H:%M')}"
+
+    def _pickup_slot_dashboard_label(
+        self,
+        now: datetime,
+        slot_datetime: datetime,
+    ) -> str:
+        same_day = self._as_pickup_local_datetime(now=now).date() == slot_datetime.date()
+        return slot_datetime.strftime('%H:%M' if same_day else '%d.%m %H:%M')
+
+    def _pickup_slot_eta_minutes(
+        self,
+        now: datetime,
+        slot_datetime: datetime | None = None,
+    ) -> int:
+        now_local = self._as_pickup_local_datetime(now=now)
+        next_slot = slot_datetime or self._next_pickup_slot_datetime(now=now)
+        delta_seconds = max(0.0, (next_slot - now_local).total_seconds())
+        return int((delta_seconds + 59) // 60)
+
+    def _resolve_pickup_slot_datetime(
+        self,
+        now: datetime,
+        positions: list[MenuPositionDB],
+    ) -> datetime:
+        required_udka_pieces = self._udka_piece_count_for_positions(positions)
+        return self._next_pickup_slot_datetime(
+            now=now,
+            required_udka_pieces=required_udka_pieces,
+        )
+
+    def _next_pickup_slot_datetime(
+        self,
+        now: datetime,
+        required_udka_pieces: int = 0,
+    ) -> datetime:
+        now_local = self._as_pickup_local_datetime(now=now)
+        candidate = self._next_pickup_slot_candidate(now_local)
+        if required_udka_pieces <= 0:
+            return candidate
+
+        max_iterations = 64
+        for _ in range(max_iterations):
+            slot_load = self._get_udka_slot_load(candidate)
+            if slot_load + required_udka_pieces <= self._UDKA_OVEN_CAPACITY:
+                return candidate
+            candidate = self._advance_pickup_slot_candidate(candidate)
+
+        raise HTTPException(
+            status_code=409,
+            detail="Nie udalo sie wyznaczyc wolnej transzy dla udek.",
+        )
+
+    def _next_pickup_slot_candidate(self, now_local: datetime) -> datetime:
+        candidate_date = now_local.date()
+        for slot_hour in self._PICKUP_SLOT_HOURS:
+            candidate = datetime(
+                year=candidate_date.year,
+                month=candidate_date.month,
+                day=candidate_date.day,
+                hour=slot_hour,
+                minute=0,
+                second=0,
+                microsecond=0,
+                tzinfo=self._PICKUP_SLOT_TIMEZONE,
+            )
+            if candidate >= now_local:
+                return candidate
+        return self._advance_pickup_slot_candidate(
+            datetime(
+                year=candidate_date.year,
+                month=candidate_date.month,
+                day=candidate_date.day,
+                hour=self._PICKUP_SLOT_HOURS[-1],
+                minute=0,
+                second=0,
+                microsecond=0,
+                tzinfo=self._PICKUP_SLOT_TIMEZONE,
+            )
+        )
+
+    def _advance_pickup_slot_candidate(self, slot_datetime: datetime) -> datetime:
+        try:
+            current_index = self._PICKUP_SLOT_HOURS.index(slot_datetime.hour)
+        except ValueError:
+            current_index = len(self._PICKUP_SLOT_HOURS) - 1
+
+        if current_index < len(self._PICKUP_SLOT_HOURS) - 1:
+            next_hour = self._PICKUP_SLOT_HOURS[current_index + 1]
+            return slot_datetime.replace(
+                hour=next_hour,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+
+        next_day = slot_datetime.date() + timedelta(days=1)
+        return datetime(
+            year=next_day.year,
+            month=next_day.month,
+            day=next_day.day,
+            hour=self._PICKUP_SLOT_HOURS[0],
+            minute=0,
+            second=0,
+            microsecond=0,
+            tzinfo=self._PICKUP_SLOT_TIMEZONE,
+        )
+
+    def _as_pickup_local_datetime(self, now: datetime) -> datetime:
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
+        return now.astimezone(self._PICKUP_SLOT_TIMEZONE)
+
+    def _pickup_slot_datetime_from_label(
+        self,
+        eta_label: str | None,
+        reference_datetime: datetime,
+    ) -> datetime | None:
+        normalized = (eta_label or "").strip()
+        if not normalized:
+            return None
+
+        local_reference = self._as_pickup_local_datetime(reference_datetime)
+        parts = normalized.split()
+        if len(parts) >= 2 and "." in parts[-2] and ":" in parts[-1]:
+            try:
+                day, month = [int(value) for value in parts[-2].split(".")]
+                hour, minute = [int(value) for value in parts[-1].split(":")]
+                return datetime(
+                    year=local_reference.year,
+                    month=month,
+                    day=day,
+                    hour=hour,
+                    minute=minute,
+                    second=0,
+                    microsecond=0,
+                    tzinfo=self._PICKUP_SLOT_TIMEZONE,
+                )
+            except ValueError:
+                return None
+
+        if ":" in normalized:
+            time_token = normalized.split()[-1]
+            try:
+                hour, minute = [int(value) for value in time_token.split(":")]
+                return datetime(
+                    year=local_reference.year,
+                    month=local_reference.month,
+                    day=local_reference.day,
+                    hour=hour,
+                    minute=minute,
+                    second=0,
+                    microsecond=0,
+                    tzinfo=self._PICKUP_SLOT_TIMEZONE,
+                )
+            except ValueError:
+                return None
+
+        return None
+
+    def _scheduled_pickup_at_for_order(
+        self,
+        checkout_order: CheckoutOrderDB,
+    ) -> datetime | None:
+        if self._order_oven_kind(checkout_order) != "udka":
+            return None
+        parsed_slot = self._pickup_slot_datetime_from_label(
+            checkout_order.address_eta_label,
+            checkout_order.created_at,
+        )
+        if parsed_slot is not None:
+            return self._as_utc(parsed_slot)
+        return self._as_utc(checkout_order.active_until)
+
+    def _is_pickup_slot_order(
+        self,
+        positions: list[MenuPositionDB],
+        fulfillment_method: str | None,
+        fulfillment_option_index: int | None,
+    ) -> bool:
+        if not self._is_planned_pickup_fulfillment(
+            fulfillment_method,
+            fulfillment_option_index,
+        ):
+            return False
+
+        return self._contains_udka_positions(positions)
+
+    def _contains_udka_positions(self, positions: list[MenuPositionDB]) -> bool:
+        return any(
+            infer_prep_group_key(position.position_type, position.name) == "udka"
+            for position in positions
+        )
+
+    def _udka_piece_count_for_positions(self, positions: list[MenuPositionDB]) -> int:
+        return sum(
+            self._UDKA_PIECES_PER_ITEM
+            for position in positions
+            if infer_prep_group_key(position.position_type, position.name) == "udka"
+        )
+
+    def _resolve_checkout_positions(
+        self,
+        items: list[CheckoutItemPayload],
+    ) -> list[MenuPositionDB]:
+        position_ids = sorted(
+            {
+                item.position_id
+                for item in items
+                if item.position_id is not None
+            }
+        )
+        if not position_ids:
+            return []
+
+        return (
+            self.db.query(MenuPositionDB)
+            .filter(MenuPositionDB.position_id.in_(position_ids))
+            .all()
+        )
 
     def _normalize_pagination(
         self,
@@ -1689,6 +2367,127 @@ class CheckoutService:
 
         return active_employees
 
+    def _get_currently_available_staff_presence(
+        self,
+        now: datetime,
+    ) -> list[AdminStaffPresencePersonOut]:
+        return [
+            AdminStaffPresencePersonOut(
+                user_id=employee.user_id,
+                email=employee.email,
+                display_name=employee.display_name,
+                initials=employee.initials,
+                last_seen_at=employee.last_seen_at,
+                is_currently_available=True,
+            )
+            for employee in self._get_active_employees(now=now)
+        ]
+
+    def _get_recently_available_staff_presence(
+        self,
+        now: datetime,
+        exclude_user_ids: set[int],
+    ) -> list[AdminStaffPresencePersonOut]:
+        recent_since = now - timedelta(hours=1)
+        active_since = now - self._EMPLOYEE_ACTIVITY_WINDOW
+        session_rows = (
+            self.db.query(SessionsDB, UserDB)
+            .join(UserDB, UserDB.user_id == SessionsDB.user_id)
+            .filter(
+                self._staff_role_filter(),
+                SessionsDB.last_seen_at >= recent_since,
+                SessionsDB.last_seen_at < active_since,
+            )
+            .order_by(SessionsDB.last_seen_at.desc(), SessionsDB.id.desc())
+            .all()
+        )
+
+        recent_employees: list[AdminStaffPresencePersonOut] = []
+        seen_user_ids = set(exclude_user_ids)
+        for session, user in session_rows:
+            if user.user_id in seen_user_ids:
+                continue
+            seen_user_ids.add(user.user_id)
+            recent_employees.append(
+                self._staff_presence_person_from_user(
+                    user=user,
+                    last_seen_at=session.last_seen_at or session.created_at,
+                    is_currently_available=False,
+                )
+            )
+
+        return recent_employees
+
+    def _search_staff_presence(
+        self,
+        query: str | None,
+        current_user_ids: set[int],
+    ) -> list[AdminStaffPresencePersonOut]:
+        latest_seen_rows = (
+            self.db.query(
+                SessionsDB.user_id.label("user_id"),
+                func.max(SessionsDB.last_seen_at).label("last_seen_at"),
+            )
+            .group_by(SessionsDB.user_id)
+            .all()
+        )
+        latest_seen_by_user_id = {
+            int(row.user_id): row.last_seen_at
+            for row in latest_seen_rows
+            if row.user_id is not None
+        }
+
+        normalized_query = (query or "").strip().lower()
+        users = self.db.query(UserDB).filter(self._staff_role_filter()).all()
+
+        results = [
+            self._staff_presence_person_from_user(
+                user=user,
+                last_seen_at=latest_seen_by_user_id.get(int(user.user_id)),
+                is_currently_available=int(user.user_id) in current_user_ids,
+            )
+            for user in users
+            if not normalized_query
+            or normalized_query
+            in f"{self._resolve_employee_display_name(user)} {(user.email or '').strip()}".lower()
+        ]
+
+        results.sort(
+            key=lambda person: (
+                person.last_seen_at is None,
+                -(person.last_seen_at.timestamp() if person.last_seen_at else 0),
+                (person.display_name or person.email).lower(),
+                person.email.lower(),
+            ),
+        )
+        return results
+
+    def _staff_presence_person_from_user(
+        self,
+        user: UserDB,
+        last_seen_at: datetime | None,
+        is_currently_available: bool,
+    ) -> AdminStaffPresencePersonOut:
+        email = (user.email or "").strip()
+        display_name = self._resolve_employee_display_name(user)
+        return AdminStaffPresencePersonOut(
+            user_id=user.user_id,
+            email=email,
+            display_name=display_name,
+            initials=self._build_employee_initials(
+                display_name=display_name,
+                email=email,
+            ),
+            last_seen_at=self._as_utc(last_seen_at),
+            is_currently_available=is_currently_available,
+        )
+
+    def _staff_role_filter(self):
+        return or_(
+            func.lower(func.ltrim(func.rtrim(UserDB.role))) == EMPLOYEE_ROLE,
+            func.lower(func.ltrim(func.rtrim(UserDB.role))) == DRIVER_ROLE,
+        )
+
     def _resolve_employee_display_name(self, user: UserDB) -> str:
         if user.name and user.name.strip():
             return user.name.strip()
@@ -1821,12 +2620,14 @@ class CheckoutService:
         current_user_id: int | None = None,
         assigned_operator_email: str | None = None,
         current_oven_load: int | None = None,
+        current_udka_oven_load: int | None = None,
     ) -> AdminDashboardOrderOut:
         remaining_eta_minutes = self._remaining_eta_minutes(
             checkout_order=checkout_order,
             now=now,
             include_oven_queue=True,
             current_oven_load=current_oven_load,
+            current_udka_oven_load=current_udka_oven_load,
         )
 
         item_count = sum((item.quantity or 1) for item in checkout_order.items)
@@ -1841,11 +2642,14 @@ class CheckoutService:
             and message.staff_read_at is None
         )
         supports_progress_updates = self._order_supports_progress_updates(checkout_order)
+        oven_kind = self._order_oven_kind(checkout_order)
         oven_slot_count = self._order_oven_slot_count(checkout_order)
         oven_load = self._get_effective_oven_load(
             checkout_order=checkout_order,
             current_oven_load=current_oven_load,
+            current_udka_oven_load=current_udka_oven_load,
         )
+        oven_capacity = self._oven_capacity_for_kind(oven_kind)
 
         return AdminDashboardOrderOut(
             checkout_order_id=checkout_order.checkout_order_id,
@@ -1876,14 +2680,15 @@ class CheckoutService:
             address_subtitle=checkout_order.address_subtitle,
             notes=checkout_order.notes,
             supports_progress_updates=supports_progress_updates,
+            oven_kind=oven_kind,
             can_mark_in_oven=(
                 supports_progress_updates
                 and oven_slot_count > 0
-                and oven_load + oven_slot_count <= self._OVEN_CAPACITY
+                and oven_load + oven_slot_count <= oven_capacity
             ),
             oven_slot_count=oven_slot_count,
             oven_load=oven_load,
-            oven_capacity=self._OVEN_CAPACITY,
+            oven_capacity=oven_capacity,
             unread_customer_message_count=unread_customer_message_count,
             assigned_to_me=(
                 current_user_id is not None
@@ -1933,10 +2738,34 @@ class CheckoutService:
         )
         return not any(keyword in normalized for keyword in no_oven_keywords)
 
+    def _item_is_udka_signature(self, item_signature: str) -> bool:
+        normalized = (item_signature or "").strip().lower()
+        return "udk" in normalized or "chicken leg" in normalized
+
     def _is_in_oven_stage(self, checkout_order: CheckoutOrderDB) -> bool:
         return (checkout_order.verification_stage or "").strip().lower() in {"in_oven", "oven"}
 
+    def _order_oven_kind(self, checkout_order: CheckoutOrderDB) -> str:
+        if self._order_udka_piece_count(checkout_order) > 0:
+            return "udka"
+        if self._order_supports_progress_updates(checkout_order):
+            return "zapiekanki"
+        return "none"
+
+    def _oven_capacity_for_kind(self, oven_kind: str) -> int:
+        if oven_kind == "udka":
+            return self._UDKA_OVEN_CAPACITY
+        if oven_kind == "zapiekanki":
+            return self._OVEN_CAPACITY
+        return 0
+
     def _order_oven_slot_count(self, checkout_order: CheckoutOrderDB) -> int:
+        oven_kind = self._order_oven_kind(checkout_order)
+        if oven_kind == "udka":
+            return self._order_udka_piece_count(checkout_order)
+        if oven_kind == "none":
+            return 0
+
         if not checkout_order.items:
             return 0
 
@@ -1953,6 +2782,22 @@ class CheckoutService:
         if oven_items_count <= 0:
             return 0
         return min(self._OVEN_CAPACITY, oven_items_count)
+
+    def _order_udka_piece_count(self, checkout_order: CheckoutOrderDB) -> int:
+        if not checkout_order.items:
+            return 0
+
+        udka_piece_count = 0
+        for item in checkout_order.items:
+            item_signature = (
+                f"{(item.name or '').strip().lower()} "
+                f"{(item.description or '').strip().lower()}"
+            )
+            if not self._item_is_udka_signature(item_signature):
+                continue
+            udka_piece_count += max(1, int(item.quantity or 1)) * self._UDKA_PIECES_PER_ITEM
+
+        return min(self._UDKA_OVEN_CAPACITY, udka_piece_count) if udka_piece_count > 0 else 0
 
     def _get_current_oven_load(
         self,
@@ -1975,13 +2820,58 @@ class CheckoutService:
         return sum(
             self._order_oven_slot_count(checkout_order)
             for checkout_order in query.all()
+            if self._order_oven_kind(checkout_order) == "zapiekanki"
+        )
+
+    def _get_udka_slot_load(
+        self,
+        slot_datetime: datetime,
+        exclude_checkout_order_id: int | None = None,
+    ) -> int:
+        slot_utc = self._as_naive_utc(slot_datetime)
+        if slot_utc is None:
+            return 0
+        slot_window_end = slot_utc + timedelta(minutes=1)
+
+        query = (
+            self.db.query(CheckoutOrderDB)
+            .options(joinedload(CheckoutOrderDB.items))
+            .filter(
+                CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.active_until >= slot_utc,
+                CheckoutOrderDB.active_until < slot_window_end,
+            )
+        )
+        if exclude_checkout_order_id is not None:
+            query = query.filter(
+                CheckoutOrderDB.checkout_order_id != exclude_checkout_order_id,
+            )
+
+        return sum(
+            self._order_udka_piece_count(checkout_order)
+            for checkout_order in query.all()
+            if self._order_oven_kind(checkout_order) == "udka"
         )
 
     def _get_effective_oven_load(
         self,
         checkout_order: CheckoutOrderDB,
         current_oven_load: int | None = None,
+        current_udka_oven_load: int | None = None,
     ) -> int:
+        oven_kind = self._order_oven_kind(checkout_order)
+        if oven_kind == "udka":
+            slot_datetime = self._scheduled_pickup_at_for_order(checkout_order)
+            if slot_datetime is None:
+                return 0
+            resolved_udka_load = (
+                self._get_udka_slot_load(slot_datetime, exclude_checkout_order_id=checkout_order.checkout_order_id)
+                if current_udka_oven_load is None or self._is_in_oven_stage(checkout_order)
+                else current_udka_oven_load
+            )
+            return resolved_udka_load
+
         resolved_oven_load = (
             self._get_current_oven_load()
             if current_oven_load is None
@@ -1997,6 +2887,7 @@ class CheckoutService:
         now: datetime,
         include_oven_queue: bool,
         current_oven_load: int | None = None,
+        current_udka_oven_load: int | None = None,
     ) -> int:
         if checkout_order.active_until is None:
             return 0
@@ -2012,14 +2903,18 @@ class CheckoutService:
         return remaining_eta_minutes + self._oven_queue_delay_minutes(
             checkout_order=checkout_order,
             current_oven_load=current_oven_load,
+            current_udka_oven_load=current_udka_oven_load,
         )
 
     def _oven_queue_delay_minutes(
         self,
         checkout_order: CheckoutOrderDB,
         current_oven_load: int | None = None,
+        current_udka_oven_load: int | None = None,
     ) -> int:
         if not self._order_supports_progress_updates(checkout_order):
+            return 0
+        if self._order_oven_kind(checkout_order) == "udka":
             return 0
         if checkout_order.processing_status != CHECKOUT_ORDER_STATUS_ASSIGNED:
             return 0
@@ -2041,6 +2936,7 @@ class CheckoutService:
         oven_load = self._get_effective_oven_load(
             checkout_order=checkout_order,
             current_oven_load=current_oven_load,
+            current_udka_oven_load=current_udka_oven_load,
         )
         overflow_slots = (oven_load + order_oven_slot_count) - self._OVEN_CAPACITY
         if overflow_slots <= 0:
