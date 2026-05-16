@@ -812,6 +812,17 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
   }
 
   void _addToCart(Map<String, dynamic> position) {
+    if (!_isPositionAvailable(position)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Ta pozycja jest chwilowo niedostepna. Wroc do niej pozniej.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (widget.hasActiveCheckout) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1084,7 +1095,8 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
                             onTap: () => _openProductPreview(items[index]),
                             onIncrement: () => _addToCart(items[index]),
                             onDecrement: () => _removeFromCart(items[index]),
-                            locked: widget.hasActiveCheckout,
+                            locked: widget.hasActiveCheckout ||
+                                !_isPositionAvailable(items[index]),
                           ),
                           if (index < items.length - 1)
                             const SizedBox(height: 10),
@@ -1248,6 +1260,8 @@ class _CategoryProductRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isAvailable = _isPositionAvailable(position);
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1296,6 +1310,13 @@ class _CategoryProductRow extends StatelessWidget {
                           _ProductStateBadge(label: 'MROZONE'),
                           _ProductStateBadge(label: 'DO ODGRZANIA'),
                         ],
+                      ),
+                    ],
+                    if (!isAvailable) ...[
+                      const SizedBox(height: 6),
+                      const _ProductStateBadge(
+                        label: 'CHWILOWO NIEDOSTEPNE',
+                        tone: _ProductStateBadgeTone.warning,
                       ),
                     ],
                     const SizedBox(height: 6),
@@ -3128,6 +3149,13 @@ class _ProductPreviewDialog extends StatelessWidget {
                         _ProductStateBadge(label: 'MROZONE'),
                         _ProductStateBadge(label: 'DO ODGRZANIA'),
                       ],
+                    ),
+                  ],
+                  if (!_isPositionAvailable(position)) ...[
+                    const SizedBox(height: 10),
+                    const _ProductStateBadge(
+                      label: 'CHWILOWO NIEDOSTEPNE',
+                      tone: _ProductStateBadgeTone.warning,
                     ),
                   ],
                   const SizedBox(height: 12),
@@ -4983,29 +5011,45 @@ class _IconCircle extends StatelessWidget {
 }
 
 class _ProductStateBadge extends StatelessWidget {
-  const _ProductStateBadge({required this.label});
+  const _ProductStateBadge({
+    required this.label,
+    this.tone = _ProductStateBadgeTone.info,
+  });
 
   final String label;
+  final _ProductStateBadgeTone tone;
 
   @override
   Widget build(BuildContext context) {
+    final backgroundColor = tone == _ProductStateBadgeTone.warning
+        ? const Color(0xFF312319)
+        : const Color(0xFF2A231D);
+    final borderColor = tone == _ProductStateBadgeTone.warning
+        ? const Color(0x44FFB36A)
+        : const Color(0x33AEE6FF);
+    final textColor = tone == _ProductStateBadgeTone.warning
+        ? const Color(0xFFFFD4AA)
+        : const Color(0xFFBEEAFF);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
-        color: const Color(0xFF2A231D),
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0x33AEE6FF)),
+        border: Border.all(color: borderColor),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: const Color(0xFFBEEAFF),
+              color: textColor,
               fontWeight: FontWeight.w800,
             ),
       ),
     );
   }
 }
+
+enum _ProductStateBadgeTone { info, warning }
 
 class _PrepTimeBadge extends StatelessWidget {
   const _PrepTimeBadge({
@@ -5984,7 +6028,7 @@ String _categoryKeyForPosition(Map<String, dynamic> position) {
 String _categorySubtitle(String categoryKey) {
   switch (categoryKey) {
     case 'zapiekanki':
-      return 'Klasyczne i mrozone warianty do szybkiego wyboru.';
+      return 'Klasyczne oraz hermetycznie pakowane warianty do odgrzania.';
     case 'kids':
       return 'Mniejsze zapiekanki 25 cm dla dzieci.';
     case 'udka':
@@ -6619,6 +6663,21 @@ bool _isFrozenPosition(Map<String, dynamic> position) {
       haystack.contains('mroz') ||
       haystack.contains('zamroz') ||
       haystack.contains('odgrzan');
+}
+
+bool _isPositionAvailable(Map<String, dynamic> position) {
+  final raw = position['is_active'];
+  if (raw is bool) {
+    return raw;
+  }
+  if (raw is num) {
+    return raw != 0;
+  }
+  if (raw is String) {
+    final normalized = raw.trim().toLowerCase();
+    return normalized != 'false' && normalized != '0';
+  }
+  return true;
 }
 
 _CartCustomization _initialCustomizationFor(Map<String, dynamic> position) {

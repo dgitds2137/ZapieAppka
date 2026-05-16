@@ -85,8 +85,9 @@ class MenuService:
         return [
             self._serialize_position(position, settings_by_group)
             for position in self.db.query(MenuPositionDB)
-            .filter(MenuPositionDB.is_active == True)
+            .order_by(MenuPositionDB.position_type.asc(), MenuPositionDB.name.asc())
             .all()
+            if self._should_expose_position_to_customer(position)
         ]
 
     def get_position(self, position_id: int):
@@ -94,11 +95,10 @@ class MenuService:
             self.db.query(MenuPositionDB)
             .filter(
                 MenuPositionDB.position_id == position_id,
-                MenuPositionDB.is_active == True,
             )
             .first()
         )
-        if not position:
+        if not position or not self._should_expose_position_to_customer(position):
             raise HTTPException(status_code=404, detail="Menu position not found")
         return self._serialize_position(position, self._get_prep_settings_by_group())
 
@@ -165,6 +165,25 @@ class MenuService:
             "prep_group_label": prep_group_label(group_key),
             "prep_minutes": setting.minutes if setting is not None else None,
         }
+
+    def _should_expose_position_to_customer(self, position: MenuPositionDB) -> bool:
+        if self._is_legacy_hidden_position(position):
+            return False
+        if bool(position.is_active):
+            return True
+        return self._is_temporarily_unavailable_position(position)
+
+    def _is_legacy_hidden_position(self, position: MenuPositionDB) -> bool:
+        position_type = (position.position_type or "").strip().lower()
+        name = (position.name or "").strip().lower()
+        if "kids" in position_type or "kids" in name:
+            return False
+        return "25cm" in name
+
+    def _is_temporarily_unavailable_position(self, position: MenuPositionDB) -> bool:
+        position_type = (position.position_type or "").strip().lower()
+        name = (position.name or "").strip().lower()
+        return "zapiek" in position_type or "zapiek" in name
 
     def _ensure_required_positions(self) -> None:
         udka_name = "Udka z kurczaka (3 szt.)"
