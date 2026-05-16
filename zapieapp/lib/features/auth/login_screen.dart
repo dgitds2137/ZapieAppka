@@ -18,6 +18,10 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   static const _backgroundAsset =
       'assets/images/background_big_ingredients_darker.png';
+  static const _heroAsset =
+      'assets/images/BrancMadeImages/bannerHorizontal.png';
+  static const _watermarkAsset =
+      'assets/images/BrancMadeImages/LogoCorner.png';
   static const _apiBaseUrl = AppConfig.apiBaseUrl;
 
   final _formKey = GlobalKey<FormState>();
@@ -164,6 +168,9 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final media = MediaQuery.of(context);
+    final compact = media.size.width < 420;
+    final heroHeight = compact ? 172.0 : 196.0;
 
     return Scaffold(
       body: Container(
@@ -186,179 +193,368 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           child: SafeArea(
-            child: Center(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.local_pizza_outlined,
-                              size: 56,
-                              color: theme.colorScheme.primary,
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Logowanie',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.headlineMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Zaloguj sie do panelu i rozpocznij prace z aplikacja.',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: const Color(0xFFD6C4B8),
-                              ),
-                            ),
-                            const SizedBox(height: 24),
-                            TextFormField(
-                              controller: emailController,
-                              keyboardType: TextInputType.emailAddress,
-                              textInputAction: TextInputAction.next,
-                              autofillHints: const [AutofillHints.username],
-                              decoration: const InputDecoration(
-                                labelText: 'E-mail',
-                                prefixIcon: Icon(Icons.mail_outline),
-                              ),
-                              validator: (value) {
-                                final email = value?.trim() ?? '';
-                                if (email.isEmpty) {
-                                  return 'Podaj adres e-mail.';
-                                }
-                                if (!email.contains('@') ||
-                                    !email.contains('.')) {
-                                  return 'Podaj poprawny adres e-mail.';
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 16),
-                            TextFormField(
-                              controller: passwordController,
-                              obscureText: obscurePassword,
-                              textInputAction: TextInputAction.done,
-                              autofillHints: const [AutofillHints.password],
-                              onFieldSubmitted: (_) {
-                                if (!loading) {
-                                  submit();
-                                }
-                              },
-                              decoration: InputDecoration(
-                                labelText: 'Haslo',
-                                prefixIcon: const Icon(Icons.lock_outline),
-                                suffixIcon: IconButton(
-                                  onPressed: loading
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            obscurePassword = !obscurePassword;
-                                          });
-                                        },
-                                  icon: Icon(
-                                    obscurePassword
-                                        ? Icons.visibility_outlined
-                                        : Icons.visibility_off_outlined,
-                                  ),
-                                ),
-                              ),
-                              validator: (value) {
-                                final password = value ?? '';
-                                if (password.isEmpty) {
-                                  return 'Podaj haslo.';
-                                }
-                                if (password.length < 8) {
-                                  return 'Haslo musi miec co najmniej 8 znakow.';
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 24),
-                            FilledButton(
-                              onPressed: loading ? null : submit,
-                              child: Text(
-                                loading ? 'Logowanie...' : 'Zaloguj sie',
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Sesja logowania bedzie zapamietana na tym urzadzeniu przez okolo ${AppConfig.persistedLoginDays} dni.',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFFD6C4B8),
-                                height: 1.35,
-                              ),
-                            ),
-                            const SizedBox(height: 12),
-                            OutlinedButton(
-                              onPressed: loading ? null : fillDemoCredentials,
-                              child: const Text('Wypelnij dane demo'),
-                            ),
-                            const SizedBox(height: 12),
-                            OutlinedButton(
-                              onPressed: loading ? null : fillAdminCredentials,
-                              child: const Text('Wypelnij konto admina'),
-                            ),
-                            const SizedBox(height: 12),
-                            OutlinedButton(
-                              onPressed:
-                                  loading ? null : fillEmployeeCredentials,
-                              child: const Text('Wypelnij konto pracownika'),
-                            ),
-                            const SizedBox(height: 12),
-                            OutlinedButton(
-                              onPressed: loading ? null : fillDriverCredentials,
-                              child: const Text('Wypelnij konto kierowcy'),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Demo user: demo@zapieapp.pl / Haslo123!',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFFD6C4B8),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Admin: admin@zapieapp.pl / Admin123!',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFFD6C4B8),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Pracownik: employee@zapieapp.pl / Employee123!',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFFD6C4B8),
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Kierowca: driver@zapieapp.pl / Driver123!',
-                              textAlign: TextAlign.center,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: const Color(0xFFD6C4B8),
-                              ),
-                            ),
-                          ],
+            child: Stack(
+              children: [
+                Positioned(
+                  top: 24,
+                  right: -36,
+                  child: IgnorePointer(
+                    child: Opacity(
+                      opacity: 0.08,
+                      child: Transform.rotate(
+                        angle: 0.18,
+                        child: Image.asset(
+                          _watermarkAsset,
+                          width: media.size.width < 520 ? 180 : 240,
+                          fit: BoxFit.contain,
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
+                Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 460),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xED15110F),
+                          borderRadius: BorderRadius.circular(28),
+                          border: Border.all(color: const Color(0x24FFFFFF)),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x2B000000),
+                              blurRadius: 28,
+                              offset: Offset(0, 16),
+                            ),
+                            BoxShadow(
+                              color: Color(0x16FF7A1A),
+                              blurRadius: 24,
+                              offset: Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(28),
+                          child: Form(
+                            key: _formKey,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  height: heroHeight,
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Image.asset(
+                                        _heroAsset,
+                                        fit: BoxFit.cover,
+                                        alignment: Alignment.center,
+                                      ),
+                                      const DecoratedBox(
+                                        decoration: BoxDecoration(
+                                          gradient: LinearGradient(
+                                            colors: [
+                                              Color(0x26000000),
+                                              Color(0xB3120E0D),
+                                              Color(0xF014100F),
+                                            ],
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            stops: [0, 0.58, 1],
+                                          ),
+                                        ),
+                                      ),
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                          18,
+                                          18,
+                                          18,
+                                          18,
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                horizontal: 10,
+                                                vertical: 6,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xD91C1715),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                border: Border.all(
+                                                  color: const Color(
+                                                    0x33FFD7B1,
+                                                  ),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                'Prosto z pieca',
+                                                style: theme
+                                                    .textTheme.labelMedium
+                                                    ?.copyWith(
+                                                      color: const Color(
+                                                        0xFFFFD8B7,
+                                                      ),
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                    ),
+                                              ),
+                                            ),
+                                            const Spacer(),
+                                            Text(
+                                              'Witaj z powrotem',
+                                              style: theme
+                                                  .textTheme.headlineMedium
+                                                  ?.copyWith(
+                                                    color: const Color(
+                                                      0xFFFFF4EC,
+                                                    ),
+                                                    fontWeight:
+                                                        FontWeight.w900,
+                                                    height: 1.02,
+                                                  ),
+                                            ),
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              'Twoje miejsce od zapiekanek, lodow i smaku, ktory juz znasz.',
+                                              style: theme
+                                                  .textTheme.bodyMedium
+                                                  ?.copyWith(
+                                                    color: const Color(
+                                                      0xFFF0DDD0,
+                                                    ),
+                                                    height: 1.3,
+                                                  ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Padding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    compact ? 18 : 24,
+                                    22,
+                                    compact ? 18 : 24,
+                                    24,
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      Text(
+                                        'Logowanie',
+                                        textAlign: TextAlign.center,
+                                        style: theme.textTheme.headlineSmall
+                                            ?.copyWith(
+                                          color: const Color(0xFFF7EEE7),
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Zaloguj sie do panelu i rozpocznij prace z aplikacja.',
+                                        textAlign: TextAlign.center,
+                                        style:
+                                            theme.textTheme.bodyMedium?.copyWith(
+                                          color: const Color(0xFFD6C4B8),
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 22),
+                                      TextFormField(
+                                        controller: emailController,
+                                        keyboardType:
+                                            TextInputType.emailAddress,
+                                        textInputAction: TextInputAction.next,
+                                        autofillHints: const [
+                                          AutofillHints.username,
+                                        ],
+                                        decoration: const InputDecoration(
+                                          labelText: 'E-mail',
+                                          prefixIcon:
+                                              Icon(Icons.mail_outline),
+                                        ),
+                                        validator: (value) {
+                                          final email = value?.trim() ?? '';
+                                          if (email.isEmpty) {
+                                            return 'Podaj adres e-mail.';
+                                          }
+                                          if (!email.contains('@') ||
+                                              !email.contains('.')) {
+                                            return 'Podaj poprawny adres e-mail.';
+                                          }
+                                          return null;
+                                        },
+                                      ),
+                                      const SizedBox(height: 16),
+                                      TextFormField(
+                                        controller: passwordController,
+                                        obscureText: obscurePassword,
+                                        textInputAction: TextInputAction.done,
+                                        autofillHints: const [
+                                          AutofillHints.password,
+                                        ],
+                                        onFieldSubmitted: (_) {
+                                          if (!loading) {
+                                            submit();
+                                          }
+                                        },
+                                        decoration: InputDecoration(
+                                          labelText: 'Haslo',
+                                          prefixIcon: const Icon(
+                                            Icons.lock_outline,
+                                          ),
+                                          suffixIcon: IconButton(
+                                            onPressed: loading
+                                                ? null
+                                                : () {
+                                                    setState(() {
+                                                      obscurePassword =
+                                                          !obscurePassword;
+                                                    });
+                                                  },
+                                            icon: Icon(
+                                              obscurePassword
+                                                  ? Icons.visibility_outlined
+                                                  : Icons
+                                                      .visibility_off_outlined,
+                                            ),
+                                          ),
+                                        ),
+                                        validator: (value) {
+                                          final password = value ?? '';
+                                          if (password.isEmpty) {
+                                            return 'Podaj haslo.';
+                                          }
+                                          if (password.length < 8) {
+                                            return 'Haslo musi miec co najmniej 8 znakow.';
+                                          }
+                                          return null;
+                                        },
+                                      ),
+                                      const SizedBox(height: 24),
+                                      FilledButton(
+                                        onPressed: loading ? null : submit,
+                                        style: FilledButton.styleFrom(
+                                          minimumSize:
+                                              const Size.fromHeight(52),
+                                        ),
+                                        child: Text(
+                                          loading
+                                              ? 'Logowanie...'
+                                              : 'Zaloguj sie',
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'Sesja logowania bedzie zapamietana na tym urzadzeniu przez okolo ${AppConfig.persistedLoginDays} dni.',
+                                        textAlign: TextAlign.center,
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          color: const Color(0xFFD6C4B8),
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 18),
+                                      Wrap(
+                                        spacing: 10,
+                                        runSpacing: 10,
+                                        children: [
+                                          _QuickFillButton(
+                                            label: 'Demo',
+                                            onPressed: loading
+                                                ? null
+                                                : fillDemoCredentials,
+                                          ),
+                                          _QuickFillButton(
+                                            label: 'Admin',
+                                            onPressed: loading
+                                                ? null
+                                                : fillAdminCredentials,
+                                          ),
+                                          _QuickFillButton(
+                                            label: 'Pracownik',
+                                            onPressed: loading
+                                                ? null
+                                                : fillEmployeeCredentials,
+                                          ),
+                                          _QuickFillButton(
+                                            label: 'Kierowca',
+                                            onPressed: loading
+                                                ? null
+                                                : fillDriverCredentials,
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 18),
+                                      Container(
+                                        padding: const EdgeInsets.all(14),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF1A1513),
+                                          borderRadius:
+                                              BorderRadius.circular(18),
+                                          border: Border.all(
+                                            color: const Color(0x1FFFFFFF),
+                                          ),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            Text(
+                                              'Szybkie loginy testowe',
+                                              textAlign: TextAlign.center,
+                                              style: theme.textTheme.labelLarge
+                                                  ?.copyWith(
+                                                color:
+                                                    const Color(0xFFFFD7B5),
+                                                fontWeight: FontWeight.w800,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 10),
+                                            _CredentialHint(
+                                              label:
+                                                  'Demo user: demo@zapieapp.pl / Haslo123!',
+                                            ),
+                                            const SizedBox(height: 6),
+                                            _CredentialHint(
+                                              label:
+                                                  'Admin: admin@zapieapp.pl / Admin123!',
+                                            ),
+                                            const SizedBox(height: 6),
+                                            _CredentialHint(
+                                              label:
+                                                  'Pracownik: employee@zapieapp.pl / Employee123!',
+                                            ),
+                                            const SizedBox(height: 6),
+                                            _CredentialHint(
+                                              label:
+                                                  'Kierowca: driver@zapieapp.pl / Driver123!',
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -389,6 +585,49 @@ class _LoginResult {
   final String? sessionToken;
   final String? role;
   final int? loyaltyPoints;
+}
+
+class _QuickFillButton extends StatelessWidget {
+  const _QuickFillButton({
+    required this.label,
+    required this.onPressed,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        side: const BorderSide(color: Color(0x33FFB061)),
+        foregroundColor: const Color(0xFFF2D6BE),
+      ),
+      child: Text(label),
+    );
+  }
+}
+
+class _CredentialHint extends StatelessWidget {
+  const _CredentialHint({
+    required this.label,
+  });
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      textAlign: TextAlign.center,
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: const Color(0xFFD6C4B8),
+            height: 1.35,
+          ),
+    );
+  }
 }
 
 int? _asInt(Object? value) {
