@@ -651,7 +651,14 @@ class _CategoryTile extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               if (previewPhoto != null)
-                _PositionImage(photoUrl: previewPhoto, title: previewTitle),
+                _PositionImage(
+                  photoUrl: previewPhoto,
+                  title: previewTitle,
+                  fit: category.key == 'lody' ? BoxFit.contain : BoxFit.cover,
+                  alignment: category.key == 'lody'
+                      ? Alignment.topCenter
+                      : Alignment.center,
+                ),
               DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
@@ -1284,6 +1291,8 @@ class _CategoryProductRow extends StatelessWidget {
                   child: _PositionImage(
                     photoUrl: _photo(position),
                     title: _title(position, 0),
+                    fit: _positionImageFit(position),
+                    alignment: _positionImageAlignment(position),
                   ),
                 ),
               ),
@@ -1389,10 +1398,10 @@ class _CategoryRowStepper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
         color: const Color(0xFF282220),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0x1AFFFFFF)),
       ),
       child: Row(
@@ -1403,7 +1412,7 @@ class _CategoryRowStepper extends StatelessWidget {
             onTap: quantity <= 0 || locked ? null : onDecrement,
           ),
           SizedBox(
-            width: 26,
+            width: 34,
             child: Text(
               '$quantity',
               textAlign: TextAlign.center,
@@ -1438,16 +1447,16 @@ class _CategoryStepperButton extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        width: 26,
-        height: 26,
+        width: 34,
+        height: 34,
         decoration: BoxDecoration(
           color:
               onTap == null ? const Color(0xFF221D1B) : const Color(0xFF38302C),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Icon(
           icon,
-          size: 16,
+          size: 18,
           color:
               onTap == null ? const Color(0xFF7B6F68) : const Color(0xFFF7EEE7),
         ),
@@ -1897,7 +1906,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     _entries = List<_CartEntry>.from(widget.initialEntries);
     _addresses =
         List<({String title, String subtitle})>.from(_defaultAddresses);
-    _enforceUdkaFulfillment();
+    _enforceFulfillmentConstraints();
     _loadDeliveryEstimate();
     _refreshUdkaPickupEstimate();
     _loadPickupLocationAddress();
@@ -1936,9 +1945,26 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
 
   bool _cartContainsUdka() => _containsUdkaCartEntries(_entries);
 
-  void _enforceUdkaFulfillment() {
+  bool _cartContainsIceCream() => _containsIceCreamCartEntries(_entries);
+
+  int _defaultFulfillmentIndexForCurrentCart() {
     if (_cartContainsUdka()) {
-      _fulfillmentIndex = 2;
+      return 2;
+    }
+    if (_cartContainsIceCream()) {
+      return 1;
+    }
+    return 0;
+  }
+
+  void _enforceFulfillmentConstraints() {
+    final preferredIndex = _defaultFulfillmentIndexForCurrentCart();
+    if (_cartContainsUdka()) {
+      _fulfillmentIndex = preferredIndex;
+      return;
+    }
+    if (_cartContainsIceCream() && _fulfillmentIndex == 0) {
+      _fulfillmentIndex = preferredIndex;
     }
   }
 
@@ -1948,6 +1974,16 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
         const SnackBar(
           content: Text(
             'Udka z kurczaka sa dostepne tylko w opcji Zaplanuj odbior o 12:00, 15:00 albo 18:00.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_cartContainsIceCream() && index == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Lody sa dostepne tylko na miejscu albo w opcji Zaplanuj odbior.',
           ),
         ),
       );
@@ -2014,7 +2050,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   void _removeEntry(int id) {
     setState(() {
       _entries.removeWhere((entry) => entry.id == id);
-      _enforceUdkaFulfillment();
+      _enforceFulfillmentConstraints();
       _redeemedPoints = _effectiveRedeemedPoints();
     });
     _syncEntries();
@@ -2057,7 +2093,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     setState(() {
       _addresses.add(newAddress);
       _addressIndex = _addresses.length - 1;
-      _fulfillmentIndex = _cartContainsUdka() ? 2 : 0;
+      _fulfillmentIndex = _defaultFulfillmentIndexForCurrentCart();
     });
   }
 
@@ -2250,6 +2286,13 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     final maxRedeemablePoints = _maxRedeemablePoints(subtotal);
     final estimatedPrepMinutes = _estimatedPrepMinutes();
     final udkaOnlyScheduledPickup = _cartContainsUdka();
+    final iceCreamPickupOnly =
+        !udkaOnlyScheduledPickup && _cartContainsIceCream();
+    final visibleFulfillmentIndexes = udkaOnlyScheduledPickup
+        ? const <int>[2]
+        : iceCreamPickupOnly
+            ? const <int>[1, 2]
+            : const <int>[0, 1, 2];
 
     return Scaffold(
       extendBody: true,
@@ -2342,15 +2385,22 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                             Row(
                               children: [
                                 for (var index = 0;
-                                    index < _fulfillmentOptions.length;
+                                    index < visibleFulfillmentIndexes.length;
                                     index++) ...[
                                   if (index > 0) const SizedBox(width: 8),
                                   Expanded(
                                     child: _FulfillmentTile(
-                                      label: _fulfillmentOptions[index].label,
-                                      icon: _fulfillmentOptions[index].icon,
-                                      isSelected: _fulfillmentIndex == index,
-                                      onTap: () => _setFulfillmentIndex(index),
+                                      label: _fulfillmentOptions[
+                                              visibleFulfillmentIndexes[index]]
+                                          .label,
+                                      icon: _fulfillmentOptions[
+                                              visibleFulfillmentIndexes[index]]
+                                          .icon,
+                                      isSelected: _fulfillmentIndex ==
+                                          visibleFulfillmentIndexes[index],
+                                      onTap: () => _setFulfillmentIndex(
+                                        visibleFulfillmentIndexes[index],
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -2360,6 +2410,18 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                             const SizedBox(height: 12),
                             Text(
                               'Udka wydajemy tylko w zaplanowanym odbiorze. Najblizszy termin: ${_summaryEtaLabel(estimatedPrepMinutes)}.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: const Color(0xFFD5C7BA),
+                                    height: 1.35,
+                                  ),
+                            ),
+                          ] else if (iceCreamPickupOnly) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              'Lody sa dostepne tylko na miejscu albo w opcji Zaplanuj odbior.',
                               style: Theme.of(context)
                                   .textTheme
                                   .bodySmall
@@ -3112,6 +3174,8 @@ class _ProductPreviewDialog extends StatelessWidget {
                     child: _PositionImage(
                       photoUrl: _photo(position),
                       title: title,
+                      fit: _positionImageFit(position),
+                      alignment: _positionImageAlignment(position),
                     ),
                   ),
                 ),
@@ -3262,6 +3326,8 @@ class _SummaryProductTile extends StatelessWidget {
                     child: _PositionImage(
                       photoUrl: _photo(entry.position),
                       title: _title(entry.position, 0),
+                      fit: _positionImageFit(entry.position),
+                      alignment: _positionImageAlignment(entry.position),
                     ),
                   ),
                 ),
@@ -3610,6 +3676,9 @@ class _CartPersonalizationScreenState
                               child: _PositionImage(
                                 photoUrl: _photo(widget.entry.position),
                                 title: title,
+                                fit: _positionImageFit(widget.entry.position),
+                                alignment:
+                                    _positionImageAlignment(widget.entry.position),
                               ),
                             ),
                           ),
@@ -4964,9 +5033,17 @@ class _CartThumb extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: _PositionImage(
-                photoUrl: _photo(entry.position),
-                title: _title(entry.position, 0),
+              child: Padding(
+                padding: _positionImagePadding(entry.position, compact: true),
+                child: _PositionImage(
+                  photoUrl: _photo(entry.position),
+                  title: _title(entry.position, 0),
+                  fit: _positionImageFit(entry.position, compact: true),
+                  alignment: _positionImageAlignment(
+                    entry.position,
+                    compact: true,
+                  ),
+                ),
               ),
             ),
             Positioned(
@@ -5477,10 +5554,17 @@ class _Glow extends StatelessWidget {
 }
 
 class _PositionImage extends StatelessWidget {
-  const _PositionImage({required this.photoUrl, required this.title});
+  const _PositionImage({
+    required this.photoUrl,
+    required this.title,
+    this.fit = BoxFit.cover,
+    this.alignment = Alignment.center,
+  });
 
   final String? photoUrl;
   final String title;
+  final BoxFit fit;
+  final Alignment alignment;
 
   @override
   Widget build(BuildContext context) {
@@ -5490,7 +5574,8 @@ class _PositionImage extends StatelessWidget {
         return _FadedPositionImage(
           child: Image.asset(
             _normalizeBundledAssetPhoto(resolvedPhotoUrl),
-            fit: BoxFit.cover,
+            fit: fit,
+            alignment: alignment,
             filterQuality: FilterQuality.medium,
             errorBuilder: (_, __, ___) => _fallback(context),
           ),
@@ -5499,7 +5584,8 @@ class _PositionImage extends StatelessWidget {
       return _FadedPositionImage(
         child: Image.network(
           resolvedPhotoUrl,
-          fit: BoxFit.cover,
+          fit: fit,
+          alignment: alignment,
           filterQuality: FilterQuality.medium,
           errorBuilder: (_, __, ___) => _fallback(context),
         ),
@@ -5984,13 +6070,6 @@ String _categoryKeyForPosition(Map<String, dynamic> position) {
       haystack.contains('kids')) {
     return 'kids';
   }
-  if (prepGroup.contains('udka') ||
-      positionType.contains('udk') ||
-      haystack.contains('udk') ||
-      haystack.contains('kurczak') ||
-      haystack.contains('chicken')) {
-    return 'udka';
-  }
 
   if (prepGroup.contains('zapiek') ||
       positionType.contains('zapiek') ||
@@ -5998,6 +6077,14 @@ String _categoryKeyForPosition(Map<String, dynamic> position) {
       (positionType.contains('zap') && positionType.contains('iek')) ||
       haystack.contains('zapiek')) {
     return 'zapiekanki';
+  }
+
+  if (prepGroup.contains('udka') ||
+      positionType.contains('udk') ||
+      haystack.contains('udk') ||
+      haystack.contains('kurczak') ||
+      haystack.contains('chicken')) {
+    return 'udka';
   }
 
   if (positionType.contains('lod') ||
@@ -6191,6 +6278,9 @@ DateTime _nextUdkaPickupSlot({DateTime? now}) {
 
 bool _containsUdkaCartEntries(Iterable<_CartEntry> entries) =>
     entries.any((entry) => _categoryKeyForPosition(entry.position) == 'udka');
+
+bool _containsIceCreamCartEntries(Iterable<_CartEntry> entries) =>
+    entries.any((entry) => _categoryKeyForPosition(entry.position) == 'lody');
 
 int _cartEstimatedPrepMinutes(List<_CartEntry> entries) {
   return entries
@@ -6663,6 +6753,42 @@ bool _isFrozenPosition(Map<String, dynamic> position) {
       haystack.contains('mroz') ||
       haystack.contains('zamroz') ||
       haystack.contains('odgrzan');
+}
+
+BoxFit _positionImageFit(
+  Map<String, dynamic> item, {
+  bool compact = false,
+}) {
+  if (compact && _categoryKeyForPosition(item) == 'lody') {
+    return BoxFit.contain;
+  }
+  if (_categoryKeyForPosition(item) == 'lody') {
+    return BoxFit.contain;
+  }
+  return BoxFit.cover;
+}
+
+Alignment _positionImageAlignment(
+  Map<String, dynamic> item, {
+  bool compact = false,
+}) {
+  if (_categoryKeyForPosition(item) == 'lody') {
+    if (compact) {
+      return const Alignment(0, -0.92);
+    }
+    return Alignment.topCenter;
+  }
+  return Alignment.center;
+}
+
+EdgeInsets _positionImagePadding(
+  Map<String, dynamic> item, {
+  bool compact = false,
+}) {
+  if (_categoryKeyForPosition(item) == 'lody' && compact) {
+    return const EdgeInsets.fromLTRB(10, 2, 10, 12);
+  }
+  return EdgeInsets.zero;
 }
 
 bool _isPositionAvailable(Map<String, dynamic> position) {

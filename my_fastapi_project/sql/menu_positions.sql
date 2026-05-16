@@ -121,9 +121,9 @@ GO
         (N'napoje', N'Coca Cola puszka 0.33', 330, 139, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Coca Cola w puszce 0.33 l.', NULL, CAST(1 AS BIT)),
         (N'napoje', N'Fanta puszka 0.33', 330, 144, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Fanta w puszce 0.33 l.', NULL, CAST(1 AS BIT)),
         (N'napoje', N'Sprite puszka 0.33', 330, 126, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Sprite w puszce 0.33 l.', NULL, CAST(1 AS BIT)),
-        (N'lody', N'Lody smietankowe', 90, 180, CAST(10 AS DECIMAL(18, 0)), N'Porcja klasycznych lodow smietankowych.', N'assets/images/whiteIceCream.png', CAST(1 AS BIT)),
-        (N'lody', N'Lody czekoladowe', 90, 190, CAST(10 AS DECIMAL(18, 0)), N'Porcja lodow czekoladowych.', N'assets/images/chocolateIceCream.png', CAST(1 AS BIT)),
-        (N'lody', N'Lody truskawkowe', 90, 170, CAST(10 AS DECIMAL(18, 0)), N'Porcja lodow truskawkowych.', N'assets/images/strawberryIceCream.png', CAST(1 AS BIT))
+        (N'lody', N'Lody smietankowe', 90, 180, CAST(10 AS DECIMAL(18, 0)), N'3 galki klasycznych lodow smietankowych.', N'assets/images/whiteIceCream.png', CAST(1 AS BIT)),
+        (N'lody', N'Lody czekoladowe', 90, 190, CAST(10 AS DECIMAL(18, 0)), N'3 galki lodow czekoladowych.', N'assets/images/chocolateIceCream.png', CAST(1 AS BIT)),
+        (N'lody', N'Lody truskawkowe', 90, 170, CAST(10 AS DECIMAL(18, 0)), N'3 galki lodow truskawkowych.', N'assets/images/strawberryIceCream.png', CAST(1 AS BIT))
     ) AS seed(position_type, name, weight, calories, price, description, photo_url, is_active)
 )
 MERGE dbo.MenuPositions AS target
