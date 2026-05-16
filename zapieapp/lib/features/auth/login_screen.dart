@@ -16,8 +16,6 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  static const _backgroundAsset =
-      'assets/images/background_big_ingredients_darker.png';
   static const _heroAsset =
       'assets/images/BrancMadeImages/bannerVertical.png';
   static const _watermarkAsset =
@@ -170,23 +168,23 @@ class _LoginScreenState extends State<LoginScreen> {
     final theme = Theme.of(context);
     final media = MediaQuery.of(context);
     final compact = media.size.width < 420;
-    final heroHeight = compact ? 248.0 : 292.0;
 
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
           image: DecorationImage(
-            image: AssetImage(_backgroundAsset),
+            image: AssetImage(_heroAsset),
             fit: BoxFit.cover,
+            alignment: Alignment(0, -0.78),
           ),
         ),
         child: DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                const Color(0xE6100C0A),
-                const Color(0xD916100E),
-                theme.colorScheme.surface,
+                const Color(0xC20C0807),
+                const Color(0xDA120C0B),
+                const Color(0xF015100E),
               ],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
@@ -219,7 +217,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       constraints: const BoxConstraints(maxWidth: 460),
                       child: Container(
                         decoration: BoxDecoration(
-                          color: const Color(0xED15110F),
+                          color: const Color(0xE9181311),
                           borderRadius: BorderRadius.circular(28),
                           border: Border.all(color: const Color(0x24FFFFFF)),
                           boxShadow: const [
@@ -243,106 +241,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                SizedBox(
-                                  height: heroHeight,
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Image.asset(
-                                        _heroAsset,
-                                        fit: BoxFit.cover,
-                                        alignment: const Alignment(0, -0.78),
-                                      ),
-                                      const DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: [
-                                              Color(0x26000000),
-                                              Color(0xB3120E0D),
-                                              Color(0xF014100F),
-                                            ],
-                                            begin: Alignment.topCenter,
-                                            end: Alignment.bottomCenter,
-                                            stops: [0, 0.58, 1],
-                                          ),
-                                        ),
-                                      ),
-                                      Padding(
-                                        padding: const EdgeInsets.fromLTRB(
-                                          18,
-                                          18,
-                                          18,
-                                          18,
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                horizontal: 10,
-                                                vertical: 6,
-                                              ),
-                                              decoration: BoxDecoration(
-                                                color: const Color(0xD91C1715),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                                border: Border.all(
-                                                  color: const Color(
-                                                    0x33FFD7B1,
-                                                  ),
-                                                ),
-                                              ),
-                                              child: Text(
-                                                'Prosto z pieca',
-                                                style: theme
-                                                    .textTheme.labelMedium
-                                                    ?.copyWith(
-                                                      color: const Color(
-                                                        0xFFFFD8B7,
-                                                      ),
-                                                      fontWeight:
-                                                          FontWeight.w800,
-                                                    ),
-                                              ),
-                                            ),
-                                            const Spacer(),
-                                            Text(
-                                              'Witaj z powrotem',
-                                              style: theme
-                                                  .textTheme.headlineMedium
-                                                  ?.copyWith(
-                                                    color: const Color(
-                                                      0xFFFFF4EC,
-                                                    ),
-                                                    fontWeight:
-                                                        FontWeight.w900,
-                                                    height: 1.02,
-                                                  ),
-                                            ),
-                                            const SizedBox(height: 6),
-                                            Text(
-                                              'Twoje miejsce od zapiekanek, lodow i smaku, ktory juz znasz.',
-                                              style: theme
-                                                  .textTheme.bodyMedium
-                                                  ?.copyWith(
-                                                    color: const Color(
-                                                      0xFFF0DDD0,
-                                                    ),
-                                                    height: 1.3,
-                                                  ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
                                 Padding(
                                   padding: EdgeInsets.fromLTRB(
                                     compact ? 18 : 24,
-                                    22,
+                                    20,
                                     compact ? 18 : 24,
                                     24,
                                   ),
@@ -350,6 +252,58 @@ class _LoginScreenState extends State<LoginScreen> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.stretch,
                                     children: [
+                                      Align(
+                                        alignment: Alignment.centerLeft,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 10,
+                                            vertical: 6,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xCC1C1715),
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                            border: Border.all(
+                                              color: const Color(0x33FFD7B1),
+                                            ),
+                                          ),
+                                          child: Text(
+                                            'Prosto z pieca',
+                                            style: theme.textTheme.labelMedium
+                                                ?.copyWith(
+                                              color: const Color(0xFFFFD8B7),
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 18),
+                                      Text(
+                                        'Witaj z powrotem',
+                                        textAlign: TextAlign.center,
+                                        style: theme.textTheme.headlineMedium
+                                            ?.copyWith(
+                                          color: const Color(0xFFFFF4EC),
+                                          fontWeight: FontWeight.w900,
+                                          height: 1.02,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Twoje miejsce od zapiekanek, lodow i smaku, ktory juz znasz.',
+                                        textAlign: TextAlign.center,
+                                        style:
+                                            theme.textTheme.bodyMedium?.copyWith(
+                                          color: const Color(0xFFF0DDD0),
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 22),
+                                      Container(
+                                        height: 1,
+                                        color: const Color(0x16FFFFFF),
+                                      ),
+                                      const SizedBox(height: 22),
                                       Text(
                                         'Logowanie',
                                         textAlign: TextAlign.center,
@@ -369,7 +323,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                           height: 1.35,
                                         ),
                                       ),
-                                      const SizedBox(height: 22),
+                                      const SizedBox(height: 20),
                                       TextFormField(
                                         controller: emailController,
                                         keyboardType:
