@@ -3917,6 +3917,8 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
     final media = MediaQuery.of(context);
     final compactLayout = media.size.width < 640;
     final deliveryOriginAddress = catalog?.deliveryOriginAddress ?? '';
+    final openingHoursRange =
+        catalog?.openingHours.formattedRange ?? '12:00-21:00';
 
     Widget body;
     if (_isLoading && catalog == null) {
@@ -3954,8 +3956,8 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
     } else {
       final positions = catalog?.positions ?? const <AdminCatalogPosition>[];
       final addons = catalog?.addons ?? const <AdminCatalogAddon>[];
-      body = Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      body = ListView(
+        physics: const BouncingScrollPhysics(),
         children: [
           _CatalogSectionHeader(
             title: 'Ustawienia dostawy',
@@ -3996,7 +3998,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
           const SizedBox(height: 10),
           _CatalogSettingTile(
             title: 'Godziny otwarcia lokalu',
-            valueLabel: catalog?.openingHours.formattedRange ?? '12:00-21:00',
+            valueLabel: openingHoursRange,
             subtitle:
                 'Ten zakres jest pokazywany na dashboardzie klienta oraz panelach admina, pracownika i kierowcy.',
             busy: _busyItems.contains('opening-hours'),
@@ -4142,10 +4144,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
               child: ScrollConfiguration(
                 behavior:
                     const MaterialScrollBehavior().copyWith(scrollbars: false),
-                child: SingleChildScrollView(
-                  physics: const BouncingScrollPhysics(),
-                  child: body,
-                ),
+                child: body,
               ),
             ),
           ],
