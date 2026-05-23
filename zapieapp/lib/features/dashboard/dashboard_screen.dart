@@ -26,7 +26,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   static const _backgroundAsset =
-      'assets/images/background_big_ingredients_darker.png';
+      'assets/images/BrancMadeImages/bannerVertical.png';
   static const _apiBaseUrl = AppConfig.apiBaseUrl;
   static final CheckoutRepository _checkoutRepository = HttpCheckoutRepository(
     apiBaseUrl: _apiBaseUrl,
@@ -38,6 +38,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   late Future<List<Map<String, dynamic>>> _positionsFuture;
   late Future<OpeningHoursData?> _openingHoursFuture;
+  OpeningHoursData? _lastKnownOpeningHours;
   AuthSession _authSession = const AuthSession();
   String? _authSessionKey;
   final List<_CartEntry> _cart = [];
@@ -113,7 +114,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<OpeningHoursData?> _fetchOpeningHours() async {
     try {
-      return await _openingHoursRepository.fetchOpeningHours();
+      final hours = await _openingHoursRepository.fetchOpeningHours();
+      _lastKnownOpeningHours = hours;
+      return hours;
     } catch (_) {
       return null;
     }
@@ -402,6 +405,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           initialEntries: _resolvedCartEntries(const <Map<String, dynamic>>[]),
           onCartChanged: _replaceCart,
           authSession: _authSession,
+          openingHours: _lastKnownOpeningHours,
         ),
       ),
     );
@@ -419,6 +423,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           initialCategoryKey: category.key,
           initialCartEntries: resolvedCartEntries,
           authSession: _authSession,
+          openingHours: _lastKnownOpeningHours,
           hasActiveCheckout: _activeCheckout != null &&
               _isCheckoutStillActive(_activeCheckout),
           onCartChanged: _replaceCart,
@@ -504,6 +509,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         future: _openingHoursFuture,
                         builder: (context, openingHoursSnapshot) {
                           final openingHours = openingHoursSnapshot.data;
+                          if (openingHours != null) {
+                            _lastKnownOpeningHours = openingHours;
+                          }
                           if (openingHours == null) {
                             return const SizedBox.shrink();
                           }
@@ -536,6 +544,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           bottomNavigationBar: _BottomChrome(
             cartEntries: cartEntries,
             activeCheckout: _activeCheckout,
+            openingHours: _lastKnownOpeningHours,
             isLoadingActiveCheckout: _isLoadingActiveCheckout,
             activeFooterIndex: _activeFooterIndex,
             onSelect: _selectPosition,
@@ -580,23 +589,13 @@ class _Background extends StatelessWidget {
       child: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xF1090808), Color(0xEC080706), Color(0xFF050505)],
+            colors: [Color(0xE60A0908), Color(0xF20A0908), Color(0xFB060505)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
         ),
         child: Stack(
           children: [
-            Positioned(
-              top: -40,
-              right: -10,
-              child: _Glow(size: 150, color: const Color(0x28FF6A00)),
-            ),
-            Positioned(
-              bottom: 130,
-              left: -20,
-              child: _Glow(size: 110, color: const Color(0x18E63946)),
-            ),
             child,
           ],
         ),
@@ -771,6 +770,7 @@ class _CategoryProductsScreen extends StatefulWidget {
     required this.initialCategoryKey,
     required this.initialCartEntries,
     required this.authSession,
+    required this.openingHours,
     required this.hasActiveCheckout,
     required this.onCartChanged,
   });
@@ -779,6 +779,7 @@ class _CategoryProductsScreen extends StatefulWidget {
   final String initialCategoryKey;
   final List<_CartEntry> initialCartEntries;
   final AuthSession authSession;
+  final OpeningHoursData? openingHours;
   final bool hasActiveCheckout;
   final ValueChanged<List<_CartEntry>> onCartChanged;
 
@@ -947,6 +948,10 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
       }
       return _udkaPickupCompactLabel();
     }
+    final openingDelay = _openingDelayForHours(widget.openingHours);
+    if (openingDelay != null) {
+      return _formatOpeningDelayCompact(openingDelay);
+    }
     return '${_estimatedPrepMinutesForEntries()} min';
   }
 
@@ -975,6 +980,7 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
             _refreshUdkaPickupEstimate();
           },
           authSession: widget.authSession,
+          openingHours: widget.openingHours,
         ),
       ),
     );
@@ -1321,11 +1327,14 @@ class _CategoryProductRow extends StatelessWidget {
                 child: SizedBox(
                   width: 82,
                   height: 82,
-                  child: _PositionImage(
-                    photoUrl: _photo(position),
-                    title: _title(position, 0),
-                    fit: _positionImageFit(position),
-                    alignment: _positionImageAlignment(position),
+                  child: Padding(
+                    padding: _positionImagePadding(position),
+                    child: _PositionImage(
+                      photoUrl: _photo(position),
+                      title: _title(position, 0),
+                      fit: _positionImageFit(position),
+                      alignment: _positionImageAlignment(position),
+                    ),
                   ),
                 ),
               ),
@@ -1567,6 +1576,7 @@ class _BottomChrome extends StatelessWidget {
   const _BottomChrome({
     required this.cartEntries,
     required this.activeCheckout,
+    required this.openingHours,
     required this.isLoadingActiveCheckout,
     required this.activeFooterIndex,
     required this.onSelect,
@@ -1579,6 +1589,7 @@ class _BottomChrome extends StatelessWidget {
 
   final List<_CartEntry> cartEntries;
   final CheckoutVerificationResponse? activeCheckout;
+  final OpeningHoursData? openingHours;
   final bool isLoadingActiveCheckout;
   final int activeFooterIndex;
   final int loyaltyPoints;
@@ -1642,7 +1653,10 @@ class _BottomChrome extends StatelessWidget {
             else if (cartEntries.isNotEmpty)
               _CartOverviewBar(
                 entries: cartEntries,
-                etaLabel: '${_cartEstimatedPrepMinutes(cartEntries)} min',
+                etaLabel: _cartOverviewEtaLabel(
+                  cartEntries,
+                  openingHours: openingHours,
+                ),
                 onSelect: onSelect,
                 onRemove: onRemove,
                 onContinue: onContinue,
@@ -1767,6 +1781,8 @@ class _ActiveOrderBar extends StatelessWidget {
         ? 'Aktywne zamowienie'
         : checkout.receivedOrder.items.first.name;
     final etaDisplay = _activeCheckoutEtaDisplay(checkout);
+    final waitingForOpening = _checkoutWaitingForOpening(checkout);
+    final availableFrom = checkout.availableFrom;
 
     return Material(
       color: Colors.transparent,
@@ -1856,6 +1872,13 @@ class _ActiveOrderBar extends StatelessWidget {
                   ),
                 ],
               ),
+              if (waitingForOpening && availableFrom != null) ...[
+                const SizedBox(height: 10),
+                _ProductStateBadge(
+                  label: _formatOpeningDelayDetailed(availableFrom),
+                  tone: _ProductStateBadgeTone.warning,
+                ),
+              ],
               const SizedBox(height: 12),
               ClipRRect(
                 borderRadius: BorderRadius.circular(999),
@@ -1900,11 +1923,13 @@ class _CartSummaryScreen extends StatefulWidget {
     required this.initialEntries,
     required this.onCartChanged,
     required this.authSession,
+    required this.openingHours,
   });
 
   final List<_CartEntry> initialEntries;
   final ValueChanged<List<_CartEntry>> onCartChanged;
   final AuthSession authSession;
+  final OpeningHoursData? openingHours;
 
   @override
   State<_CartSummaryScreen> createState() => _CartSummaryScreenState();
@@ -2185,14 +2210,23 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
 
   bool _usesDeliveryBuffer() => _fulfillmentIndex == 0;
 
+  DateTime? _currentOpeningDelay() {
+    if (_cartContainsUdka()) {
+      return null;
+    }
+    return _openingDelayForHours(widget.openingHours);
+  }
+
   int _summaryEtaMinutes(int prepMinutes) {
     if (_cartContainsUdka()) {
       return _udkaPickupEstimate?.etaMinutes ?? _udkaPickupEtaMinutes();
     }
-    if (!_usesDeliveryBuffer()) {
-      return prepMinutes;
+    final baseMinutes = _usesDeliveryBuffer() ? _deliveryEtaMinutes : prepMinutes;
+    final openingDelay = _currentOpeningDelay();
+    if (openingDelay == null) {
+      return baseMinutes;
     }
-    return _deliveryEtaMinutes;
+    return baseMinutes + _minutesUntilDateTime(openingDelay);
   }
 
   String _summaryEtaLabel(int prepMinutes) {
@@ -2202,6 +2236,10 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
         return _formatScheduledPickupCompact(estimate.scheduledPickupAt);
       }
       return _udkaPickupCompactLabel();
+    }
+    final openingDelay = _currentOpeningDelay();
+    if (openingDelay != null) {
+      return _formatOpeningDelayCompact(openingDelay);
     }
     return '${_summaryEtaMinutes(prepMinutes)} min.';
   }
@@ -2217,6 +2255,10 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
         return _formatScheduledPickupDetailed(estimate.scheduledPickupAt);
       }
       return _udkaPickupEtaLabel();
+    }
+    final openingDelay = _currentOpeningDelay();
+    if (openingDelay != null) {
+      return _formatOpeningDelayDetailed(openingDelay);
     }
     final totalMinutes =
         _usesDeliveryBuffer() ? _deliveryEtaMinutes : prepMinutes;
@@ -2321,6 +2363,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     final udkaOnlyScheduledPickup = _cartContainsUdka();
     final iceCreamPickupOnly =
         !udkaOnlyScheduledPickup && _cartContainsIceCream();
+    final openingDelay = _currentOpeningDelay();
     final visibleFulfillmentIndexes = udkaOnlyScheduledPickup
         ? const <int>[2]
         : iceCreamPickupOnly
@@ -2461,6 +2504,20 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                                   ?.copyWith(
                                     color: const Color(0xFFD5C7BA),
                                     height: 1.35,
+                                  ),
+                            ),
+                          ],
+                          if (openingDelay != null) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              'Realizacja startuje po otwarciu lokalu ${_formatOpeningDelaySummary(openingDelay)}.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: const Color(0xFFFFD5AE),
+                                    height: 1.35,
+                                    fontWeight: FontWeight.w700,
                                   ),
                             ),
                           ],
@@ -5566,26 +5623,6 @@ class _PersonalizeThumbButton extends StatelessWidget {
   }
 }
 
-class _Glow extends StatelessWidget {
-  const _Glow({required this.size, required this.color});
-
-  final double size;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: Container(
-        height: size,
-        width: size,
-        decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(colors: [color, Colors.transparent])),
-      ),
-    );
-  }
-}
-
 class _PositionImage extends StatelessWidget {
   const _PositionImage({
     required this.photoUrl,
@@ -6237,6 +6274,94 @@ class _UdkaPickupEstimate {
   final DateTime scheduledPickupAt;
 }
 
+DateTime? _openingDelayForHours(OpeningHoursData? openingHours, {DateTime? now}) {
+  if (openingHours == null || openingHours.isOpenNow) {
+    return null;
+  }
+  return _nextOpeningDateTime(openingHours, now: now);
+}
+
+DateTime _nextOpeningDateTime(OpeningHoursData openingHours, {DateTime? now}) {
+  final localNow = (now ?? DateTime.now()).toLocal();
+  final openMinutes = _timeStringToMinutes(openingHours.openTime);
+  final closeMinutes = _timeStringToMinutes(openingHours.closeTime);
+  final currentMinutes = (localNow.hour * 60) + localNow.minute;
+  var targetDate = DateTime(localNow.year, localNow.month, localNow.day);
+  if (currentMinutes >= closeMinutes) {
+    targetDate = targetDate.add(const Duration(days: 1));
+  }
+  return DateTime(
+    targetDate.year,
+    targetDate.month,
+    targetDate.day,
+    openMinutes ~/ 60,
+    openMinutes % 60,
+  );
+}
+
+int _timeStringToMinutes(String rawValue) {
+  final parts = rawValue.split(':');
+  if (parts.length != 2) {
+    return 0;
+  }
+  final hour = int.tryParse(parts[0]) ?? 0;
+  final minute = int.tryParse(parts[1]) ?? 0;
+  return (hour * 60) + minute;
+}
+
+int _minutesUntilDateTime(DateTime target, {DateTime? now}) {
+  final localNow = (now ?? DateTime.now()).toLocal();
+  final deltaSeconds = math.max(0, target.difference(localNow).inSeconds);
+  return ((deltaSeconds + 59) / 60).floor();
+}
+
+String _formatOpeningDelayCompact(DateTime availableFrom, {DateTime? now}) {
+  final localAvailableFrom = availableFrom.toLocal();
+  final localNow = (now ?? DateTime.now()).toLocal();
+  final hour = localAvailableFrom.hour.toString().padLeft(2, '0');
+  final minute = localAvailableFrom.minute.toString().padLeft(2, '0');
+  if (_isSameCalendarDay(localAvailableFrom, localNow)) {
+    return 'po $hour:$minute';
+  }
+  return 'od ${_pickupDateLabel(localAvailableFrom)} $hour:$minute';
+}
+
+String _formatOpeningDelayDetailed(DateTime availableFrom, {DateTime? now}) {
+  final localAvailableFrom = availableFrom.toLocal();
+  final localNow = (now ?? DateTime.now()).toLocal();
+  final hour = localAvailableFrom.hour.toString().padLeft(2, '0');
+  final minute = localAvailableFrom.minute.toString().padLeft(2, '0');
+  if (_isSameCalendarDay(localAvailableFrom, localNow)) {
+    return 'Start po $hour:$minute';
+  }
+  return 'Start ${_pickupDateLabel(localAvailableFrom)} $hour:$minute';
+}
+
+String _formatOpeningDelaySummary(DateTime availableFrom, {DateTime? now}) {
+  final localAvailableFrom = availableFrom.toLocal();
+  final localNow = (now ?? DateTime.now()).toLocal();
+  final hour = localAvailableFrom.hour.toString().padLeft(2, '0');
+  final minute = localAvailableFrom.minute.toString().padLeft(2, '0');
+  if (_isSameCalendarDay(localAvailableFrom, localNow)) {
+    return 'o $hour:$minute';
+  }
+  return '${_pickupDateLabel(localAvailableFrom)} $hour:$minute';
+}
+
+String _cartOverviewEtaLabel(
+  List<_CartEntry> entries, {
+  OpeningHoursData? openingHours,
+}) {
+  if (_containsUdkaCartEntries(entries)) {
+    return _udkaPickupCompactLabel();
+  }
+  final openingDelay = _openingDelayForHours(openingHours);
+  if (openingDelay != null) {
+    return _formatOpeningDelayCompact(openingDelay);
+  }
+  return '${_cartEstimatedPrepMinutes(entries)} min';
+}
+
 String _udkaPickupEtaLabel({DateTime? now}) =>
     _formatScheduledPickupDetailed(_nextUdkaPickupSlot(now: now), now: now);
 
@@ -6388,7 +6513,24 @@ DateTime? _scheduledPickupDateTimeForCheckout(
   return checkout.scheduledPickupAt ?? checkout.activeUntil;
 }
 
+bool _checkoutWaitingForOpening(CheckoutVerificationResponse checkout) {
+  if (_checkoutContainsUdka(checkout)) {
+    return false;
+  }
+  final availableFrom = checkout.availableFrom?.toLocal();
+  if (availableFrom == null) {
+    return false;
+  }
+  return DateTime.now().toLocal().isBefore(availableFrom);
+}
+
 String _activeCheckoutEtaDisplay(CheckoutVerificationResponse checkout) {
+  if (_checkoutWaitingForOpening(checkout)) {
+    final availableFrom = checkout.availableFrom;
+    if (availableFrom != null) {
+      return _formatOpeningDelayCompact(availableFrom);
+    }
+  }
   if (_checkoutContainsUdka(checkout)) {
     final scheduledPickupAt = _scheduledPickupDateTimeForCheckout(checkout);
     if (scheduledPickupAt != null) {
@@ -6792,6 +6934,9 @@ BoxFit _positionImageFit(
   Map<String, dynamic> item, {
   bool compact = false,
 }) {
+  if (_categoryKeyForPosition(item) == 'frytki') {
+    return BoxFit.contain;
+  }
   if (compact && _categoryKeyForPosition(item) == 'lody') {
     return BoxFit.contain;
   }
@@ -6805,6 +6950,9 @@ Alignment _positionImageAlignment(
   Map<String, dynamic> item, {
   bool compact = false,
 }) {
+  if (_categoryKeyForPosition(item) == 'frytki') {
+    return compact ? const Alignment(0, 0.2) : Alignment.center;
+  }
   if (_categoryKeyForPosition(item) == 'lody') {
     if (compact) {
       return const Alignment(0, -0.92);
@@ -6818,6 +6966,11 @@ EdgeInsets _positionImagePadding(
   Map<String, dynamic> item, {
   bool compact = false,
 }) {
+  if (_categoryKeyForPosition(item) == 'frytki') {
+    return compact
+        ? const EdgeInsets.fromLTRB(8, 6, 8, 8)
+        : const EdgeInsets.all(6);
+  }
   if (_categoryKeyForPosition(item) == 'lody' && compact) {
     return const EdgeInsets.fromLTRB(10, 2, 10, 12);
   }

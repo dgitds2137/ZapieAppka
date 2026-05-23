@@ -156,6 +156,12 @@ class CheckoutService:
                 now=created_at,
                 positions=checkout_positions,
             )
+        available_from = self._resolve_checkout_available_from(
+            now=created_at,
+            positions=checkout_positions,
+            fulfillment_method=payload.fulfillment_method,
+            fulfillment_option_index=payload.fulfillment_option_index,
+        )
         effective_eta_minutes = self._calculate_checkout_eta_minutes(
             payload.items,
             fallback_minutes=payload.eta_minutes,
@@ -164,6 +170,7 @@ class CheckoutService:
             now=created_at,
             positions=checkout_positions,
             pickup_slot_datetime=pickup_slot_datetime,
+            available_from=available_from,
         )
         effective_address = payload.address
         pickup_location_address = self._get_delivery_origin_address().strip()
@@ -172,7 +179,16 @@ class CheckoutService:
             payload.fulfillment_option_index,
         ):
             effective_address = payload.address.model_copy(
-                update={"eta_label": self._delivery_eta_label(effective_eta_minutes)}
+                update={
+                    "eta_label": (
+                        self._opening_delay_eta_label(
+                            now=created_at,
+                            available_from=available_from,
+                        )
+                        if available_from is not None
+                        else self._delivery_eta_label(effective_eta_minutes)
+                    )
+                }
             )
         elif self._is_pickup_slot_order(
             positions=checkout_positions,
@@ -190,11 +206,17 @@ class CheckoutService:
                 }
             )
         else:
+            pickup_update = {
+                "title": pickup_location_address or payload.address.title,
+                "subtitle": payload.fulfillment_method,
+            }
+            if available_from is not None:
+                pickup_update["eta_label"] = self._opening_delay_eta_label(
+                    now=created_at,
+                    available_from=available_from,
+                )
             effective_address = payload.address.model_copy(
-                update={
-                    "title": pickup_location_address or payload.address.title,
-                    "subtitle": payload.fulfillment_method,
-                }
+                update=pickup_update
             )
         active_until = (
             self._as_naive_utc(pickup_slot_datetime)
@@ -324,6 +346,7 @@ class CheckoutService:
             awarded_points=awarded_points,
             user_points_balance=int(user.loyalty_points or 0) if user is not None else 0,
             scheduled_pickup_at=self._as_utc(pickup_slot_datetime),
+            available_from=self._as_utc(available_from),
             received_order=response_payload,
         )
 
@@ -825,7 +848,7 @@ class CheckoutService:
         self._set_string_runtime_setting(
             setting_key=self._DELIVERY_ORIGIN_ADDRESS_SETTING_KEY,
             label="Adres lokalu dla dostaw",
-            string_value=geocoded_origin["display_name"],
+            string_value=normalized_address,
             updated_by_user_id=operator.user_id,
         )
         return self.get_admin_catalog(
@@ -1048,6 +1071,10 @@ class CheckoutService:
 
         is_delivery_order = self._is_driver_order(checkout_order)
         is_ready_for_delivery_transition = verification_stage == "ready_for_delivery"
+        is_open_now = self._is_open_now(
+            open_time=self._get_opening_time(),
+            close_time=self._get_closing_time(),
+        )
 
         if normalized_role == DRIVER_ROLE and verification_stage == "in_oven":
             raise HTTPException(
@@ -1105,8 +1132,20 @@ class CheckoutService:
                 detail="Status w dostawie jest ustawiany dopiero po podjeciu zamowienia przez kierowce.",
             )
 
-        checkout_order.processing_status = processing_status
         if processing_status == CHECKOUT_ORDER_STATUS_ASSIGNED:
+            if (
+                normalized_role in {ADMIN_ROLE, EMPLOYEE_ROLE}
+                and checkout_order.assigned_to_user_id is None
+                and not is_open_now
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Lokal otwiera sie o "
+                        f"{self._get_opening_time()}. "
+                        "Zamowienie mozna podjac dopiero po otwarciu."
+                    ),
+                )
             if (
                 normalized_role == DRIVER_ROLE
                 and checkout_order.assigned_to_user_id is None
@@ -1125,15 +1164,22 @@ class CheckoutService:
                     status_code=403,
                     detail="Dostawe gotowa do wysylki moze podjac tylko kierowca.",
                 )
+            checkout_order.processing_status = processing_status
             if (
-                checkout_order.assigned_to_user_id is not None
+                normalized_role != ADMIN_ROLE
+                and checkout_order.assigned_to_user_id is not None
                 and checkout_order.assigned_to_user_id != operator.user_id
             ):
                 raise HTTPException(
                     status_code=409,
                     detail="To zamowienie zostalo juz podjete przez innego operatora.",
                 )
-            if checkout_order.assigned_to_user_id is None:
+            if (
+                checkout_order.assigned_to_user_id is not None
+                and checkout_order.assigned_to_user_id != operator.user_id
+            ):
+                pass
+            elif checkout_order.assigned_to_user_id is None:
                 checkout_order.assigned_to_user_id = operator.user_id
             if checkout_order.assigned_at is None:
                 checkout_order.assigned_at = datetime.utcnow()
@@ -1151,6 +1197,7 @@ class CheckoutService:
             else:
                 checkout_order.verification_stage = verification_stage or "assigned"
         elif processing_status == CHECKOUT_ORDER_STATUS_UNASSIGNED:
+            checkout_order.processing_status = processing_status
             if (
                 normalized_role == DRIVER_ROLE
                 and checkout_order.assigned_to_user_id is not None
@@ -1168,6 +1215,7 @@ class CheckoutService:
                 else "accepted"
             )
         if processing_status == CHECKOUT_ORDER_STATUS_COMPLETED:
+            checkout_order.processing_status = processing_status
             if (
                 normalized_role == DRIVER_ROLE
                 and checkout_order.assigned_to_user_id is not None
@@ -1642,6 +1690,7 @@ class CheckoutService:
             ),
             user_points_balance=self._get_user_loyalty_points(checkout_order.user_id),
             scheduled_pickup_at=self._scheduled_pickup_at_for_order(checkout_order),
+            available_from=self._available_from_for_order(checkout_order),
             received_order=payload,
         )
 
@@ -1987,21 +2036,33 @@ class CheckoutService:
         now: datetime,
         positions: list[MenuPositionDB] | None = None,
         pickup_slot_datetime: datetime | None = None,
+        available_from: datetime | None = None,
     ) -> int:
         if self._is_delivery_fulfillment(
             fulfillment_method,
             fulfillment_option_index,
         ):
-            return (
+            base_eta = (
                 self._BUSY_DELIVERY_ETA_MINUTES
                 if self._has_delivery_in_progress(now)
                 else self._STANDARD_DELIVERY_ETA_MINUTES
+            )
+            if available_from is None:
+                return base_eta
+            return base_eta + self._minutes_until_opening(
+                now=now,
+                available_from=available_from,
             )
 
         safe_fallback = max(1, int(fallback_minutes or 0))
         resolved_positions = positions or self._resolve_checkout_positions(items)
         if not resolved_positions:
-            return safe_fallback
+            if available_from is None:
+                return safe_fallback
+            return safe_fallback + self._minutes_until_opening(
+                now=now,
+                available_from=available_from,
+            )
 
         if self._is_pickup_slot_order(
             positions=resolved_positions,
@@ -2033,9 +2094,16 @@ class CheckoutService:
                 prep_minutes.append(setting.minutes)
 
         if not prep_minutes:
-            return safe_fallback
+            base_eta = safe_fallback
+        else:
+            base_eta = max(prep_minutes)
 
-        return max(prep_minutes)
+        if available_from is None:
+            return base_eta
+        return base_eta + self._minutes_until_opening(
+            now=now,
+            available_from=available_from,
+        )
 
     def _is_delivery_fulfillment(
         self,
@@ -2110,6 +2178,94 @@ class CheckoutService:
         now_local = self._as_pickup_local_datetime(now=now)
         next_slot = slot_datetime or self._next_pickup_slot_datetime(now=now)
         delta_seconds = max(0.0, (next_slot - now_local).total_seconds())
+        return int((delta_seconds + 59) // 60)
+
+    def _opening_delay_eta_label(
+        self,
+        *,
+        now: datetime,
+        available_from: datetime,
+    ) -> str:
+        local_now = self._as_pickup_local_datetime(now=now)
+        local_available_from = self._as_pickup_local_datetime(now=available_from)
+        if local_now.date() == local_available_from.date():
+            return f"Start po {local_available_from.strftime('%H:%M')}"
+        return f"Start {local_available_from.strftime('%d.%m %H:%M')}"
+
+    def _resolve_checkout_available_from(
+        self,
+        *,
+        now: datetime,
+        positions: list[MenuPositionDB],
+        fulfillment_method: str | None,
+        fulfillment_option_index: int | None,
+    ) -> datetime | None:
+        if self._is_pickup_slot_order(
+            positions=positions,
+            fulfillment_method=fulfillment_method,
+            fulfillment_option_index=fulfillment_option_index,
+        ):
+            return None
+        return self._available_from_if_closed(now)
+
+    def _available_from_for_order(
+        self,
+        checkout_order: CheckoutOrderDB,
+    ) -> datetime | None:
+        if self._order_oven_kind(checkout_order) == "udka":
+            return None
+        return self._available_from_if_closed(checkout_order.created_at)
+
+    def _available_from_if_closed(
+        self,
+        now: datetime,
+    ) -> datetime | None:
+        open_time = self._get_opening_time()
+        close_time = self._get_closing_time()
+        if self._is_open_now(
+            open_time=open_time,
+            close_time=close_time,
+            now=now,
+        ):
+            return None
+        return self._next_opening_datetime(now=now)
+
+    def _next_opening_datetime(
+        self,
+        *,
+        now: datetime,
+    ) -> datetime:
+        local_now = self._as_pickup_local_datetime(now=now)
+        open_time = self._get_opening_time()
+        close_time = self._get_closing_time()
+        open_minutes = self._time_to_minutes(open_time)
+        close_minutes = self._time_to_minutes(close_time)
+        current_minutes = (local_now.hour * 60) + local_now.minute
+        target_date = local_now.date()
+        if current_minutes >= close_minutes:
+            target_date = target_date + timedelta(days=1)
+        open_hour = open_minutes // 60
+        open_minute = open_minutes % 60
+        return datetime(
+            year=target_date.year,
+            month=target_date.month,
+            day=target_date.day,
+            hour=open_hour,
+            minute=open_minute,
+            second=0,
+            microsecond=0,
+            tzinfo=self._PICKUP_SLOT_TIMEZONE,
+        )
+
+    def _minutes_until_opening(
+        self,
+        *,
+        now: datetime,
+        available_from: datetime,
+    ) -> int:
+        local_now = self._as_pickup_local_datetime(now=now)
+        local_available_from = self._as_pickup_local_datetime(now=available_from)
+        delta_seconds = max(0.0, (local_available_from - local_now).total_seconds())
         return int((delta_seconds + 59) // 60)
 
     def _resolve_pickup_slot_datetime(
@@ -2977,7 +3133,7 @@ class CheckoutService:
             .options(joinedload(CheckoutOrderDB.items))
             .filter(
                 CheckoutOrderDB.status != "completed",
-                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.processing_status == CHECKOUT_ORDER_STATUS_ASSIGNED,
                 CheckoutOrderDB.active_until >= slot_utc,
                 CheckoutOrderDB.active_until < slot_window_end,
             )

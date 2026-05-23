@@ -18,6 +18,8 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   static const _heroAsset =
       'assets/images/BrancMadeImages/bannerVertical.png';
+  static const _characterAsset =
+      'assets/images/BrancMadeImages/cartoonBoyVerticalPng.png';
   static const _watermarkAsset =
       'assets/images/BrancMadeImages/LogoCorner.png';
   static const _apiBaseUrl = AppConfig.apiBaseUrl;
@@ -252,32 +254,15 @@ class _LoginScreenState extends State<LoginScreen> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.stretch,
                                     children: [
-                                      Align(
-                                        alignment: Alignment.centerLeft,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 10,
-                                            vertical: 6,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xCC1C1715),
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                            border: Border.all(
-                                              color: const Color(0x33FFD7B1),
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'Prosto z pieca',
-                                            style: theme.textTheme.labelMedium
-                                                ?.copyWith(
-                                              color: const Color(0xFFFFD8B7),
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
+                                      SizedBox(
+                                        height: compact ? 190 : 240,
+                                        child: Image.asset(
+                                          _characterAsset,
+                                          fit: BoxFit.contain,
+                                          alignment: Alignment.topCenter,
                                         ),
                                       ),
-                                      const SizedBox(height: 18),
+                                      const SizedBox(height: 6),
                                       Text(
                                         'Witaj z powrotem',
                                         textAlign: TextAlign.center,

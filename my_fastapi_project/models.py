@@ -585,6 +585,7 @@ class CheckoutVerificationOut(BaseModel):
     awarded_points: int = 0
     user_points_balance: int = 0
     scheduled_pickup_at: datetime | None = None
+    available_from: datetime | None = None
     received_order: CheckoutVerificationIn
 
 

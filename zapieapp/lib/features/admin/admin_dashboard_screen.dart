@@ -44,7 +44,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   final Set<int> _busyOrderIds = <int>{};
   final Set<String> _busyPrepTimeGroups = <String>{};
   final GlobalKey _pendingOrdersSectionKey = GlobalKey();
+  final GlobalKey _firstPendingOrderKey = GlobalKey();
   final GlobalKey _inProgressOrdersSectionKey = GlobalKey();
+  final GlobalKey _firstInProgressOrderKey = GlobalKey();
   final GlobalKey _closedOrdersSectionKey = GlobalKey();
   Timer? _refreshTimer;
 
@@ -154,7 +156,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Future<void> _openTakenOrderDetails(AdminDashboardOrder order) async {
+    final isAdmin = widget.authSession.isAdmin;
     final isDriver = widget.authSession.isDriver;
+    final canAdminManageWithoutTaking = isAdmin && !isDriver;
     List<CheckoutChatMessage> orderMessages = const [];
 
     try {
@@ -187,14 +191,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       barrierColor: const Color(0xC4000000),
       builder: (dialogContext) => _TakenOrderDetailsDialog(
         order: order,
+        isAdminView: isAdmin,
         isDriverView: isDriver,
         messages: orderMessages,
         onClose: () => Navigator.of(dialogContext).pop(),
         onMarkInOven: isDriver ||
                 !order.supportsProgressUpdates ||
                 !order.canMarkInOven ||
-                !order.assignedToMe ||
-                !order.isInProgress ||
+                (!canAdminManageWithoutTaking &&
+                    (!order.assignedToMe || !order.isInProgress)) ||
                 _busyOrderIds.contains(order.checkoutOrderId) ||
                 _operatorStageIndex(order) >= 2
             ? null
@@ -209,8 +214,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               },
         onMarkReadyForDispatch: isDriver ||
                 !_isDeliveryOrder(order) ||
-                !order.assignedToMe ||
-                !order.isInProgress ||
+                (!canAdminManageWithoutTaking &&
+                    (!order.assignedToMe || !order.isInProgress)) ||
                 _busyOrderIds.contains(order.checkoutOrderId) ||
                 _operatorStageIndex(order) >= 3
             ? null
@@ -226,8 +231,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         onMarkOnTheWay: isDriver ||
                 _isDeliveryOrder(order) ||
                 !order.supportsProgressUpdates ||
-                !order.assignedToMe ||
-                !order.isInProgress ||
+                (!canAdminManageWithoutTaking &&
+                    (!order.assignedToMe || !order.isInProgress)) ||
                 _busyOrderIds.contains(order.checkoutOrderId) ||
                 _operatorStageIndex(order) >= 3
             ? null
@@ -242,9 +247,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   verificationStage: 'on_the_way',
                 );
               },
-        onComplete: !order.assignedToMe ||
-                !order.isInProgress ||
-                _busyOrderIds.contains(order.checkoutOrderId)
+        onComplete: ((!canAdminManageWithoutTaking &&
+                    (!order.assignedToMe || !order.isInProgress)) ||
+                _busyOrderIds.contains(order.checkoutOrderId))
             ? null
             : () async {
                 Navigator.of(dialogContext).pop();
@@ -335,6 +340,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       duration: const Duration(milliseconds: 450),
       curve: Curves.easeInOutCubic,
       alignment: 0.08,
+    );
+  }
+
+  Future<void> _scrollToInProgressOrders(bool hasOrders) async {
+    await _scrollToSection(
+      hasOrders ? _firstInProgressOrderKey : _inProgressOrdersSectionKey,
+    );
+  }
+
+  Future<void> _scrollToPendingOrders(bool hasOrders) async {
+    await _scrollToSection(
+      hasOrders ? _firstPendingOrderKey : _pendingOrdersSectionKey,
     );
   }
 
@@ -443,6 +460,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     } else {
       final isEmployee = widget.authSession.isEmployee;
       final isDriver = widget.authSession.isDriver;
+      final inProgressOrders =
+          isDriver ? dashboard.myTakenOrders : dashboard.inProgressOrders;
       final statCards = [
         _StatCardData(
           icon: isDriver
@@ -450,7 +469,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               : Icons.support_agent_outlined,
           value: dashboard.pendingOrderCount.toString(),
           label: isDriver ? 'Oczekujace\ndostawy' : 'Oczekujace\nzamowienia',
-          onTap: () => _scrollToSection(_pendingOrdersSectionKey),
+          onTap: () => _scrollToPendingOrders(dashboard.pendingOrders.isNotEmpty),
         ),
         _StatCardData(
           icon: isDriver ? Icons.route_outlined : Icons.room_service_outlined,
@@ -459,7 +478,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               : dashboard.inProgressOrderCount.toString(),
           label:
               isDriver ? 'Przypisane\nDo Ciebie' : 'Zamowienia w\nrealizacji',
-          onTap: () => _scrollToSection(_inProgressOrdersSectionKey),
+          onTap: () => _scrollToInProgressOrders(inProgressOrders.isNotEmpty),
         ),
         if (!isDriver)
           _StatCardData(
@@ -503,7 +522,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           _StatCardData(
             icon: Icons.inventory_2_outlined,
             value: '',
-            label: 'Repozytorium\nproduktow',
+            label: 'Ustawienia\naplikacji',
             onTap: _openCatalogRepository,
           ),
           _StatCardData(
@@ -519,9 +538,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
         ]);
       }
-
-      final inProgressOrders =
-          isDriver ? dashboard.myTakenOrders : dashboard.inProgressOrders;
 
       body = SafeArea(
         bottom: false,
@@ -628,26 +644,44 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       : 'Nowe zamowienia pojawia sie tutaj automatycznie po zapisie checkoutu.',
                 )
               else
+                ...() {
+                  final canTakePendingOrders =
+                      isDriver || dashboard.openingHours.isOpenNow;
+                  final pendingBlockedReason =
+                      !isDriver && !dashboard.openingHours.isOpenNow
+                          ? 'Lokal otwiera sie o ${dashboard.openingHours.openTime}. Zamowienia mozna podjac dopiero po otwarciu.'
+                          : null;
+                  return <Widget>[
                 for (final order in dashboard.pendingOrders) ...[
-                  _AdminOrderCard(
-                    order: order,
-                    busy: _busyOrderIds.contains(order.checkoutOrderId),
-                    accentColor: const Color(0xFFE48A32),
-                    statusLabel: isDriver ? 'Do odbioru' : 'Niepodjete',
-                    primaryActionLabel:
-                        isDriver ? 'Podejmij dostawe' : 'Podejmij',
-                    onPrimaryAction: () => _updateOrderStatus(
-                      order,
-                      'assigned',
-                      isDriver
-                          ? 'Dostawa #${order.checkoutOrderId} zostala przypisana do Ciebie.'
-                          : 'Zamowienie #${order.checkoutOrderId} zostalo podjete.',
+                  KeyedSubtree(
+                    key: order == dashboard.pendingOrders.first
+                        ? _firstPendingOrderKey
+                        : null,
+                    child: _AdminOrderCard(
+                      order: order,
+                      busy: _busyOrderIds.contains(order.checkoutOrderId),
+                      accentColor: const Color(0xFFE48A32),
+                      statusLabel: isDriver ? 'Do odbioru' : 'Niepodjete',
+                      primaryActionLabel:
+                          isDriver ? 'Podejmij dostawe' : 'Podejmij',
+                      onPrimaryAction: canTakePendingOrders
+                          ? () => _updateOrderStatus(
+                                order,
+                                'assigned',
+                                isDriver
+                                    ? 'Dostawa #${order.checkoutOrderId} zostala przypisana do Ciebie.'
+                                    : 'Zamowienie #${order.checkoutOrderId} zostalo podjete.',
+                              )
+                          : null,
+                      primaryDisabledReason: pendingBlockedReason,
+                      onTap:
+                          isDriver ? () => _openTakenOrderDetails(order) : null,
                     ),
-                    onTap:
-                        isDriver ? () => _openTakenOrderDetails(order) : null,
                   ),
                   const SizedBox(height: 12),
                 ],
+                  ];
+                }(),
               const SizedBox(height: 10),
               KeyedSubtree(
                 key: _inProgressOrdersSectionKey,
@@ -674,40 +708,45 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       : 'Po podjeciu zlecenia pojawi sie ono w tej sekcji.',
                 )
               else
-                for (final order in inProgressOrders) ...[
-                  _AdminOrderCard(
-                    order: order,
-                    busy: _busyOrderIds.contains(order.checkoutOrderId),
-                    accentColor: const Color(0xFF63D7D2),
-                    statusLabel: _boardStatusLabelForOrder(
-                      order,
-                      isDriverView: isDriver,
-                    ),
-                    primaryActionLabel:
-                        isDriver || _isReadyForDeliveryStage(order)
-                            ? 'Szczegoly'
-                            : 'Zakoncz',
-                    secondaryActionLabel:
-                        isDriver || _isReadyForDeliveryStage(order)
-                            ? null
-                            : 'Cofnij',
-                    onPrimaryAction: () => isDriver
-                        ? _openTakenOrderDetails(order)
-                        : _isReadyForDeliveryStage(order)
-                            ? _openTakenOrderDetails(order)
-                            : _updateOrderStatus(
-                                order,
-                                'completed',
-                                'Zamowienie #${order.checkoutOrderId} zostalo zakonczone.',
+                for (var index = 0; index < inProgressOrders.length; index++) ...[
+                  KeyedSubtree(
+                    key: index == 0 ? _firstInProgressOrderKey : null,
+                    child: _AdminOrderCard(
+                      order: inProgressOrders[index],
+                      busy: _busyOrderIds.contains(
+                        inProgressOrders[index].checkoutOrderId,
+                      ),
+                      accentColor: const Color(0xFF63D7D2),
+                      statusLabel: _boardStatusLabelForOrder(
+                        inProgressOrders[index],
+                        isDriverView: isDriver,
+                      ),
+                      primaryActionLabel:
+                          isDriver || _isReadyForDeliveryStage(inProgressOrders[index])
+                              ? 'Szczegoly'
+                              : 'Zakoncz',
+                      secondaryActionLabel:
+                          isDriver || _isReadyForDeliveryStage(inProgressOrders[index])
+                              ? null
+                              : 'Cofnij',
+                      onPrimaryAction: () => isDriver
+                          ? _openTakenOrderDetails(inProgressOrders[index])
+                          : _isReadyForDeliveryStage(inProgressOrders[index])
+                              ? _openTakenOrderDetails(inProgressOrders[index])
+                              : _updateOrderStatus(
+                                  inProgressOrders[index],
+                                  'completed',
+                                  'Zamowienie #${inProgressOrders[index].checkoutOrderId} zostalo zakonczone.',
+                                ),
+                      onSecondaryAction: isDriver
+                          ? null
+                          : () => _updateOrderStatus(
+                                inProgressOrders[index],
+                                'unassigned',
+                                'Zamowienie #${inProgressOrders[index].checkoutOrderId} wrocilo do oczekujacych.',
                               ),
-                    onSecondaryAction: isDriver
-                        ? null
-                        : () => _updateOrderStatus(
-                              order,
-                              'unassigned',
-                              'Zamowienie #${order.checkoutOrderId} wrocilo do oczekujacych.',
-                            ),
-                    onTap: () => _openTakenOrderDetails(order),
+                      onTap: () => _openTakenOrderDetails(inProgressOrders[index]),
+                    ),
                   ),
                   const SizedBox(height: 12),
                 ],
@@ -1494,7 +1533,8 @@ class _AdminOrderCard extends StatelessWidget {
     required this.accentColor,
     required this.statusLabel,
     required this.primaryActionLabel,
-    required this.onPrimaryAction,
+    this.onPrimaryAction,
+    this.primaryDisabledReason,
     this.secondaryActionLabel,
     this.onSecondaryAction,
     this.onTap,
@@ -1505,7 +1545,8 @@ class _AdminOrderCard extends StatelessWidget {
   final Color accentColor;
   final String statusLabel;
   final String primaryActionLabel;
-  final VoidCallback onPrimaryAction;
+  final VoidCallback? onPrimaryAction;
+  final String? primaryDisabledReason;
   final String? secondaryActionLabel;
   final VoidCallback? onSecondaryAction;
   final VoidCallback? onTap;
@@ -1604,7 +1645,7 @@ class _AdminOrderCard extends StatelessWidget {
           const SizedBox(height: 8),
           _InfoRow(
             icon: Icons.location_on_outlined,
-            label: '${order.addressTitle} | ${order.addressSubtitle}',
+            label: _orderAddressLabel(order),
           ),
           if (order.customerEmail != null &&
               order.customerEmail!.isNotEmpty) ...[
@@ -1651,6 +1692,26 @@ class _AdminOrderCard extends StatelessWidget {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
+          if (primaryDisabledReason != null && primaryDisabledReason!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0x26FFB15D),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0x55FFB15D)),
+              ),
+              child: Text(
+                primaryDisabledReason!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFFFD7B5),
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
               ),
             ),
           ],
@@ -2059,7 +2120,7 @@ class _ClosedOrderHistoryCard extends StatelessWidget {
               const SizedBox(height: 8),
               _InfoRow(
                 icon: Icons.location_on_outlined,
-                label: '${order.addressTitle} | ${order.addressSubtitle}',
+                label: _orderAddressLabel(order),
               ),
             ],
           ),
@@ -2612,6 +2673,7 @@ class _TakenOrderSquare extends StatelessWidget {
 class _TakenOrderDetailsDialog extends StatelessWidget {
   const _TakenOrderDetailsDialog({
     required this.order,
+    required this.isAdminView,
     required this.isDriverView,
     required this.messages,
     required this.onClose,
@@ -2622,6 +2684,7 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
   });
 
   final AdminDashboardOrder order;
+  final bool isAdminView;
   final bool isDriverView;
   final List<CheckoutChatMessage> messages;
   final VoidCallback onClose;
@@ -2637,7 +2700,8 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
     final stageLabel = _operatorStageLabel(order);
     final assignedOperatorEmail = order.assignedOperatorEmail?.trim();
     final showDriverDeliveryReminder = _needsDriverDeliveryReminder(order);
-    final canManageWorkflow = order.assignedToMe && order.isInProgress;
+    final canManageWorkflow =
+        isAdminView || (order.assignedToMe && order.isInProgress);
     final hasIntermediateWorkflow = onMarkInOven != null ||
         onMarkReadyForDispatch != null ||
         onMarkOnTheWay != null;
@@ -2704,7 +2768,7 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
                   ),
                 _MetaChip(
                   icon: Icons.location_on_outlined,
-                  label: order.addressTitle,
+                  label: _compactVenueAddress(order.addressTitle),
                 ),
               ],
             ),
@@ -2736,7 +2800,7 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
                               : onMarkReadyForDispatch != null
                                   ? 'Aktualny etap: $stageLabel. Po oznaczeniu gotowosci zlecenie trafi do kolejki kierowcy.'
                                   : 'Aktualny etap: $stageLabel. Te akcje od razu aktualizuja tracker klienta.'
-                          : 'To zamowienie nie korzysta z etapow posrednich. Mozesz je tylko podjac i zakonczyc.',
+                      : 'To zamowienie nie korzysta z etapow posrednich. Mozesz je tylko podjac i zakonczyc.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: const Color(0xFFD6C6BA),
                             height: 1.35,
@@ -2854,7 +2918,9 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
                 child: Text(
                   order.assignedToMe
                       ? 'To zamowienie jest przypisane do Ciebie.'
-                      : 'To zamowienie prowadzi $assignedOperatorEmail. Szczegoly sa dostepne tylko do podgladu.',
+                      : isAdminView
+                          ? 'To zamowienie prowadzi $assignedOperatorEmail. Jako administrator mozesz mimo to zaktualizowac jego status.'
+                          : 'To zamowienie prowadzi $assignedOperatorEmail. Szczegoly sa dostepne tylko do podgladu.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: const Color(0xFFD6C6BA),
                         height: 1.35,
@@ -3871,7 +3937,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
     final nextAddress = await _showTextEditorDialog(
       title: 'Adres lokalu dla dostaw',
       hintText: 'np. ul. Marszalkowska 1, 00-001 Warszawa',
-      initialValue: currentAddress,
+      initialValue: _compactVenueAddress(currentAddress),
       maxLines: 4,
     );
     if (nextAddress == null) {
@@ -3931,7 +3997,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'Nie udalo sie pobrac repozytorium produktow.',
+              'Nie udalo sie pobrac ustawien aplikacji.',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: const Color(0xFFF8EEE6),
                     fontWeight: FontWeight.w800,
@@ -3958,6 +4024,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
       final addons = catalog?.addons ?? const <AdminCatalogAddon>[];
       body = ListView(
         physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 12),
         children: [
           _CatalogSectionHeader(
             title: 'Ustawienia dostawy',
@@ -3988,7 +4055,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
           _CatalogSettingTile(
             title: 'Adres lokalu dla dostaw',
             valueLabel: deliveryOriginAddress.trim().isNotEmpty
-                ? deliveryOriginAddress
+                ? _compactVenueAddress(deliveryOriginAddress)
                 : 'Nie ustawiono',
             subtitle:
                 'Ten adres jest geokodowany i stanowi punkt odniesienia dla promienia dostawy.',
@@ -4011,15 +4078,23 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
                 'Dezaktywowany produkt nie pojawi sie juz na dashboardzie klienta.',
           ),
           const SizedBox(height: 12),
-          for (final position in positions) ...[
-            _CatalogPositionTile(
-              position: position,
-              busy: _busyItems.contains('position:${position.positionId}'),
-              onToggle: () => _togglePosition(position),
-              onEditPrice: () => _editPositionPrice(position),
-            ),
-            const SizedBox(height: 10),
-          ],
+          if (positions.isEmpty)
+            const _CatalogEmptyState(
+              icon: Icons.inventory_2_outlined,
+              title: 'Brak produktow w repozytorium',
+              subtitle:
+                  'Backend nie zwrocil jeszcze zadnych pozycji menu do edycji.',
+            )
+          else
+            for (final position in positions) ...[
+              _CatalogPositionTile(
+                position: position,
+                busy: _busyItems.contains('position:${position.positionId}'),
+                onToggle: () => _togglePosition(position),
+                onEditPrice: () => _editPositionPrice(position),
+              ),
+              const SizedBox(height: 10),
+            ],
           const SizedBox(height: 8),
           _CatalogSectionHeader(
             title: 'Dodatki',
@@ -4027,15 +4102,23 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
                 'Dezaktywowany dodatek zniknie z personalizacji pozycji po stronie klienta.',
           ),
           const SizedBox(height: 12),
-          for (final addon in addons) ...[
-            _CatalogAddonTile(
-              addon: addon,
-              busy: _busyItems.contains('addon:${addon.addonId}'),
-              onToggle: () => _toggleAddon(addon),
-              onEditPrice: () => _editAddonPrice(addon),
-            ),
-            const SizedBox(height: 10),
-          ],
+          if (addons.isEmpty)
+            const _CatalogEmptyState(
+              icon: Icons.add_circle_outline_rounded,
+              title: 'Brak dodatkow',
+              subtitle:
+                  'Backend nie zwrocil jeszcze zadnych dodatkow do edycji.',
+            )
+          else
+            for (final addon in addons) ...[
+              _CatalogAddonTile(
+                addon: addon,
+                busy: _busyItems.contains('addon:${addon.addonId}'),
+                onToggle: () => _toggleAddon(addon),
+                onEditPrice: () => _editAddonPrice(addon),
+              ),
+              const SizedBox(height: 10),
+            ],
         ],
       );
     }
@@ -4065,7 +4148,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Repozytorium produktow',
+                    'Ustawienia aplikacji',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           color: const Color(0xFFF8EEE6),
                           fontWeight: FontWeight.w900,
@@ -4107,7 +4190,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Repozytorium produktow',
+                          'Ustawienia aplikacji',
                           style: Theme.of(context)
                               .textTheme
                               .headlineSmall
@@ -4141,10 +4224,18 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
               ),
             const SizedBox(height: 16),
             Expanded(
-              child: ScrollConfiguration(
-                behavior:
-                    const MaterialScrollBehavior().copyWith(scrollbars: false),
-                child: body,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: const Color(0x521C1A19),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0x18FFFFFF)),
+                ),
+                padding: const EdgeInsets.all(12),
+                child: ScrollConfiguration(
+                  behavior: const MaterialScrollBehavior()
+                      .copyWith(scrollbars: false),
+                  child: body,
+                ),
               ),
             ),
           ],
@@ -4184,6 +4275,55 @@ class _CatalogSectionHeader extends StatelessWidget {
               ),
         ),
       ],
+    );
+  }
+}
+
+class _CatalogEmptyState extends StatelessWidget {
+  const _CatalogEmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x1FFFFFFF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: const Color(0xFFE98B38), size: 22),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              color: const Color(0xFFF7EEE6),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFFD4C4B8),
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -5236,6 +5376,77 @@ Color _employeeBadgeColor(AdminDashboardActiveEmployee employee) {
   final seed = employee.userId == 0 ? employee.email.hashCode : employee.userId;
   final hue = (seed.abs() * 37) % 360;
   return HSLColor.fromAHSL(1, hue.toDouble(), 0.58, 0.46).toColor();
+}
+
+String _orderAddressLabel(AdminDashboardOrder order) {
+  final compact = _compactVenueAddress(order.addressTitle);
+  final subtitle = order.addressSubtitle.trim();
+  if (subtitle.isEmpty) {
+    return compact;
+  }
+  return '$compact | $subtitle';
+}
+
+String _compactVenueAddress(String raw) {
+  final normalized = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+  if (normalized.isEmpty) {
+    return '';
+  }
+
+  final postalCode =
+      RegExp(r'\b\d{2}-\d{3}\b').firstMatch(normalized)?.group(0);
+  final segments = normalized
+      .split(',')
+      .map((segment) => segment.trim())
+      .where((segment) => segment.isNotEmpty)
+      .toList(growable: false);
+
+  final houseNumberPattern = RegExp(r'\b\d+[A-Za-z]?(?:/\d+[A-Za-z]?)?\b');
+  String? streetWithNumber;
+
+  for (var index = 0; index < segments.length; index++) {
+    final segment = segments[index];
+    if (postalCode != null && segment.contains(postalCode)) {
+      continue;
+    }
+    final hasNumber = houseNumberPattern.hasMatch(segment);
+    final hasLetters = RegExp(r'[A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż]').hasMatch(segment);
+
+    if (hasLetters && hasNumber) {
+      streetWithNumber = segment;
+      break;
+    }
+
+    if (hasNumber) {
+      final previous = index > 0 ? segments[index - 1] : '';
+      final next = index + 1 < segments.length ? segments[index + 1] : '';
+      final candidateStreet = [
+        previous,
+        next,
+      ].firstWhere(
+        (candidate) =>
+            candidate.isNotEmpty &&
+            !houseNumberPattern.hasMatch(candidate) &&
+            !RegExp(r'\bpolska\b', caseSensitive: false).hasMatch(candidate) &&
+            RegExp(r'[A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż]').hasMatch(candidate),
+        orElse: () => '',
+      );
+      if (candidateStreet.isNotEmpty) {
+        final number = houseNumberPattern.firstMatch(segment)?.group(0) ?? '';
+        streetWithNumber = '$candidateStreet $number'.trim();
+        break;
+      }
+    }
+  }
+
+  if (streetWithNumber == null || streetWithNumber.isEmpty) {
+    streetWithNumber = segments.isNotEmpty ? segments.first : normalized;
+  }
+
+  if (postalCode != null && postalCode.isNotEmpty) {
+    return '$streetWithNumber, $postalCode';
+  }
+  return streetWithNumber;
 }
 
 Color _staffPresenceBadgeColor(AdminStaffPresencePerson person) {

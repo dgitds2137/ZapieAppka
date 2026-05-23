@@ -297,6 +297,17 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     });
   }
 
+  bool _isWaitingForOpening(CheckoutVerificationResponse checkout) {
+    if (_isUdkaCheckout(checkout)) {
+      return false;
+    }
+    final availableFrom = checkout.availableFrom?.toLocal();
+    if (availableFrom == null) {
+      return false;
+    }
+    return DateTime.now().toLocal().isBefore(availableFrom);
+  }
+
   bool _isSameCalendarDay(DateTime left, DateTime right) {
     return left.year == right.year &&
         left.month == right.month &&
@@ -309,7 +320,46 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     return '$day.$month';
   }
 
+  String _formatOpeningDelayCompact(DateTime availableFrom) {
+    final localAvailableFrom = availableFrom.toLocal();
+    final now = DateTime.now().toLocal();
+    final hour = localAvailableFrom.hour.toString().padLeft(2, '0');
+    final minute = localAvailableFrom.minute.toString().padLeft(2, '0');
+    if (_isSameCalendarDay(localAvailableFrom, now)) {
+      return 'po $hour:$minute';
+    }
+    return 'od ${_pickupDateLabel(localAvailableFrom)} $hour:$minute';
+  }
+
+  String _formatOpeningDelayDetailed(DateTime availableFrom) {
+    final localAvailableFrom = availableFrom.toLocal();
+    final now = DateTime.now().toLocal();
+    final hour = localAvailableFrom.hour.toString().padLeft(2, '0');
+    final minute = localAvailableFrom.minute.toString().padLeft(2, '0');
+    if (_isSameCalendarDay(localAvailableFrom, now)) {
+      return 'Start po $hour:$minute';
+    }
+    return 'Start ${_pickupDateLabel(localAvailableFrom)} $hour:$minute';
+  }
+
+  String _formatOpeningDelaySummary(DateTime availableFrom) {
+    final localAvailableFrom = availableFrom.toLocal();
+    final now = DateTime.now().toLocal();
+    final hour = localAvailableFrom.hour.toString().padLeft(2, '0');
+    final minute = localAvailableFrom.minute.toString().padLeft(2, '0');
+    if (_isSameCalendarDay(localAvailableFrom, now)) {
+      return 'po $hour:$minute';
+    }
+    return '${_pickupDateLabel(localAvailableFrom)} $hour:$minute';
+  }
+
   String _scheduledPickupHeroLabel(CheckoutVerificationResponse checkout) {
+    if (_isWaitingForOpening(checkout)) {
+      final availableFrom = checkout.availableFrom;
+      if (availableFrom != null) {
+        return _formatOpeningDelayCompact(availableFrom);
+      }
+    }
     final scheduledPickupAt = checkout.scheduledPickupAt ?? checkout.activeUntil;
     if (!_isUdkaCheckout(checkout) || scheduledPickupAt == null) {
       return '${checkout.receivedOrder.etaMinutes} min';
@@ -393,6 +443,9 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
   }
 
   String _trackingHeadlineForCheckout(CheckoutVerificationResponse checkout) {
+    if (_isWaitingForOpening(checkout)) {
+      return 'Realizacja wystartuje po otwarciu';
+    }
     final isDelivery = _isDeliveryCheckout(checkout);
     final supportsOven = _supportsOvenStageForCheckout(checkout);
     switch (_activeStageIndexForCheckout(checkout)) {
@@ -419,6 +472,13 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
   }
 
   String _trackingMessageForCheckout(CheckoutVerificationResponse checkout) {
+    if (_isWaitingForOpening(checkout)) {
+      final availableFrom = checkout.availableFrom;
+      if (availableFrom != null) {
+        return 'Lokal jest jeszcze zamkniety. Realizacja wystartuje ${_formatOpeningDelaySummary(availableFrom)}.';
+      }
+      return 'Lokal jest jeszcze zamkniety. Realizacja wystartuje po otwarciu.';
+    }
     final isDelivery = _isDeliveryCheckout(checkout);
     final supportsOven = _supportsOvenStageForCheckout(checkout);
     switch (_activeStageIndexForCheckout(checkout)) {
@@ -466,6 +526,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     final request = order.receivedOrder;
     final itemCount = request.items.length;
     final leadItem = itemCount == 0 ? 'Brak pozycji' : request.items.first.name;
+    final waitingForOpening = _isWaitingForOpening(order);
 
     return Scaffold(
       extendBody: true,
@@ -559,6 +620,12 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (waitingForOpening && order.availableFrom != null) ...[
+                      const SizedBox(height: 12),
+                      _TrackingInfoBadge(
+                        label: _formatOpeningDelayDetailed(order.availableFrom!),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     Row(
                       children: [
@@ -869,6 +936,52 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                         ],
                       ),
                     ],
+                    const SizedBox(height: 12),
+                    const Divider(color: Color(0x1FFFFFFF), height: 1),
+                    const SizedBox(height: 12),
+                    if (request.subtotalAmount != null) ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Suma przed rabatem',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFFD3C1B5),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'PLN ${_fmt(request.subtotalAmount!)}',
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              color: const Color(0xFFF6E7DB),
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Do zaplaty',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: const Color(0xFFF8EEE6),
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          'PLN ${_fmt(request.totalAmount)}',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: const Color(0xFFFFB66A),
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1116,6 +1229,31 @@ class _StageDot extends StatelessWidget {
               ),
             )
           : null,
+    );
+  }
+}
+
+class _TrackingInfoBadge extends StatelessWidget {
+  const _TrackingInfoBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0x24FFFFFF),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x34FFFFFF)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: const Color(0xFFFFF4EB),
+              fontWeight: FontWeight.w800,
+            ),
+      ),
     );
   }
 }
