@@ -19,7 +19,9 @@ class _LoginScreenState extends State<LoginScreen> {
   static const _heroAsset =
       'assets/images/BrancMadeImages/bannerVertical.png';
   static const _characterAsset =
-      'assets/images/BrancMadeImages/cartoonBoyVerticalPng.png';
+      'assets/images/BrancMadeImages/cartoonBoyNoBanner.png';
+  static const _characterBannerAsset =
+      'assets/images/BrancMadeImages/zapiekankiBanner.png';
   static const _watermarkAsset =
       'assets/images/BrancMadeImages/LogoCorner.png';
   static const _apiBaseUrl = AppConfig.apiBaseUrl;
@@ -255,11 +257,26 @@ class _LoginScreenState extends State<LoginScreen> {
                                         CrossAxisAlignment.stretch,
                                     children: [
                                       SizedBox(
-                                        height: compact ? 190 : 240,
-                                        child: Image.asset(
-                                          _characterAsset,
-                                          fit: BoxFit.contain,
-                                          alignment: Alignment.topCenter,
+                                        height: compact ? 248 : 322,
+                                        child: Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.start,
+                                          children: [
+                                            Image.asset(
+                                              _characterBannerAsset,
+                                              height: compact ? 104 : 136,
+                                              fit: BoxFit.contain,
+                                            ),
+                                            const SizedBox(height: 0.6),
+                                            Expanded(
+                                              child: Image.asset(
+                                                _characterAsset,
+                                                fit: BoxFit.contain,
+                                                alignment:
+                                                    Alignment.topCenter,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                       const SizedBox(height: 6),
