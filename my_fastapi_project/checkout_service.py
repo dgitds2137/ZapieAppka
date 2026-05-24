@@ -21,6 +21,7 @@ from models import (
     DRIVER_ROLE,
     EMPLOYEE_ROLE,
     CHECKOUT_ORDER_STATUS_ASSIGNED,
+    CHECKOUT_ORDER_STATUS_CANCELLED,
     CHECKOUT_ORDER_STATUS_COMPLETED,
     CHECKOUT_ORDER_STATUS_UNASSIGNED,
     AppRuntimeSettingDB,
@@ -55,6 +56,7 @@ from models import (
     CheckoutPickupSlotEstimateIn,
     CheckoutPickupLocationOut,
     CheckoutPickupSlotEstimateOut,
+    CheckoutCancelIn,
     CheckoutReceiptConfirmationIn,
     CheckoutAddressPayload,
     DeliveryAddressValidationIn,
@@ -427,10 +429,12 @@ class CheckoutService:
             )
             .filter(
                 or_(
-                    CheckoutOrderDB.status != "completed",
-                    CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
-                ),
-            )
+                CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.status != CHECKOUT_ORDER_STATUS_CANCELLED,
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_CANCELLED,
+            ),
+        )
             .order_by(CheckoutOrderDB.created_at.desc())
             .all()
         )
@@ -1471,6 +1475,82 @@ class CheckoutService:
             message="Dodano dodatkowe 10 minut oczekiwania i przekazano zgloszenie do obslugi.",
         )
 
+    def cancel_active_checkout(
+        self,
+        payload: CheckoutCancelIn,
+    ) -> CheckoutVerificationOut:
+        user_id = self._resolve_user_id(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Brak aktywnej sesji zamowienia.")
+
+        now = datetime.utcnow()
+        self._refresh_checkout_states(user_id=user_id, now=now)
+        checkout_order = self._get_current_checkout_order(user_id=user_id, now=now)
+
+        if checkout_order is None:
+            raise HTTPException(status_code=404, detail="Brak aktywnego zamowienia do anulowania.")
+
+        if (
+            payload.verification_id is not None
+            and payload.verification_id.strip()
+            and checkout_order.verification_id != payload.verification_id.strip()
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Aktywne zamowienie nie zgadza sie z prosba anulowania.",
+            )
+
+        if checkout_order.processing_status != CHECKOUT_ORDER_STATUS_UNASSIGNED:
+            raise HTTPException(
+                status_code=409,
+                detail="Nie mozna anulowac zamowienia po przejeciu przez obsluge.",
+            )
+
+        if checkout_order.status != "active":
+            raise HTTPException(
+                status_code=409,
+                detail="To zamowienie nie jest juz w stanie, ktory pozwala na anulowanie.",
+            )
+
+        user = (
+            self.db.query(UserDB).filter(UserDB.user_id == checkout_order.user_id).first()
+            if checkout_order.user_id is not None
+            else None
+        )
+        awarded_points = loyalty_points_for_order_total(
+            float(checkout_order.subtotal_amount or 0),
+        )
+
+        try:
+            if user is not None:
+                user.loyalty_points = max(
+                    0,
+                    int(user.loyalty_points or 0)
+                    + int(checkout_order.redeemed_points or 0)
+                    - awarded_points,
+                )
+            checkout_order.status = CHECKOUT_ORDER_STATUS_CANCELLED
+            checkout_order.processing_status = CHECKOUT_ORDER_STATUS_CANCELLED
+            checkout_order.verification_stage = CHECKOUT_ORDER_STATUS_CANCELLED
+            checkout_order.active_until = now
+            self.db.commit()
+            self.db.refresh(checkout_order)
+        except SQLAlchemyError as exc:
+            self.db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail="Nie udalo sie anulowac zamowienia.",
+            ) from exc
+
+        return self._build_response(
+            checkout_order,
+            now=now,
+            message="Zamowienie zostalo anulowane przed przejeciem przez obsluge.",
+        )
+
     def get_order_messages(
         self,
         checkout_order_id: int,
@@ -2138,7 +2218,9 @@ class CheckoutService:
             self.db.query(CheckoutOrderDB.checkout_order_id)
             .filter(
                 CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.status != CHECKOUT_ORDER_STATUS_CANCELLED,
                 CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_CANCELLED,
                 CheckoutOrderDB.verification_stage.in_(
                     self._DELIVERY_IN_PROGRESS_STAGES
                 ),
@@ -2904,7 +2986,9 @@ class CheckoutService:
     def _is_order_closed(self, checkout_order: CheckoutOrderDB) -> bool:
         return (
             checkout_order.status == "completed"
+            or checkout_order.status == CHECKOUT_ORDER_STATUS_CANCELLED
             or checkout_order.processing_status == CHECKOUT_ORDER_STATUS_COMPLETED
+            or checkout_order.processing_status == CHECKOUT_ORDER_STATUS_CANCELLED
         )
 
     def _build_admin_order(
@@ -3103,7 +3187,9 @@ class CheckoutService:
             .options(joinedload(CheckoutOrderDB.items))
             .filter(
                 CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.status != CHECKOUT_ORDER_STATUS_CANCELLED,
                 CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_CANCELLED,
                 CheckoutOrderDB.verification_stage.in_(("in_oven", "oven")),
             )
         )
@@ -3133,6 +3219,7 @@ class CheckoutService:
             .options(joinedload(CheckoutOrderDB.items))
             .filter(
                 CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.status != CHECKOUT_ORDER_STATUS_CANCELLED,
                 CheckoutOrderDB.processing_status == CHECKOUT_ORDER_STATUS_ASSIGNED,
                 CheckoutOrderDB.active_until >= slot_utc,
                 CheckoutOrderDB.active_until < slot_window_end,

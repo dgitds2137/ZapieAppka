@@ -86,6 +86,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
   late CheckoutVerificationResponse _currentCheckout;
   Timer? _refreshTimer;
   bool _isSubmittingReceiptConfirmation = false;
+  bool _isCancellingOrder = false;
 
   @override
   void initState() {
@@ -217,6 +218,106 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
       if (mounted) {
         setState(() {
           _isSubmittingReceiptConfirmation = false;
+        });
+      }
+    }
+  }
+
+  bool _canCancelOrder(CheckoutVerificationResponse checkout) {
+    if (widget.isHistoryView) {
+      return false;
+    }
+    return checkout.status.trim().toLowerCase() == 'active' &&
+        checkout.processingStatus.trim().toLowerCase() == 'unassigned' &&
+        !checkout.requiresReceiptConfirmation;
+  }
+
+  Future<void> _cancelOrder() async {
+    if (_isCancellingOrder || !_canCancelOrder(_currentCheckout)) {
+      return;
+    }
+
+    final shouldCancel = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: const Color(0xFF181311),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              'Anulowac zamowienie?',
+              style: TextStyle(
+                color: Color(0xFFF8EEE7),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            content: const Text(
+              'Mozesz anulowac zamowienie tylko zanim przejmie je obsluga. Ta operacja cofnie aktywne sledzenie tego zamowienia.',
+              style: TextStyle(
+                color: Color(0xFFD8C7BA),
+                height: 1.4,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('Wroc'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB6422E),
+                ),
+                child: const Text('Anuluj zamowienie'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!shouldCancel || !mounted) {
+      return;
+    }
+
+    setState(() {
+      _isCancellingOrder = true;
+    });
+
+    try {
+      final checkout = await widget.checkoutRepository.cancelActiveCheckout(
+        CheckoutCancelRequest(
+          verificationId: _currentCheckout.verificationId,
+          sessionToken: widget.authSession.sessionToken,
+          userEmail: widget.authSession.email,
+        ),
+      );
+      await SessionPersistence.saveActiveCheckout(null);
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(checkout.message)),
+      );
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        AppRoutes.dashboard,
+        (route) => false,
+        arguments: <String, dynamic>{
+          ...widget.authSession.toRouteArgs(),
+        },
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCancellingOrder = false;
         });
       }
     }
@@ -360,7 +461,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
         return _formatOpeningDelayCompact(availableFrom);
       }
     }
-    final scheduledPickupAt = checkout.scheduledPickupAt ?? checkout.activeUntil;
+    final scheduledPickupAt =
+        checkout.scheduledPickupAt ?? checkout.activeUntil;
     if (!_isUdkaCheckout(checkout) || scheduledPickupAt == null) {
       return '${checkout.receivedOrder.etaMinutes} min';
     }
@@ -527,6 +629,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     final itemCount = request.items.length;
     final leadItem = itemCount == 0 ? 'Brak pozycji' : request.items.first.name;
     final waitingForOpening = _isWaitingForOpening(order);
+    final canCancelOrder = _canCancelOrder(order);
 
     return Scaffold(
       extendBody: true,
@@ -623,7 +726,8 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                     if (waitingForOpening && order.availableFrom != null) ...[
                       const SizedBox(height: 12),
                       _TrackingInfoBadge(
-                        label: _formatOpeningDelayDetailed(order.availableFrom!),
+                        label:
+                            _formatOpeningDelayDetailed(order.availableFrom!),
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -885,6 +989,62 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
                                   style: TextStyle(fontWeight: FontWeight.w800),
                                 ),
                         ),
+                    ],
+                  ),
+                ),
+              ],
+              if (canCancelOrder) ...[
+                const SizedBox(height: 16),
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xEE100E0D),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: const Color(0x28FF8C73)),
+                  ),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Chcesz wycofac zamowienie?',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: const Color(0xFFF7EEE6),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Dopoki zamowienie ma status oczekujacy i nie zostalo przejete przez administratora ani pracownika, mozesz je anulowac samodzielnie.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFFD3C1B5),
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: _isCancellingOrder ? null : _cancelOrder,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(50),
+                          backgroundColor: const Color(0xFFB6422E),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: _isCancellingOrder
+                            ? const SizedBox(
+                                height: 18,
+                                width: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Text(
+                                'Anuluj zamowienie',
+                                style: TextStyle(fontWeight: FontWeight.w800),
+                              ),
+                      ),
                     ],
                   ),
                 ),

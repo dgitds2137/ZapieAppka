@@ -418,7 +418,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final resolvedCartEntries = _resolvedCartEntries(positions);
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-      builder: (_) => _CategoryProductsScreen(
+        builder: (_) => _CategoryProductsScreen(
           categories: _buildDashboardCategories(positions),
           initialCategoryKey: category.key,
           initialCartEntries: resolvedCartEntries,
@@ -2221,7 +2221,8 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     if (_cartContainsUdka()) {
       return _udkaPickupEstimate?.etaMinutes ?? _udkaPickupEtaMinutes();
     }
-    final baseMinutes = _usesDeliveryBuffer() ? _deliveryEtaMinutes : prepMinutes;
+    final baseMinutes =
+        _usesDeliveryBuffer() ? _deliveryEtaMinutes : prepMinutes;
     final openingDelay = _currentOpeningDelay();
     if (openingDelay == null) {
       return baseMinutes;
@@ -3635,9 +3636,13 @@ class _CartPersonalizationScreenState
     final description = _description(widget.entry.position);
     final isZapiekanka =
         _supportsZapiekankaServingOptions(widget.entry.position);
+    final addonSections = _buildPersonalizationSections(
+      _options,
+      widget.entry.position,
+    );
     final selectedExtras = _personalizationChips(_customization);
     final extrasPriceTotal = _extrasPriceTotal(_customization);
-    final hasAddonOptions = _options.isNotEmpty;
+    final hasAddonOptions = addonSections.isNotEmpty;
 
     Widget addonsContent;
     if (_isLoadingOptions) {
@@ -3695,26 +3700,44 @@ class _CartPersonalizationScreenState
         ),
       );
     } else {
-      addonsContent = SizedBox(
-        height: 220,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          physics: const BouncingScrollPhysics(),
-          itemCount: _options.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 12),
-          itemBuilder: (context, index) {
-            final option = _options[index];
-            return _CustomizationOptionTile(
-              label: option.label,
-              subtitle: option.subtitle,
-              assetPath: option.assetPath,
-              emoji: option.emoji,
-              count: _customization.extras[option.label] ?? 0,
-              onDecrement: () => _changeExtra(option.label, -1),
-              onIncrement: () => _changeExtra(option.label, 1),
-            );
-          },
-        ),
+      addonsContent = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var sectionIndex = 0;
+              sectionIndex < addonSections.length;
+              sectionIndex++) ...[
+            if (sectionIndex > 0) const SizedBox(height: 18),
+            Text(
+              addonSections[sectionIndex].title,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: const Color(0xFFF7EBDD),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              height: 220,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                itemCount: addonSections[sectionIndex].options.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final option = addonSections[sectionIndex].options[index];
+                  return _CustomizationOptionTile(
+                    label: option.label,
+                    subtitle: option.subtitle,
+                    assetPath: option.assetPath,
+                    emoji: option.emoji,
+                    count: _customization.extras[option.label] ?? 0,
+                    onDecrement: () => _changeExtra(option.label, -1),
+                    onIncrement: () => _changeExtra(option.label, 1),
+                  );
+                },
+              ),
+            ),
+          ],
+        ],
       );
     }
 
@@ -3767,8 +3790,8 @@ class _CartPersonalizationScreenState
                                 photoUrl: _photo(widget.entry.position),
                                 title: title,
                                 fit: _positionImageFit(widget.entry.position),
-                                alignment:
-                                    _positionImageAlignment(widget.entry.position),
+                                alignment: _positionImageAlignment(
+                                    widget.entry.position),
                               ),
                             ),
                           ),
@@ -5682,8 +5705,9 @@ class _PositionImage extends StatelessWidget {
                 math.min(constraints.maxWidth, constraints.maxHeight) * 0.42,
               )
             : 26.0;
-        final showTitle =
-            !isCompact && constraints.maxHeight >= 96 && constraints.maxWidth >= 88;
+        final showTitle = !isCompact &&
+            constraints.maxHeight >= 96 &&
+            constraints.maxWidth >= 88;
 
         return Center(
           child: Padding(
@@ -5706,10 +5730,11 @@ class _PositionImage extends StatelessWidget {
                       child: Text(
                         title,
                         textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                              color: const Color(0xFFFFF0E6),
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.labelMedium?.copyWith(
+                                  color: const Color(0xFFFFF0E6),
+                                  fontWeight: FontWeight.w700,
+                                ),
                       ),
                     ),
                   ),
@@ -5917,6 +5942,7 @@ class _PersonalizationOption {
     required this.subtitle,
     required this.emoji,
     required this.price,
+    this.groupKey = 'sauce',
     this.defaultQuantity = 0,
     this.assetPath,
   });
@@ -5925,11 +5951,18 @@ class _PersonalizationOption {
   final String subtitle;
   final String emoji;
   final double price;
+  final String groupKey;
   final int defaultQuantity;
   final String? assetPath;
 }
 
 const _knownPersonalizationOptions = <_PersonalizationOption>[
+  _PersonalizationOption(
+    label: 'Bulka',
+    subtitle: 'Miekka bulka do zestawu z udkami albo na dokonczenie sosu.',
+    emoji: '🍞',
+    price: 3,
+  ),
   _PersonalizationOption(
     label: 'Pomidory',
     subtitle: 'Swieze plasterki pomidora do klasycznej zapiekanki.',
@@ -5958,6 +5991,31 @@ const _knownPersonalizationOptions = <_PersonalizationOption>[
     assetPath: 'assets/images/bbqSauce.png',
   ),
   _PersonalizationOption(
+    label: 'Sos czosnkowy',
+    subtitle:
+        'Lagodny, kremowy sos czosnkowy do frytek, udek i cieplejszych pozycji.',
+    emoji: '🧄',
+    price: 2.5,
+  ),
+  _PersonalizationOption(
+    label: 'Sos miodowo-musztardowy',
+    subtitle: 'Slodko-wytrawny sos, ktory dobrze siada z pieczonym kurczakiem.',
+    emoji: '🍯',
+    price: 2.5,
+  ),
+  _PersonalizationOption(
+    label: 'Sos buffalo',
+    subtitle: 'Lekko pikantny sos dla bardziej wyrazistego profilu udek.',
+    emoji: '🌶️',
+    price: 2.5,
+  ),
+  _PersonalizationOption(
+    label: 'Pikle',
+    subtitle: 'Kwaskowe pikle do przelamania ciezszego smaku kurczaka.',
+    emoji: '🥒',
+    price: 3,
+  ),
+  _PersonalizationOption(
     label: 'Surowka kolorowa',
     subtitle: 'Swieza salatka jako lekki, chrupiacy kontrast.',
     emoji: '🥗',
@@ -5980,9 +6038,203 @@ const _knownPersonalizationOptions = <_PersonalizationOption>[
   ),
 ];
 
+class _PersonalizationSection {
+  const _PersonalizationSection({
+    required this.groupKey,
+    required this.title,
+    required this.options,
+  });
+
+  final String groupKey;
+  final String title;
+  final List<_PersonalizationOption> options;
+}
+
+const _extendedPersonalizationOptions = <_PersonalizationOption>[
+  _PersonalizationOption(
+    label: 'Bulka',
+    subtitle: 'Miekka bulka do zestawu z udkami albo na dokonczenie sosu.',
+    emoji: '🍞',
+    price: 3,
+    groupKey: 'side',
+  ),
+  _PersonalizationOption(
+    label: 'Pomidory',
+    subtitle: 'Swieze plasterki pomidora do klasycznej zapiekanki.',
+    emoji: '🍅',
+    price: 3,
+    groupKey: 'cold',
+    assetPath: 'assets/images/tomatos.png',
+  ),
+  _PersonalizationOption(
+    label: 'Pomidory cherry',
+    subtitle: 'Swieze pomidory cherry do odswiezenia zapiekanki.',
+    emoji: '🍅',
+    price: 3,
+    groupKey: 'cold',
+    assetPath: 'assets/images/tomatos.png',
+  ),
+  _PersonalizationOption(
+    label: 'Ogorek kiszony',
+    subtitle: 'Kwaskowy ogorek kiszony do przelamania sera i miesa.',
+    emoji: '🥒',
+    price: 3,
+    groupKey: 'cold',
+  ),
+  _PersonalizationOption(
+    label: 'Zurawina',
+    subtitle: 'Slodko-kwasna zurawina do bardziej kontrastowego smaku.',
+    emoji: '🫐',
+    price: 3,
+    groupKey: 'cold',
+  ),
+  _PersonalizationOption(
+    label: 'Oliwki',
+    subtitle: 'Lekko slone oliwki, ktore podbijaja smak sera i pieczywa.',
+    emoji: '🫒',
+    price: 3,
+    groupKey: 'cold',
+  ),
+  _PersonalizationOption(
+    label: 'Prazona cebulka',
+    subtitle: 'Chrupiaca cebulka dla dodatkowej tekstury i aromatu.',
+    emoji: '🧅',
+    price: 2.5,
+    groupKey: 'cold',
+    assetPath: 'assets/images/crispyOnions.png',
+  ),
+  _PersonalizationOption(
+    label: 'Salami',
+    subtitle: 'Wyraziste salami zapiekane razem z pozycja.',
+    emoji: '🥓',
+    price: 4,
+    groupKey: 'hot',
+  ),
+  _PersonalizationOption(
+    label: 'Szynka',
+    subtitle: 'Klasyczna szynka jako cieply dodatek do zapiekanki.',
+    emoji: '🍖',
+    price: 4,
+    groupKey: 'hot',
+  ),
+  _PersonalizationOption(
+    label: 'Kielbasa',
+    subtitle: 'Pieczona kielbasa dla bardziej konkretnego, miesnego profilu.',
+    emoji: '🌭',
+    price: 4,
+    groupKey: 'hot',
+  ),
+  _PersonalizationOption(
+    label: 'Ananas',
+    subtitle: 'Slodki ananas do bardziej kontrastowej kompozycji.',
+    emoji: '🍍',
+    price: 3,
+    groupKey: 'hot',
+  ),
+  _PersonalizationOption(
+    label: 'Cebula czerwona',
+    subtitle: 'Cienko krojona czerwona cebula, ktora dobrze siada na cieplo.',
+    emoji: '🧅',
+    price: 3,
+    groupKey: 'hot',
+  ),
+  _PersonalizationOption(
+    label: 'Sos BBQ',
+    subtitle: 'Dymny sos do mocniejszego, bardziej grillowego profilu.',
+    emoji: '🍖',
+    price: 2,
+    groupKey: 'sauce',
+    assetPath: 'assets/images/bbqSauce.png',
+  ),
+  _PersonalizationOption(
+    label: 'Sos czosnkowy',
+    subtitle:
+        'Lagodny, kremowy sos czosnkowy do frytek, udek i cieplejszych pozycji.',
+    emoji: '🧄',
+    price: 2.5,
+    groupKey: 'sauce',
+  ),
+  _PersonalizationOption(
+    label: 'Sos miodowo-musztardowy',
+    subtitle: 'Slodko-wytrawny sos, ktory dobrze siada z pieczonym kurczakiem.',
+    emoji: '🍯',
+    price: 2.5,
+    groupKey: 'sauce',
+  ),
+  _PersonalizationOption(
+    label: 'Sos buffalo',
+    subtitle: 'Lekko pikantny sos dla bardziej wyrazistego profilu udek.',
+    emoji: '🌶️',
+    price: 2.5,
+    groupKey: 'sauce',
+  ),
+  _PersonalizationOption(
+    label: 'Sos ostry',
+    subtitle: 'Pikantny sos dla ostrzejszego finiszu.',
+    emoji: '🌶️',
+    price: 2.5,
+    groupKey: 'sauce',
+  ),
+  _PersonalizationOption(
+    label: 'Majonez',
+    subtitle: 'Gesty, lagodny majonez do klasycznych polaczen.',
+    emoji: '🥚',
+    price: 1.5,
+    groupKey: 'sauce',
+  ),
+  _PersonalizationOption(
+    label: 'Musztarda',
+    subtitle: 'Wyrazista musztarda do kurczaka, frytek i zapiekanek.',
+    emoji: '🌭',
+    price: 1.5,
+    groupKey: 'sauce',
+  ),
+  _PersonalizationOption(
+    label: 'Remoulada',
+    subtitle: 'Kremowa remoulada z ziolowym finiszem.',
+    emoji: '🥫',
+    price: 2.5,
+    groupKey: 'sauce',
+  ),
+  _PersonalizationOption(
+    label: 'Pikle',
+    subtitle: 'Kwaskowe pikle do przelamania ciezszego smaku kurczaka.',
+    emoji: '🥒',
+    price: 3,
+    groupKey: 'side',
+  ),
+  _PersonalizationOption(
+    label: 'Surowka kolorowa',
+    subtitle: 'Swieza salatka jako lekki, chrupiacy kontrast.',
+    emoji: '🥗',
+    price: 4,
+    groupKey: 'side',
+    assetPath: 'assets/images/colorSalad.png',
+  ),
+  _PersonalizationOption(
+    label: 'Ketchup',
+    subtitle: 'Klasyczny dodatek dla bardziej znanego, pomidorowego smaku.',
+    emoji: '🍅',
+    price: 1.5,
+    groupKey: 'sauce',
+    assetPath: 'assets/images/ketchup.png',
+  ),
+  _PersonalizationOption(
+    label: 'Sos tysiaca wysp',
+    subtitle: 'Lagodniejszy, kremowy sos do bogatszej kompozycji.',
+    emoji: '🥫',
+    price: 2.5,
+    groupKey: 'sauce',
+    assetPath: 'assets/images/thousandIslandsSauce.png',
+  ),
+];
+
 final Map<String, _PersonalizationOption> _knownPersonalizationOptionsByLabel =
     {
-  for (final option in _knownPersonalizationOptions)
+  for (final option in [
+    ..._knownPersonalizationOptions,
+    ..._extendedPersonalizationOptions,
+  ])
     option.label.trim().toLowerCase(): option,
 };
 
@@ -6017,24 +6269,33 @@ Future<List<_PersonalizationOption>> _fetchPersonalizationOptions(
     );
   }
 
-  return decoded
+  final options = decoded
       .map(
         (item) => item is Map<String, dynamic>
             ? item
             : Map<String, dynamic>.from(item as Map),
       )
-      .map(_personalizationOptionFromJson)
+      .map((item) => _personalizationOptionFromJson(item, position))
       .toList(growable: false);
+  return _mergePersonalizationOptionsWithCategoryDefaults(options, position);
 }
 
 _PersonalizationOption _personalizationOptionFromJson(
   Map<String, dynamic> json,
+  Map<String, dynamic> position,
 ) {
   final label = json['name']?.toString().trim() ?? 'Dodatek';
   final normalizedLabel = label.toLowerCase();
   final knownOption = _knownPersonalizationOptionsByLabel[normalizedLabel];
   final description = json['description']?.toString().trim();
   final defaultQuantity = _asInt(json['default_quantity']) ?? 0;
+  final rawGroupKey = _normalizeAddonGroupKey(
+    json['addon_group_key']?.toString(),
+  );
+  final groupKey = rawGroupKey.isEmpty
+      ? (knownOption?.groupKey ??
+          _inferAddonGroupKey(label, _categoryKeyForPosition(position)))
+      : rawGroupKey;
 
   return _PersonalizationOption(
     label: label,
@@ -6043,6 +6304,7 @@ _PersonalizationOption _personalizationOptionFromJson(
         : description,
     emoji: knownOption?.emoji ?? _fallbackExtraEmoji(label),
     price: _price(json) ?? knownOption?.price ?? 0,
+    groupKey: groupKey,
     defaultQuantity: defaultQuantity > 0 ? defaultQuantity : 0,
     assetPath:
         _resolvePersonalizationAssetPath(json['photo_url']?.toString()) ??
@@ -6058,6 +6320,221 @@ String? _resolvePersonalizationAssetPath(String? rawValue) {
   return _isBundledAssetPhoto(value)
       ? _normalizeBundledAssetPhoto(value)
       : value;
+}
+
+List<_PersonalizationSection> _buildPersonalizationSections(
+  List<_PersonalizationOption> options,
+  Map<String, dynamic> position,
+) {
+  final categoryKey = _categoryKeyForPosition(position);
+  final optionsByGroup = <String, List<_PersonalizationOption>>{};
+  for (final option in options) {
+    final groupKey = option.groupKey.trim().toLowerCase();
+    (optionsByGroup[groupKey] ??= <_PersonalizationOption>[]).add(option);
+  }
+
+  final sections = <_PersonalizationSection>[];
+  final mainOptions = <_PersonalizationOption>[];
+  for (final groupKey in const ['side', 'cold', 'hot']) {
+    final groupOptions = optionsByGroup.remove(groupKey) ?? const [];
+    if (groupOptions.isNotEmpty) {
+      mainOptions.addAll(groupOptions);
+    }
+  }
+  if (mainOptions.isNotEmpty) {
+    sections.add(
+      _PersonalizationSection(
+        groupKey: categoryKey == 'udka' ? 'side' : 'addons',
+        title: categoryKey == 'udka' ? 'Do zestawu' : 'Dodatki',
+        options: mainOptions,
+      ),
+    );
+  }
+
+  final sauceOptions = optionsByGroup.remove('sauce') ?? const [];
+  if (sauceOptions.isNotEmpty) {
+    sections.add(
+      _PersonalizationSection(
+        groupKey: 'sauce',
+        title: 'Sosy',
+        options: sauceOptions,
+      ),
+    );
+  }
+
+  for (final entry in optionsByGroup.entries) {
+    if (entry.value.isEmpty) {
+      continue;
+    }
+    sections.add(
+      _PersonalizationSection(
+        groupKey: entry.key,
+        title: _personalizationSectionTitle(entry.key),
+        options: entry.value,
+      ),
+    );
+  }
+
+  return sections;
+}
+
+List<_PersonalizationOption> _mergePersonalizationOptionsWithCategoryDefaults(
+  List<_PersonalizationOption> options,
+  Map<String, dynamic> position,
+) {
+  final categoryKey = _categoryKeyForPosition(position);
+  final expectedLabels = _expectedAddonLabelsForCategory(categoryKey);
+  if (expectedLabels.isEmpty) {
+    return options;
+  }
+
+  final merged = <String, _PersonalizationOption>{
+    for (final option in options) option.label.trim().toLowerCase(): option,
+  };
+
+  for (final label in expectedLabels) {
+    final key = label.trim().toLowerCase();
+    final known = _knownPersonalizationOptionsByLabel[key];
+    if (known != null) {
+      merged.putIfAbsent(key, () => known);
+    }
+  }
+
+  final groupOrder = <String, int>{
+    'side': 0,
+    'cold': 1,
+    'hot': 2,
+    'sauce': 3,
+  };
+
+  final result = merged.values.toList(growable: false);
+  result.sort((a, b) {
+    final groupCompare =
+        (groupOrder[a.groupKey] ?? 99).compareTo(groupOrder[b.groupKey] ?? 99);
+    if (groupCompare != 0) {
+      return groupCompare;
+    }
+    return a.label.compareTo(b.label);
+  });
+  return result;
+}
+
+List<String> _expectedAddonLabelsForCategory(String categoryKey) {
+  switch (categoryKey) {
+    case 'zapiekanki':
+    case 'kids':
+      return const [
+        'Pomidory cherry',
+        'Ogorek kiszony',
+        'Zurawina',
+        'Prazona cebulka',
+        'Oliwki',
+        'Salami',
+        'Szynka',
+        'Kielbasa',
+        'Ananas',
+        'Cebula czerwona',
+        'Ketchup',
+        'Majonez',
+        'Musztarda',
+        'Sos tysiaca wysp',
+        'Sos czosnkowy',
+        'Sos ostry',
+        'Remoulada',
+      ];
+    case 'udka':
+      return const [
+        'Bulka',
+        'Pikle',
+        'Surowka kolorowa',
+        'Ketchup',
+        'Majonez',
+        'Musztarda',
+        'Sos BBQ',
+        'Sos czosnkowy',
+        'Sos buffalo',
+        'Sos miodowo-musztardowy',
+        'Sos ostry',
+        'Remoulada',
+      ];
+    case 'dodatki':
+      return const [
+        'Ketchup',
+        'Majonez',
+        'Musztarda',
+        'Sos czosnkowy',
+        'Sos ostry',
+        'Remoulada',
+      ];
+    default:
+      return const [];
+  }
+}
+
+String _personalizationSectionTitle(String groupKey) {
+  switch (groupKey) {
+    case 'cold':
+      return 'Na zimno';
+    case 'hot':
+      return 'Na goraco';
+    case 'side':
+      return 'Do zestawu';
+    case 'sauce':
+      return 'Sosy';
+    default:
+      return 'Dodatki';
+  }
+}
+
+String _normalizeAddonGroupKey(String? rawValue) {
+  final value = rawValue?.trim().toLowerCase() ?? '';
+  switch (value) {
+    case 'cold':
+    case 'na zimno':
+    case 'na_zimno':
+      return 'cold';
+    case 'hot':
+    case 'na goraco':
+    case 'na_goraco':
+      return 'hot';
+    case 'side':
+    case 'do zestawu':
+    case 'dodatek':
+      return 'side';
+    case 'sauce':
+    case 'sos':
+    case 'sosy':
+      return 'sauce';
+    default:
+      return value;
+  }
+}
+
+String _inferAddonGroupKey(String label, String categoryKey) {
+  switch (label.toLowerCase()) {
+    case 'pomidory':
+    case 'pomidory cherry':
+    case 'ogorek kiszony':
+    case 'zurawina':
+    case 'prazona cebulka':
+    case 'oliwki':
+      return 'cold';
+    case 'salami':
+    case 'szynka':
+    case 'kielbasa':
+    case 'ananas':
+    case 'cebula czerwona':
+      return 'hot';
+    case 'bulka':
+    case 'pikle':
+    case 'surowka kolorowa':
+      return 'side';
+  }
+
+  if (categoryKey == 'udka') {
+    return 'side';
+  }
+  return 'sauce';
 }
 
 List<_DashboardCategory> _buildDashboardCategories(
@@ -6274,7 +6751,8 @@ class _UdkaPickupEstimate {
   final DateTime scheduledPickupAt;
 }
 
-DateTime? _openingDelayForHours(OpeningHoursData? openingHours, {DateTime? now}) {
+DateTime? _openingDelayForHours(OpeningHoursData? openingHours,
+    {DateTime? now}) {
   if (openingHours == null || openingHours.isOpenNow) {
     return null;
   }
@@ -6538,8 +7016,9 @@ String _activeCheckoutEtaDisplay(CheckoutVerificationResponse checkout) {
     }
   }
 
-  final totalEta =
-      checkout.receivedOrder.etaMinutes <= 0 ? 1 : checkout.receivedOrder.etaMinutes;
+  final totalEta = checkout.receivedOrder.etaMinutes <= 0
+      ? 1
+      : checkout.receivedOrder.etaMinutes;
   final remainingEta = checkout.remainingEtaMinutes ?? totalEta;
   return '${remainingEta.clamp(0, 999)} min';
 }
@@ -6855,18 +7334,46 @@ List<String> _extrasChanges(_CartCustomization customization) {
 String _fallbackExtraEmoji(String label) {
   switch (label.toLowerCase()) {
     case 'pomidory':
+    case 'pomidory cherry':
       return '🍅';
+    case 'ogorek kiszony':
+      return '🥒';
+    case 'zurawina':
+      return '🫐';
     case 'oliwki':
       return '🫒';
     case 'prazona cebulka':
+    case 'cebula czerwona':
       return '🧅';
+    case 'salami':
+      return '🥓';
+    case 'szynka':
     case 'sos bbq':
       return '🍖';
+    case 'kielbasa':
+    case 'musztarda':
+      return '🌭';
+    case 'ananas':
+      return '🍍';
+    case 'sos czosnkowy':
+      return '🧄';
+    case 'sos miodowo-musztardowy':
+      return '🍯';
+    case 'sos buffalo':
+    case 'sos ostry':
+      return '🌶️';
+    case 'majonez':
+      return '🥚';
+    case 'bulka':
+      return '🍞';
+    case 'pikle':
+      return '🥒';
     case 'surowka kolorowa':
       return '🥗';
     case 'ketchup':
       return '🍅';
     case 'sos tysiaca wysp':
+    case 'remoulada':
       return '🥫';
   }
   return '✨';
@@ -6934,7 +7441,7 @@ BoxFit _positionImageFit(
   Map<String, dynamic> item, {
   bool compact = false,
 }) {
-  if (_categoryKeyForPosition(item) == 'frytki') {
+  if (_isFriesPosition(item)) {
     return BoxFit.contain;
   }
   if (compact && _categoryKeyForPosition(item) == 'lody') {
@@ -6950,8 +7457,8 @@ Alignment _positionImageAlignment(
   Map<String, dynamic> item, {
   bool compact = false,
 }) {
-  if (_categoryKeyForPosition(item) == 'frytki') {
-    return compact ? const Alignment(0, 0.2) : Alignment.center;
+  if (_isFriesPosition(item)) {
+    return compact ? const Alignment(0, 0.08) : const Alignment(0, 0.04);
   }
   if (_categoryKeyForPosition(item) == 'lody') {
     if (compact) {
@@ -6966,15 +7473,29 @@ EdgeInsets _positionImagePadding(
   Map<String, dynamic> item, {
   bool compact = false,
 }) {
-  if (_categoryKeyForPosition(item) == 'frytki') {
+  if (_isFriesPosition(item)) {
     return compact
-        ? const EdgeInsets.fromLTRB(8, 6, 8, 8)
-        : const EdgeInsets.all(6);
+        ? const EdgeInsets.fromLTRB(12, 2, 12, 2)
+        : const EdgeInsets.fromLTRB(4, 2, 4, 2);
   }
   if (_categoryKeyForPosition(item) == 'lody' && compact) {
     return const EdgeInsets.fromLTRB(10, 2, 10, 12);
   }
   return EdgeInsets.zero;
+}
+
+bool _isFriesPosition(Map<String, dynamic> item) {
+  final positionType =
+      item['position_type']?.toString().trim().toLowerCase() ?? '';
+  final prepGroup =
+      item['prep_group_key']?.toString().trim().toLowerCase() ?? '';
+  final title = _title(item, 0).trim().toLowerCase();
+  final description = _description(item).trim().toLowerCase();
+  final photoUrl = item['photo_url']?.toString().trim().toLowerCase() ?? '';
+  final haystack = '$positionType $prepGroup $title $description $photoUrl';
+  return haystack.contains('frytk') ||
+      haystack.contains('fries') ||
+      haystack.contains('fries.png');
 }
 
 bool _isPositionAvailable(Map<String, dynamic> position) {

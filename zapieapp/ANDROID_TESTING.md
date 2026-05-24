@@ -5,6 +5,12 @@
 Test smoothness on a physical Android device in `--profile` mode.
 Web in Chrome is useful for layout iteration, but it is not a reliable proxy for Flutter rendering performance on Android.
 
+Use this Android command shape by default:
+
+```powershell
+flutter run -d <device-id> --flavor dev --profile --dart-define=API_BASE_URL=...
+```
+
 ## Local Backend
 
 Start the FastAPI backend on your machine so the phone can reach it.
@@ -35,7 +41,7 @@ adb reverse tcp:8000 tcp:8000
 
 ```powershell
 cd C:\FFApi\zapieapp
-flutter run -d <device-id> --profile --dart-define=API_BASE_URL=http://127.0.0.1:8000
+flutter run -d <device-id> --flavor dev --profile --dart-define=API_BASE_URL=http://127.0.0.1:8000
 ```
 
 This mode uses `adb reverse`. `127.0.0.1` and `localhost` point to the phone itself,
@@ -72,6 +78,14 @@ If Windows sees the phone as `MTP` or `ADB Interface` but `adb devices` is still
 3. Disable and enable `USB debugging` again.
 4. Reconnect the cable and accept the RSA prompt again.
 
+4. If you want to remove old app builds from the phone before installing a fresh one:
+
+```powershell
+C:\Users\User\AppData\Local\Android\sdk\platform-tools\adb.exe -s <device-id> uninstall com.example.zapieapp_flutter_starter
+C:\Users\User\AppData\Local\Android\sdk\platform-tools\adb.exe -s <device-id> uninstall pl.zapieapp.mobile
+C:\Users\User\AppData\Local\Android\sdk\platform-tools\adb.exe -s <device-id> uninstall pl.zapieapp.mobile.dev
+```
+
 4. Run Flutter on that exact device with the Azure API URL.
 
 This project currently needs Java 17 for Android Gradle Plugin, so set it in the shell before `flutter run`:
@@ -80,13 +94,13 @@ This project currently needs Java 17 for Android Gradle Plugin, so set it in the
 cd C:\FFApi\zapieapp
 $env:JAVA_HOME='C:\Program Files\Java\jdk-17'
 $env:Path="$env:JAVA_HOME\bin;$env:Path"
-flutter run -d <device-id> --dart-define=API_BASE_URL=https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io
+flutter run -d <device-id> --flavor dev --dart-define=API_BASE_URL=https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io
 ```
 
 Example from our run:
 
 ```powershell
-flutter run -d 42c63095 --dart-define=API_BASE_URL=https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io
+flutter run -d 42c63095 --flavor dev --dart-define=API_BASE_URL=https://zapieapp-api-dev-alpha.gentlewave-09e4c100.westeurope.azurecontainerapps.io
 ```
 
 5. If you want to confirm that the public backend is alive before the run:
@@ -99,6 +113,8 @@ Invoke-RestMethod -Uri 'https://zapieapp-api-dev-alpha.gentlewave-09e4c100.weste
 Notes for this mode:
 
 - `flutter run` installs `app-debug.apk` on the phone.
+- Always pass `--flavor dev` for Android runs from this repo.
+- Unflavored Android builds are intentionally blocked in Gradle to prevent installing the old template package `com.example.zapieapp_flutter_starter`.
 - If the app launches and later `flutter run` prints `Lost connection to device`, the install and launch may still have succeeded; this usually means the USB/ADB session dropped after startup.
 - If `flutter run` picks Java 11 and fails with `Android Gradle plugin requires Java 17`, repeat the run in a shell where `JAVA_HOME` points to `C:\Program Files\Java\jdk-17`.
 
@@ -110,7 +126,7 @@ Notes for this mode:
 
 ```powershell
 cd C:\FFApi\zapieapp
-flutter run -d <device-id> --profile --dart-define=API_BASE_URL=http://192.168.0.42:8000
+flutter run -d <device-id> --flavor dev --profile --dart-define=API_BASE_URL=http://192.168.0.42:8000
 ```
 
 ## Performance Overlay
@@ -118,7 +134,7 @@ flutter run -d <device-id> --profile --dart-define=API_BASE_URL=http://192.168.0
 To inspect frame timing and jank on device, enable the Flutter performance overlay:
 
 ```powershell
-flutter run -d <device-id> --profile --dart-define=API_BASE_URL=http://127.0.0.1:8000 --dart-define=SHOW_PERFORMANCE_OVERLAY=true
+flutter run -d <device-id> --flavor dev --profile --dart-define=API_BASE_URL=http://127.0.0.1:8000 --dart-define=SHOW_PERFORMANCE_OVERLAY=true
 ```
 
 For Wi-Fi testing, replace the API URL with the LAN address of the computer.

@@ -30,6 +30,10 @@ abstract class CheckoutRepository {
     CheckoutReceiptConfirmationRequest request,
   );
 
+  Future<CheckoutVerificationResponse> cancelActiveCheckout(
+    CheckoutCancelRequest request,
+  );
+
   Future<List<CheckoutChatMessage>> fetchOrderMessages({
     required int checkoutOrderId,
     String? sessionToken,
@@ -209,6 +213,36 @@ class HttpCheckoutRepository implements CheckoutRepository {
     rememberActiveCheckout(
       checkout.status == 'completed' ? null : checkout,
     );
+    return checkout;
+  }
+
+  @override
+  Future<CheckoutVerificationResponse> cancelActiveCheckout(
+    CheckoutCancelRequest request,
+  ) async {
+    final response = await _client
+        .post(
+          Uri.parse('$_apiBaseUrl/checkout/cancel'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(request.toJson()),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Nieoczekiwany format odpowiedzi z /checkout/cancel.');
+    }
+
+    final checkout = CheckoutVerificationResponse.fromJson(decoded);
+    rememberActiveCheckout(null);
     return checkout;
   }
 

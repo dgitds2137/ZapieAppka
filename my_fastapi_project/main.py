@@ -126,6 +126,7 @@ class MenuService:
                 "description": addon.description,
                 "price": float(addon.price),
                 "photo_url": addon.photo_url,
+                "addon_group_key": addon.addon_group_key,
                 "sort_order": addon.sort_order,
                 "is_active": addon.is_active,
                 "is_default": link.is_default,

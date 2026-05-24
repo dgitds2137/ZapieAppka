@@ -75,3 +75,27 @@ android {
 flutter {
     source = "../.."
 }
+
+gradle.taskGraph.whenReady {
+    val blockedTasks = allTasks
+        .map { it.name }
+        .filter { taskName ->
+            taskName in setOf(
+                "assembleDebug",
+                "assembleProfile",
+                "assembleRelease",
+                "bundleDebug",
+                "bundleProfile",
+                "bundleRelease",
+                "installDebug",
+                "installProfile",
+                "installRelease",
+            )
+        }
+
+    if (blockedTasks.isNotEmpty()) {
+        throw GradleException(
+            "Unflavored Android build is disabled. Use --flavor dev or --flavor prod.",
+        )
+    }
+}

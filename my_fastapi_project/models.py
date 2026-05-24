@@ -24,6 +24,7 @@ ADMIN_ROLE = "admin"
 CHECKOUT_ORDER_STATUS_UNASSIGNED = "unassigned"
 CHECKOUT_ORDER_STATUS_ASSIGNED = "assigned"
 CHECKOUT_ORDER_STATUS_COMPLETED = "completed"
+CHECKOUT_ORDER_STATUS_CANCELLED = "cancelled"
 
 
 # =========================
@@ -138,6 +139,7 @@ class MenuAddonDB(Base):
     description = Column(Text, nullable=True)
     price = Column(Numeric(10, 2), nullable=False, default=0)
     photo_url = Column(String(500), nullable=True)
+    addon_group_key = Column(String(40), nullable=False, default="sauce")
     sort_order = Column(Integer, nullable=False, default=0)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -431,6 +433,7 @@ class MenuAddonSchema(BaseModel):
     description: str | None = None
     price: float
     photo_url: str | None = None
+    addon_group_key: str = "sauce"
     sort_order: int = 0
     is_active: bool = True
     is_default: bool = False
@@ -599,6 +602,12 @@ class CheckoutHistoryPageOut(BaseModel):
 
 class CheckoutReceiptConfirmationIn(BaseModel):
     received: bool
+    session_token: str | None = None
+    user_email: EmailStr | None = None
+
+
+class CheckoutCancelIn(BaseModel):
+    verification_id: str | None = None
     session_token: str | None = None
     user_email: EmailStr | None = None
 

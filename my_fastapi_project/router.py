@@ -25,6 +25,7 @@ from models import (
     CheckoutPickupLocationOut,
     CheckoutPickupSlotEstimateIn,
     CheckoutPickupSlotEstimateOut,
+    CheckoutCancelIn,
     CheckoutReceiptConfirmationIn,
     CheckoutVerificationIn,
     CheckoutVerificationOut,
@@ -129,6 +130,13 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         db: Session = Depends(get_db),
     ):
         return CheckoutService(db).confirm_receipt(payload)
+
+    @r.post("/checkout/cancel", response_model=CheckoutVerificationOut)
+    def cancel_active_checkout(
+        payload: CheckoutCancelIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).cancel_active_checkout(payload)
 
     @r.get(
         "/checkout/orders/{checkout_order_id}/messages",

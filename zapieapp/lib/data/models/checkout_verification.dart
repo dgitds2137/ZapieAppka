@@ -330,6 +330,24 @@ class CheckoutReceiptConfirmationRequest {
       };
 }
 
+class CheckoutCancelRequest {
+  const CheckoutCancelRequest({
+    this.verificationId,
+    this.sessionToken,
+    this.userEmail,
+  });
+
+  final String? verificationId;
+  final String? sessionToken;
+  final String? userEmail;
+
+  Map<String, dynamic> toJson() => {
+        'verification_id': verificationId,
+        'session_token': sessionToken,
+        'user_email': userEmail,
+      };
+}
+
 class CheckoutChatMessage {
   const CheckoutChatMessage({
     required this.checkoutOrderMessageId,
@@ -358,8 +376,7 @@ class CheckoutChatMessage {
       message: json['message']?.toString() ?? '',
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ??
           DateTime.now().toUtc(),
-      staffReadAt:
-          DateTime.tryParse(json['staff_read_at']?.toString() ?? ''),
+      staffReadAt: DateTime.tryParse(json['staff_read_at']?.toString() ?? ''),
     );
   }
 }
