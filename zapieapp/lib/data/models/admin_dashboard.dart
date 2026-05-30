@@ -74,6 +74,7 @@ class AdminCatalogPosition {
   const AdminCatalogPosition({
     required this.positionId,
     required this.positionType,
+    required this.sortOrder,
     required this.name,
     this.description,
     this.price,
@@ -82,6 +83,7 @@ class AdminCatalogPosition {
 
   final int positionId;
   final String positionType;
+  final int sortOrder;
   final String name;
   final String? description;
   final double? price;
@@ -91,6 +93,7 @@ class AdminCatalogPosition {
     return AdminCatalogPosition(
       positionId: _asInt(json['position_id']) ?? 0,
       positionType: json['position_type']?.toString() ?? '',
+      sortOrder: _asInt(json['sort_order']) ?? 0,
       name: json['name']?.toString() ?? '',
       description: json['description']?.toString(),
       price: _asDouble(json['price']),

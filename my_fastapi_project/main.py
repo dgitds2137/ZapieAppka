@@ -85,7 +85,11 @@ class MenuService:
         return [
             self._serialize_position(position, settings_by_group)
             for position in self.db.query(MenuPositionDB)
-            .order_by(MenuPositionDB.position_type.asc(), MenuPositionDB.name.asc())
+            .order_by(
+                MenuPositionDB.position_type.asc(),
+                MenuPositionDB.sort_order.asc(),
+                MenuPositionDB.name.asc(),
+            )
             .all()
             if self._should_expose_position_to_customer(position)
         ]
@@ -154,6 +158,7 @@ class MenuService:
         return {
             "position_id": position.position_id,
             "position_type": position.position_type,
+            "sort_order": position.sort_order or 0,
             "name": position.name,
             "weight": position.weight,
             "calories": position.calories,
@@ -200,6 +205,7 @@ class MenuService:
         self.db.add(
             MenuPositionDB(
                 position_type="udka",
+                sort_order=0,
                 name=udka_name,
                 weight=300,
                 calories=600,

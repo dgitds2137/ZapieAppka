@@ -91,6 +91,7 @@ class MenuPositionDB(Base):
 
     position_id = Column(Integer, primary_key=True, index=True)
     position_type = Column(String(50), nullable=True, index=True)
+    sort_order = Column(Integer, nullable=False, default=0)
     name = Column(String(80), nullable=True)
     weight = Column(Integer, nullable=True)
     calories = Column(Integer, nullable=True)
@@ -445,6 +446,7 @@ class MenuAddonSchema(BaseModel):
 class AdminCatalogPositionOut(BaseModel):
     position_id: int
     position_type: str | None = None
+    sort_order: int = 0
     name: str
     description: str | None = None
     price: float | None = None

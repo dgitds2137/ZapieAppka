@@ -659,6 +659,7 @@ class CheckoutService:
             self.db.query(MenuPositionDB)
             .order_by(
                 MenuPositionDB.position_type.asc(),
+                MenuPositionDB.sort_order.asc(),
                 MenuPositionDB.name.asc(),
             )
             .all()
@@ -681,6 +682,7 @@ class CheckoutService:
                 AdminCatalogPositionOut(
                     position_id=position.position_id,
                     position_type=position.position_type,
+                    sort_order=position.sort_order or 0,
                     name=(position.name or "").strip(),
                     description=position.description,
                     price=float(position.price) if position.price is not None else None,
@@ -732,6 +734,7 @@ class CheckoutService:
         return AdminCatalogPositionOut(
             position_id=position.position_id,
             position_type=position.position_type,
+            sort_order=position.sort_order or 0,
             name=(position.name or "").strip(),
             description=position.description,
             price=float(position.price) if position.price is not None else None,
