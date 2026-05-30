@@ -5638,10 +5638,54 @@ class _PersonalizeThumbButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _ThumbActionButton(
-      icon: Icons.brush_rounded,
-      tooltip: 'Personalizuj pozycje',
-      onTap: onTap,
+    return Tooltip(
+      message: 'Wybierz sosy i dodatki',
+      child: Semantics(
+        button: true,
+        label: 'Wybierz sosy i dodatki',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              height: 32,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xEE8F3A12),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: const Color(0x66FFE2CF)),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x661A0A05),
+                    blurRadius: 10,
+                    offset: Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.local_dining_rounded,
+                    size: 14,
+                    color: Color(0xFFFFF3E8),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'SOSY+',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: const Color(0xFFFFF3E8),
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.25,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
