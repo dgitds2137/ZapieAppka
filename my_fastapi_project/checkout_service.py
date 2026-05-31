@@ -80,7 +80,7 @@ class CheckoutService:
     _STANDARD_DELIVERY_ETA_MINUTES = 30
     _BUSY_DELIVERY_ETA_MINUTES = 60
     _OVEN_CAPACITY = 6
-    _UDKA_OVEN_CAPACITY = 16
+    _DEFAULT_UDKA_OVEN_CAPACITY = 16
     _UDKA_PIECES_PER_ITEM = 1
     _OVEN_QUEUE_DELAY_MINUTES = 8
     _CHECKOUT_HISTORY_DEFAULT_PAGE_SIZE = 10
@@ -92,8 +92,11 @@ class CheckoutService:
     _DELIVERY_MINIMUM_SETTING_KEY = "delivery_minimum_amount"
     _DEFAULT_DELIVERY_RADIUS_KM = 8.0
     _DELIVERY_RADIUS_SETTING_KEY = "delivery_radius_km"
-    _DEFAULT_UDKA_THERMAL_PACKAGING_FEE = 0.0
+    _DEFAULT_UDKA_THERMAL_PACKAGING_FEE = 3.0
     _UDKA_THERMAL_PACKAGING_FEE_SETTING_KEY = "udka_thermal_packaging_fee"
+    _UDKA_OVEN_CAPACITY_SETTING_KEY = "udka_oven_capacity"
+    _DEFAULT_UDKA_PICKUP_SLOTS = ("12:00", "15:00", "18:00")
+    _UDKA_PICKUP_SLOTS_SETTING_KEY = "udka_pickup_slots"
     _DELIVERY_ORIGIN_ADDRESS_SETTING_KEY = "delivery_origin_address"
     _DEFAULT_OPENING_TIME = "12:00"
     _DEFAULT_CLOSING_TIME = "21:00"
@@ -107,7 +110,6 @@ class CheckoutService:
     }
     _NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
     _NOMINATIM_USER_AGENT = "ZapieApp/1.0 (delivery-radius-validation)"
-    _PICKUP_SLOT_HOURS = (12, 15, 18)
     _PICKUP_SLOT_TIMEZONE = ZoneInfo("Europe/Warsaw")
 
     _METHOD_MESSAGES = {
@@ -148,7 +150,7 @@ class CheckoutService:
                 status_code=409,
                 detail=(
                     "Udka z kurczaka sa dostepne tylko w opcji Zaplanuj odbior "
-                    "w transzach 12:00, 15:00 i 18:00."
+                    f"w transzach {self._udka_pickup_slots_display_label()}."
                 ),
             )
         pickup_slot_datetime = None
@@ -403,6 +405,7 @@ class CheckoutService:
 
     def get_udka_availability(self) -> UdkaAvailabilityOut:
         now = datetime.utcnow()
+        udka_oven_capacity = self._get_udka_oven_capacity()
         now_local = self._as_pickup_local_datetime(now)
         next_slot = self._next_pickup_slot_datetime(now=now)
         following_slot = self._advance_pickup_slot_candidate(next_slot)
@@ -413,13 +416,13 @@ class CheckoutService:
         next_slot_load = self._get_udka_slot_load(next_slot)
         following_slot_load = self._get_udka_slot_load(following_slot)
         available_now_pieces = (
-            max(0, self._UDKA_OVEN_CAPACITY - current_slot_load)
+            max(0, udka_oven_capacity - current_slot_load)
             if current_slot is not None
             else 0
         )
-        next_batch_open_pieces = max(0, self._UDKA_OVEN_CAPACITY - next_slot_load)
+        next_batch_open_pieces = max(0, udka_oven_capacity - next_slot_load)
         following_batch_open_pieces = max(
-            0, self._UDKA_OVEN_CAPACITY - following_slot_load
+            0, udka_oven_capacity - following_slot_load
         )
         thermal_packaging_fee = self._get_udka_thermal_packaging_fee()
         return UdkaAvailabilityOut(
@@ -627,7 +630,7 @@ class CheckoutService:
             oven_load=current_oven_load,
             oven_capacity=self._OVEN_CAPACITY,
             udka_oven_load=current_udka_oven_load,
-            udka_oven_capacity=self._UDKA_OVEN_CAPACITY,
+            udka_oven_capacity=self._get_udka_oven_capacity(),
             udka_slot_label=self._pickup_slot_dashboard_label(
                 now=now,
                 slot_datetime=next_udka_slot,
@@ -1910,6 +1913,47 @@ class CheckoutService:
         )
         return fee if fee > 0 else None
 
+    def _get_udka_oven_capacity(self) -> int:
+        raw_capacity = self._get_decimal_runtime_setting(
+            setting_key=self._UDKA_OVEN_CAPACITY_SETTING_KEY,
+            default_value=float(self._DEFAULT_UDKA_OVEN_CAPACITY),
+        )
+        return max(1, int(round(raw_capacity)))
+
+    def _udka_pickup_slots_display_label(self) -> str:
+        return ", ".join(
+            f"{hour:02d}:{minute:02d}"
+            for hour, minute in self._get_udka_pickup_slot_times()
+        )
+
+    def _get_udka_pickup_slot_times(self) -> tuple[tuple[int, int], ...]:
+        raw_slots = self._get_string_runtime_setting(
+            setting_key=self._UDKA_PICKUP_SLOTS_SETTING_KEY,
+            default_value=",".join(self._DEFAULT_UDKA_PICKUP_SLOTS),
+        )
+        parsed: list[tuple[int, int]] = []
+        for token in raw_slots.split(","):
+            slot = self._parse_pickup_slot_token(token)
+            if slot is not None and slot not in parsed:
+                parsed.append(slot)
+        if not parsed:
+            parsed = [(12, 0), (15, 0), (18, 0)]
+        parsed.sort()
+        return tuple(parsed)
+
+    def _parse_pickup_slot_token(self, token: str | None) -> tuple[int, int] | None:
+        normalized = (token or "").strip()
+        if len(normalized) != 5 or ":" not in normalized:
+            return None
+        hour_part, minute_part = normalized.split(":", maxsplit=1)
+        if not hour_part.isdigit() or not minute_part.isdigit():
+            return None
+        hour = int(hour_part)
+        minute = int(minute_part)
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            return None
+        return (hour, minute)
+
     def _get_delivery_origin_address(self) -> str:
         return self._get_string_runtime_setting(
             setting_key=self._DELIVERY_ORIGIN_ADDRESS_SETTING_KEY,
@@ -2419,13 +2463,14 @@ class CheckoutService:
     ) -> datetime:
         now_local = self._as_pickup_local_datetime(now=now)
         candidate = self._next_pickup_slot_candidate(now_local)
+        udka_oven_capacity = self._get_udka_oven_capacity()
         if required_udka_pieces <= 0:
             return candidate
 
         max_iterations = 64
         for _ in range(max_iterations):
             slot_load = self._get_udka_slot_load(candidate)
-            if slot_load + required_udka_pieces <= self._UDKA_OVEN_CAPACITY:
+            if slot_load + required_udka_pieces <= udka_oven_capacity:
                 return candidate
             candidate = self._advance_pickup_slot_candidate(candidate)
 
@@ -2435,27 +2480,29 @@ class CheckoutService:
         )
 
     def _next_pickup_slot_candidate(self, now_local: datetime) -> datetime:
+        slot_times = self._get_udka_pickup_slot_times()
         candidate_date = now_local.date()
-        for slot_hour in self._PICKUP_SLOT_HOURS:
+        for slot_hour, slot_minute in slot_times:
             candidate = datetime(
                 year=candidate_date.year,
                 month=candidate_date.month,
                 day=candidate_date.day,
                 hour=slot_hour,
-                minute=0,
+                minute=slot_minute,
                 second=0,
                 microsecond=0,
                 tzinfo=self._PICKUP_SLOT_TIMEZONE,
             )
             if candidate >= now_local:
                 return candidate
+        last_hour, last_minute = slot_times[-1]
         return self._advance_pickup_slot_candidate(
             datetime(
                 year=candidate_date.year,
                 month=candidate_date.month,
                 day=candidate_date.day,
-                hour=self._PICKUP_SLOT_HOURS[-1],
-                minute=0,
+                hour=last_hour,
+                minute=last_minute,
                 second=0,
                 microsecond=0,
                 tzinfo=self._PICKUP_SLOT_TIMEZONE,
@@ -2463,14 +2510,15 @@ class CheckoutService:
         )
 
     def _current_pickup_slot_datetime(self, now_local: datetime) -> datetime | None:
+        slot_times = self._get_udka_pickup_slot_times()
         candidate_date = now_local.date()
-        for slot_hour in reversed(self._PICKUP_SLOT_HOURS):
+        for slot_hour, slot_minute in reversed(slot_times):
             candidate = datetime(
                 year=candidate_date.year,
                 month=candidate_date.month,
                 day=candidate_date.day,
                 hour=slot_hour,
-                minute=0,
+                minute=slot_minute,
                 second=0,
                 microsecond=0,
                 tzinfo=self._PICKUP_SLOT_TIMEZONE,
@@ -2480,27 +2528,30 @@ class CheckoutService:
         return None
 
     def _advance_pickup_slot_candidate(self, slot_datetime: datetime) -> datetime:
+        slot_times = self._get_udka_pickup_slot_times()
+        slot_pair = (slot_datetime.hour, slot_datetime.minute)
         try:
-            current_index = self._PICKUP_SLOT_HOURS.index(slot_datetime.hour)
+            current_index = slot_times.index(slot_pair)
         except ValueError:
-            current_index = len(self._PICKUP_SLOT_HOURS) - 1
+            current_index = len(slot_times) - 1
 
-        if current_index < len(self._PICKUP_SLOT_HOURS) - 1:
-            next_hour = self._PICKUP_SLOT_HOURS[current_index + 1]
+        if current_index < len(slot_times) - 1:
+            next_hour, next_minute = slot_times[current_index + 1]
             return slot_datetime.replace(
                 hour=next_hour,
-                minute=0,
+                minute=next_minute,
                 second=0,
                 microsecond=0,
             )
 
         next_day = slot_datetime.date() + timedelta(days=1)
+        first_hour, first_minute = slot_times[0]
         return datetime(
             year=next_day.year,
             month=next_day.month,
             day=next_day.day,
-            hour=self._PICKUP_SLOT_HOURS[0],
-            minute=0,
+            hour=first_hour,
+            minute=first_minute,
             second=0,
             microsecond=0,
             tzinfo=self._PICKUP_SLOT_TIMEZONE,
@@ -3201,7 +3252,7 @@ class CheckoutService:
 
     def _oven_capacity_for_kind(self, oven_kind: str) -> int:
         if oven_kind == "udka":
-            return self._UDKA_OVEN_CAPACITY
+            return self._get_udka_oven_capacity()
         if oven_kind == "zapiekanki":
             return self._OVEN_CAPACITY
         return 0
@@ -3244,7 +3295,11 @@ class CheckoutService:
                 continue
             udka_piece_count += max(1, int(item.quantity or 1)) * self._UDKA_PIECES_PER_ITEM
 
-        return min(self._UDKA_OVEN_CAPACITY, udka_piece_count) if udka_piece_count > 0 else 0
+        return (
+            min(self._get_udka_oven_capacity(), udka_piece_count)
+            if udka_piece_count > 0
+            else 0
+        )
 
     def _get_current_oven_load(
         self,

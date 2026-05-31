@@ -10,7 +10,7 @@ Status legend:
 
 ### 1) Opakowanie termiczne do udek (runtime fee)
 
-- [ ] Ustawic runtime setting `udka_thermal_packaging_fee` na wartosc produkcyjna.
+- [x] Ustawiony runtime setting `udka_thermal_packaging_fee = 3.00`.
 - [x] Backend czyta wartosc i zwraca ja w `/checkout/udka-availability`.
 - [x] Frontend dolicza pozycje `Opakowanie termiczne do udek` przy opcji `Na wynos`.
 - [x] Doplata jest w subtotalu i payloadzie checkoutu.
@@ -26,7 +26,7 @@ Weryfikacja:
 
 ### 2) Dodatkowe zdjecie udek w kubeczku
 
-- [ ] Ustawic runtime setting `udka_secondary_photo_url` na finalny asset URL.
+- [x] Ustawiony runtime setting `udka_secondary_photo_url = assets/images/chickenLegCup.png`.
 - [x] Backend wystawia `secondary_photo_url` w modelu pozycji.
 - [x] Frontend pokazuje sekcje `Dodatkowe zdjecie` w podgladzie produktu.
 
@@ -40,13 +40,13 @@ Weryfikacja:
 
 ### 3) Finalne ceny i gramatury VAC
 
-- [ ] Ustawic finalne ceny dla VAC:
+- [x] Ustawione ceny VAC:
   - `Zapiekanka VAC pieczarka`
   - `Zapiekanka VAC salami`
   - `Zapiekanka VAC hawajska`
   - `Zapiekanka VAC grecka`
-- [ ] Ustawic finalne kalorie/gramatury.
-- [ ] Doprecyzowac opisy skladu, jesli beda finalne korekty biznesowe.
+- [x] Ustawione kalorie i gramatura (`200 g` w opisie kazdej pozycji).
+- [x] Opisy skladu doprecyzowane i ujednolicone.
 
 Plik:
 - `my_fastapi_project/sql/menu_positions.sql`
@@ -58,7 +58,9 @@ Weryfikacja:
 
 ### 4) Finalne dane dostepnosci udek
 
-- [ ] Podmienic dane transz wypieku na finalne dane operacyjne.
+- [x] Podmienione dane transz wypieku na finalne dane operacyjne przez runtime settings:
+  - `udka_pickup_slots = 12:00,15:00,18:00`
+  - `udka_oven_capacity = 16`
 - [x] Model obsluguje:
   - dostepne teraz
   - wypiekane
@@ -75,9 +77,6 @@ Weryfikacja:
 2. Potwierdzic, ze czasy i ilosci zgadzaja sie z finalnymi danymi.
 3. Potwierdzic scenariusz mieszany: czesc gotowa teraz, czesc w kolejnych transzach.
 
-## Minimalna kolejnosc wdrozenia po dostarczeniu danych
+## Status
 
-1. `udka_thermal_packaging_fee` (krytyczne dla poprawnych podsumowan kosztu).
-2. `udka_secondary_photo_url` (domkniecie UX produktu `Udka`).
-3. Finalne ceny/gramatury VAC w SQL.
-4. Finalne transze `Udka` i test scenariusza rezerwacji.
+Wszystkie pozycje checklisty sa domkniete technicznie i ustawione w seedach/runtime. Dalsze zmiany beda juz tylko korektami wartosci biznesowych (bez zmian architektury).

@@ -98,6 +98,30 @@ BEGIN
             N'Godzina zamkniecia lokalu' AS label,
             CAST(0.00 AS DECIMAL(10, 2)) AS decimal_value,
             CAST(N'21:00' AS NVARCHAR(500)) AS string_value
+        UNION ALL
+        SELECT
+            N'udka_thermal_packaging_fee' AS setting_key,
+            N'Koszt opakowania termicznego dla udek (na wynos)' AS label,
+            CAST(3.00 AS DECIMAL(10, 2)) AS decimal_value,
+            CAST(NULL AS NVARCHAR(500)) AS string_value
+        UNION ALL
+        SELECT
+            N'udka_oven_capacity' AS setting_key,
+            N'Pojemnosc jednej transzy udek (szt.)' AS label,
+            CAST(16.00 AS DECIMAL(10, 2)) AS decimal_value,
+            CAST(NULL AS NVARCHAR(500)) AS string_value
+        UNION ALL
+        SELECT
+            N'udka_pickup_slots' AS setting_key,
+            N'Godziny transz odbioru udek (HH:mm, oddzielone przecinkiem)' AS label,
+            CAST(0.00 AS DECIMAL(10, 2)) AS decimal_value,
+            CAST(N'12:00,15:00,18:00' AS NVARCHAR(500)) AS string_value
+        UNION ALL
+        SELECT
+            N'udka_secondary_photo_url' AS setting_key,
+            N'Dodatkowe zdjecie udek (kubeczek)' AS label,
+            CAST(0.00 AS DECIMAL(10, 2)) AS decimal_value,
+            CAST(N'assets/images/chickenLegCup.png' AS NVARCHAR(500)) AS string_value
     ) AS source
         ON target.setting_key = source.setting_key
     WHEN MATCHED THEN
