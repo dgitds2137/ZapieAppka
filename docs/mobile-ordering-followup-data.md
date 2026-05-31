@@ -3,7 +3,7 @@
 Ten dokument zbiera otwarte punkty, ktore sa juz przygotowane technicznie i czekaja na finalne dane (ceny, gramatury, assety, transze).
 
 Status legend:
-- `[ ]` do uzupelnienia
+- `TODO` do uzupelnienia
 - `[x]` gotowe
 
 ## Checklist wykonawcza
