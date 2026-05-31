@@ -17,6 +17,7 @@ from db import ensure_database_schema, get_db, get_engine
 from loyalty import loyalty_points_for_price
 from models import (
     ADMIN_ROLE,
+    AppRuntimeSettingDB,
     DEFAULT_USER_ROLE,
     DRIVER_ROLE,
     EMPLOYEE_ROLE,
@@ -76,6 +77,8 @@ def health_db():
 
 
 class MenuService:
+    _UDKA_SECONDARY_PHOTO_URL_SETTING_KEY = "udka_secondary_photo_url"
+
     def __init__(self, db: Session):
         self.db = db
 
@@ -154,6 +157,11 @@ class MenuService:
     ) -> dict[str, object | None]:
         group_key = infer_prep_group_key(position.position_type, position.name)
         setting = settings_by_group.get(group_key) if group_key else None
+        secondary_photo_url = (
+            self._get_string_runtime_setting(self._UDKA_SECONDARY_PHOTO_URL_SETTING_KEY)
+            if group_key == "udka"
+            else None
+        )
 
         return {
             "position_id": position.position_id,
@@ -166,11 +174,24 @@ class MenuService:
             "loyalty_points": loyalty_points_for_price(position.price),
             "description": position.description,
             "photo_url": position.photo_url,
+            "secondary_photo_url": secondary_photo_url,
             "is_active": bool(position.is_active),
             "prep_group_key": group_key,
             "prep_group_label": prep_group_label(group_key),
             "prep_minutes": setting.minutes if setting is not None else None,
         }
+
+    def _get_string_runtime_setting(self, setting_key: str) -> str | None:
+        setting = (
+            self.db.query(AppRuntimeSettingDB)
+            .filter(AppRuntimeSettingDB.setting_key == setting_key)
+            .first()
+        )
+        value = setting.string_value if setting is not None else None
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
 
     def _should_expose_position_to_customer(self, position: MenuPositionDB) -> bool:
         if self._is_legacy_hidden_position(position):
@@ -189,13 +210,22 @@ class MenuService:
     def _is_temporarily_unavailable_position(self, position: MenuPositionDB) -> bool:
         position_type = (position.position_type or "").strip().lower()
         name = (position.name or "").strip().lower()
+        if (
+            "frozen" in position_type
+            or "mroz" in position_type
+            or "vac" in position_type
+            or "frozen" in name
+            or "mroz" in name
+            or "vac" in name
+        ):
+            return False
         return "zapiek" in position_type or "zapiek" in name
 
     def _ensure_required_positions(self) -> None:
-        udka_name = "Udka z kurczaka (3 szt.)"
+        udka_name = "Udko z kurczaka - cala noga"
         exists = (
             self.db.query(MenuPositionDB.position_id)
-            .filter(MenuPositionDB.name == udka_name)
+            .filter(MenuPositionDB.position_type == "udka")
             .first()
             is not None
         )
@@ -211,8 +241,8 @@ class MenuService:
                 calories=600,
                 price=20,
                 description=(
-                    "Pakiet 3 pieczonych udek z kurczaka. "
-                    "Kazda kolejna sztuka w koszyku dodaje kolejny pakiet 3 udek."
+                    "Jedna cala noga z kurczaka pieczona na chrupiaco. "
+                    "Kazda kolejna sztuka w koszyku dodaje kolejne udko."
                 ),
                 photo_url="assets/images/chickenLeg.png",
                 is_active=True,

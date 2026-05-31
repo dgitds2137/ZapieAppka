@@ -25,6 +25,7 @@ from models import (
     CheckoutPickupLocationOut,
     CheckoutPickupSlotEstimateIn,
     CheckoutPickupSlotEstimateOut,
+    UdkaAvailabilityOut,
     CheckoutCancelIn,
     CheckoutReceiptConfirmationIn,
     CheckoutVerificationIn,
@@ -123,6 +124,10 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         db: Session = Depends(get_db),
     ):
         return CheckoutService(db).get_pickup_slot_estimate(payload)
+
+    @r.get("/checkout/udka-availability", response_model=UdkaAvailabilityOut)
+    def get_udka_availability(db: Session = Depends(get_db)):
+        return CheckoutService(db).get_udka_availability()
 
     @r.post("/checkout/confirm-receipt", response_model=CheckoutVerificationOut)
     def confirm_checkout_receipt(

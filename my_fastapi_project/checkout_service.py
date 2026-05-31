@@ -56,6 +56,7 @@ from models import (
     CheckoutPickupSlotEstimateIn,
     CheckoutPickupLocationOut,
     CheckoutPickupSlotEstimateOut,
+    UdkaAvailabilityOut,
     CheckoutCancelIn,
     CheckoutReceiptConfirmationIn,
     CheckoutAddressPayload,
@@ -80,7 +81,7 @@ class CheckoutService:
     _BUSY_DELIVERY_ETA_MINUTES = 60
     _OVEN_CAPACITY = 6
     _UDKA_OVEN_CAPACITY = 16
-    _UDKA_PIECES_PER_ITEM = 3
+    _UDKA_PIECES_PER_ITEM = 1
     _OVEN_QUEUE_DELAY_MINUTES = 8
     _CHECKOUT_HISTORY_DEFAULT_PAGE_SIZE = 10
     _CHECKOUT_HISTORY_MAX_PAGE_SIZE = 25
@@ -91,6 +92,8 @@ class CheckoutService:
     _DELIVERY_MINIMUM_SETTING_KEY = "delivery_minimum_amount"
     _DEFAULT_DELIVERY_RADIUS_KM = 8.0
     _DELIVERY_RADIUS_SETTING_KEY = "delivery_radius_km"
+    _DEFAULT_UDKA_THERMAL_PACKAGING_FEE = 0.0
+    _UDKA_THERMAL_PACKAGING_FEE_SETTING_KEY = "udka_thermal_packaging_fee"
     _DELIVERY_ORIGIN_ADDRESS_SETTING_KEY = "delivery_origin_address"
     _DEFAULT_OPENING_TIME = "12:00"
     _DEFAULT_CLOSING_TIME = "21:00"
@@ -396,6 +399,44 @@ class CheckoutService:
                 slot_datetime=pickup_slot_datetime,
             ),
             scheduled_pickup_at=self._as_utc(pickup_slot_datetime),
+        )
+
+    def get_udka_availability(self) -> UdkaAvailabilityOut:
+        now = datetime.utcnow()
+        now_local = self._as_pickup_local_datetime(now)
+        next_slot = self._next_pickup_slot_datetime(now=now)
+        following_slot = self._advance_pickup_slot_candidate(next_slot)
+        current_slot = self._current_pickup_slot_datetime(now_local)
+        current_slot_load = (
+            self._get_udka_slot_load(current_slot) if current_slot is not None else 0
+        )
+        next_slot_load = self._get_udka_slot_load(next_slot)
+        following_slot_load = self._get_udka_slot_load(following_slot)
+        available_now_pieces = (
+            max(0, self._UDKA_OVEN_CAPACITY - current_slot_load)
+            if current_slot is not None
+            else 0
+        )
+        next_batch_open_pieces = max(0, self._UDKA_OVEN_CAPACITY - next_slot_load)
+        following_batch_open_pieces = max(
+            0, self._UDKA_OVEN_CAPACITY - following_slot_load
+        )
+        thermal_packaging_fee = self._get_udka_thermal_packaging_fee()
+        return UdkaAvailabilityOut(
+            available_now_pieces=available_now_pieces,
+            baking_pieces=next_slot_load,
+            next_ready_at=self._as_utc(next_slot),
+            next_batch_open_pieces=next_batch_open_pieces,
+            following_ready_at=self._as_utc(following_slot),
+            following_batch_open_pieces=following_batch_open_pieces,
+            reservable_after_payment=True,
+            takeout_supported=True,
+            thermal_packaging_fee=thermal_packaging_fee,
+            thermal_packaging_fee_label=(
+                f"PLN {thermal_packaging_fee:.2f}"
+                if thermal_packaging_fee is not None
+                else None
+            ),
         )
 
     def get_admin_dashboard(
@@ -1862,6 +1903,13 @@ class CheckoutService:
             default_value=self._DEFAULT_DELIVERY_RADIUS_KM,
         )
 
+    def _get_udka_thermal_packaging_fee(self) -> float | None:
+        fee = self._get_decimal_runtime_setting(
+            setting_key=self._UDKA_THERMAL_PACKAGING_FEE_SETTING_KEY,
+            default_value=self._DEFAULT_UDKA_THERMAL_PACKAGING_FEE,
+        )
+        return fee if fee > 0 else None
+
     def _get_delivery_origin_address(self) -> str:
         return self._get_string_runtime_setting(
             setting_key=self._DELIVERY_ORIGIN_ADDRESS_SETTING_KEY,
@@ -2413,6 +2461,23 @@ class CheckoutService:
                 tzinfo=self._PICKUP_SLOT_TIMEZONE,
             )
         )
+
+    def _current_pickup_slot_datetime(self, now_local: datetime) -> datetime | None:
+        candidate_date = now_local.date()
+        for slot_hour in reversed(self._PICKUP_SLOT_HOURS):
+            candidate = datetime(
+                year=candidate_date.year,
+                month=candidate_date.month,
+                day=candidate_date.day,
+                hour=slot_hour,
+                minute=0,
+                second=0,
+                microsecond=0,
+                tzinfo=self._PICKUP_SLOT_TIMEZONE,
+            )
+            if candidate <= now_local:
+                return candidate
+        return None
 
     def _advance_pickup_slot_candidate(self, slot_datetime: datetime) -> datetime:
         try:

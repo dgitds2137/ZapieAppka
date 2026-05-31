@@ -572,6 +572,19 @@ class CheckoutPickupSlotEstimateOut(BaseModel):
     scheduled_pickup_at: datetime
 
 
+class UdkaAvailabilityOut(BaseModel):
+    available_now_pieces: int
+    baking_pieces: int
+    next_ready_at: datetime
+    next_batch_open_pieces: int
+    following_ready_at: datetime | None = None
+    following_batch_open_pieces: int = 0
+    reservable_after_payment: bool = True
+    takeout_supported: bool = True
+    thermal_packaging_fee: float | None = None
+    thermal_packaging_fee_label: str | None = None
+
+
 class CheckoutVerificationOut(BaseModel):
     verification_id: str
     saved_order_id: int

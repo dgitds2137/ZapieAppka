@@ -121,6 +121,33 @@ BEGIN
 END;
 GO
 
+UPDATE dbo.MenuPositions
+SET description = REPLACE(
+        description,
+        N'a''la oscypek',
+        N'ser wedzony a''la oscypek'
+    )
+WHERE LOWER(ISNULL(name, N'')) = N'goralska 50cm'
+  AND description LIKE N'%a''la oscypek%';
+GO
+
+UPDATE dbo.MenuPositions
+SET
+    name = N'Udko z kurczaka - cala noga',
+    weight = 300,
+    calories = 600,
+    price = CAST(20 AS DECIMAL(18, 0)),
+    description = N'Jedna cala noga z kurczaka pieczona na chrupiaco. Kazda kolejna sztuka w koszyku dodaje kolejne udko.',
+    photo_url = N'assets/images/chickenLeg.png',
+    is_active = CAST(1 AS BIT)
+WHERE LOWER(ISNULL(position_type, N'')) = N'udka';
+GO
+
+UPDATE dbo.MenuPositions
+SET is_active = CAST(0 AS BIT)
+WHERE LOWER(ISNULL(position_type, N'')) = N'zapiekanki_frozen';
+GO
+
 ;WITH PositionSeed AS (
     SELECT
         seed.position_type,
@@ -138,7 +165,7 @@ GO
         (N'zapiekanki', 40, N'Salame 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, salame spianata 30g', N'assets/images/zapSalame.png', CAST(0 AS BIT)),
         (N'zapiekanki', 50, N'Jalapeno Salame 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, salame spianata 30g, jalapeno 20g, cebula czerwona 10g', N'assets/images/zapJalapengoSalame.png', CAST(0 AS BIT)),
         (N'zapiekanki', 90, N'Serowa 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, ser plesniowy camembert 25g, ser plesniowy lazur 25g', N'assets/images/zapCheese.png', CAST(1 AS BIT)),
-        (N'zapiekanki', 70, N'Goralska 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, a''la oscypek 30g, zurawina 40g', N'assets/images/zapCheese.png', CAST(1 AS BIT)),
+        (N'zapiekanki', 70, N'Goralska 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, ser wedzony a''la oscypek 30g, zurawina 40g', N'assets/images/zapCheese.png', CAST(1 AS BIT)),
         (N'zapiekanki', 110, N'Szarpana 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, szarpane udko z rozna 140g', N'assets/images/zapMeat.png', CAST(0 AS BIT)),
         (N'zapiekanki', 120, N'Rukola 50cm', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, szynka dlugodojrzewajaca 30g, pomidorki koktajlowe 40g, rukola 10g', N'assets/images/zapMeat.png', CAST(0 AS BIT)),
         (N'kids', 10, N'Kids Szynka 25cm', 100, 200, CAST(20 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, szynka 15g', N'assets/images/zapMeat.png', CAST(1 AS BIT)),
@@ -146,12 +173,11 @@ GO
         (N'kids', 30, N'Kids Salame 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g', N'assets/images/zapSalame.png', CAST(1 AS BIT)),
         (N'kids', 40, N'Kids Jalapeno Salame 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, salame spianata 15g, jalapeno 10g, cebula czerwona 5g', N'assets/images/zapJalapengoSalame.png', CAST(1 AS BIT)),
         (N'kids', 50, N'Kids Serowa 25cm', 100, 100, CAST(18 AS DECIMAL(18, 0)), N'Dziecieca wersja zapiekanki: bagietka, maslo 10g, pieczarki 60g, cheddar 40g, mozzarella 20g, ser plesniowy camembert 12g, ser plesniowy lazur 12g', N'assets/images/zapCheese.png', CAST(1 AS BIT)),
-        (N'zapiekanki_frozen', 20, N'Szynka 50cm Mrozona', 200, 400, CAST(40 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, szynka 30g.', N'assets/images/zapMeatFrozen.png', CAST(1 AS BIT)),
-        (N'zapiekanki_frozen', 10, N'Pieczarka 50cm Mrozona', 200, 400, CAST(40 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g.', N'assets/images/zapMushroomFrozen.png', CAST(1 AS BIT)),
-        (N'zapiekanki_frozen', 40, N'Salame 50cm Mrozona', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, salame spianata 30g.', N'assets/images/zapSalameFrozen.png', CAST(1 AS BIT)),
-        (N'zapiekanki_frozen', 50, N'Jalapeno Salame 50cm Mrozona', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, salame spianata 30g, jalapeno 20g, cebula czerwona 10g.', N'assets/images/zapJalapengoSalame.png', CAST(1 AS BIT)),
-        (N'zapiekanki_frozen', 90, N'Serowa 50cm Mrozona', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'Hermetycznie zapakowana zapiekanka do odgrzania. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, ser plesniowy camembert 25g, ser plesniowy lazur 25g.', N'assets/images/zapCheeseFrozen.png', CAST(1 AS BIT)),
-        (N'udka', 10, N'Udka z kurczaka (3 szt.)', 300, 600, CAST(20 AS DECIMAL(18, 0)), N'Pakiet 3 pieczonych udek z kurczaka. Kazda kolejna sztuka w koszyku dodaje kolejny pakiet 3 udek.', N'assets/images/chickenLeg.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', 10, N'Pieczarka VAC', 200, 400, CAST(40 AS DECIMAL(18, 0)), N'Zapiekanka do wypieku w domu. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g. Sosy do VAC sa platne.', N'assets/images/zapMushroomFrozen.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', 20, N'Salami VAC', 200, 200, CAST(36 AS DECIMAL(18, 0)), N'Zapiekanka do wypieku w domu. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, salame spianata 30g. Sosy do VAC sa platne.', N'assets/images/zapSalameFrozen.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', 30, N'Hawajska VAC', 200, 220, CAST(40 AS DECIMAL(18, 0)), N'Zapiekanka do wypieku w domu. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, szynka 30g, ananas 40g. Sosy do VAC sa platne.', N'assets/images/zapMeatFrozen.png', CAST(1 AS BIT)),
+        (N'zapiekanki_frozen', 40, N'Grecka VAC', 200, 220, CAST(40 AS DECIMAL(18, 0)), N'Zapiekanka do wypieku w domu. Sklad: bagietka, maslo 20g, pieczarki 120g, cheddar 80g, mozzarella 40g, oliwki 20g, pomidor 40g. Sosy do VAC sa platne.', N'assets/images/zapCheeseFrozen.png', CAST(1 AS BIT)),
+        (N'udka', 10, N'Udko z kurczaka - cala noga', 300, 600, CAST(20 AS DECIMAL(18, 0)), N'Jedna cala noga z kurczaka pieczona na chrupiaco. Kazda kolejna sztuka w koszyku dodaje kolejne udko.', N'assets/images/chickenLeg.png', CAST(1 AS BIT)),
         (N'dodatki', 10, N'Frytki', 150, 420, CAST(10 AS DECIMAL(18, 0)), N'Chrupiace frytki podawane na cieplo.', N'assets/images/fries.png', CAST(1 AS BIT)),
         (N'napoje', 10, N'Coca Cola puszka 0.33', 330, 139, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Coca Cola w puszce 0.33 l.', NULL, CAST(1 AS BIT)),
         (N'napoje', 20, N'Fanta puszka 0.33', 330, 144, CAST(8 AS DECIMAL(18, 0)), N'Gazowany napoj Fanta w puszce 0.33 l.', NULL, CAST(1 AS BIT)),

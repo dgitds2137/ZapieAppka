@@ -621,21 +621,131 @@ class _CategoryBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: categories.length,
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: childAspectRatio,
-      ),
-      itemBuilder: (context, index) => _CategoryTile(
-        category: categories[index],
-        onTap: categories[index].items.isEmpty
-            ? null
-            : () => onCategoryTap(categories[index]),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Szybkie sekcje',
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: const Color(0xFFF8EEE7),
+                fontWeight: FontWeight.w900,
+              ),
+        ),
+        const SizedBox(height: 10),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Row(
+            children: [
+              for (var index = 0; index < categories.length; index++) ...[
+                _DashboardCategoryQuickChip(
+                  category: categories[index],
+                  onTap: categories[index].items.isEmpty
+                      ? null
+                      : () => onCategoryTap(categories[index]),
+                ),
+                if (index < categories.length - 1) const SizedBox(width: 8),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: categories.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            crossAxisSpacing: 12,
+            mainAxisSpacing: 12,
+            childAspectRatio: childAspectRatio,
+          ),
+          itemBuilder: (context, index) => _CategoryTile(
+            category: categories[index],
+            onTap: categories[index].items.isEmpty
+                ? null
+                : () => onCategoryTap(categories[index]),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DashboardCategoryQuickChip extends StatelessWidget {
+  const _DashboardCategoryQuickChip({
+    required this.category,
+    required this.onTap,
+  });
+
+  final _DashboardCategory category;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isEnabled = onTap != null;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: isEnabled ? const Color(0xFF211C19) : const Color(0xFF181412),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: isEnabled
+                  ? category.endColor.withValues(alpha: 0.32)
+                  : const Color(0x18FFFFFF),
+            ),
+            boxShadow: isEnabled
+                ? [
+                    BoxShadow(
+                      color: category.endColor.withValues(alpha: 0.16),
+                      blurRadius: 16,
+                      offset: const Offset(0, 8),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      category.startColor,
+                      category.endColor,
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Icon(
+                  category.icon,
+                  size: 14,
+                  color: const Color(0xFFFFF4ED),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                category.title,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: isEnabled
+                          ? const Color(0xFFFFF4ED)
+                          : const Color(0xFF9A8F87),
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1114,7 +1224,7 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '$itemCountLabel • ${_categorySubtitle(category.key)}',
+                                  '$itemCountLabel | ${_categorySubtitle(category.key)}',
                                   style: Theme.of(context)
                                       .textTheme
                                       .bodyMedium
@@ -1309,6 +1419,9 @@ class _CategoryProductRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isAvailable = _isPositionAvailable(position);
+    final isFrozen = _isFrozenPosition(position);
+    final isFries = _isFriesPosition(position);
+    final isUdka = _categoryKeyForPosition(position) == 'udka';
 
     return Material(
       color: Colors.transparent,
@@ -1354,14 +1467,18 @@ class _CategoryProductRow extends StatelessWidget {
                             fontWeight: FontWeight.w800,
                           ),
                     ),
-                    if (_isFrozenPosition(position)) ...[
+                    if (isFrozen || isFries) ...[
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
-                        children: const [
-                          _ProductStateBadge(label: 'MROZONE'),
-                          _ProductStateBadge(label: 'DO ODGRZANIA'),
+                        children: [
+                          if (isFrozen) ...const [
+                            _ProductStateBadge(label: 'VAC'),
+                            _ProductStateBadge(label: 'SOSY PLATNE'),
+                          ],
+                          if (isFries)
+                            const _ProductStateBadge(label: 'KETCHUP GRATIS'),
                         ],
                       ),
                     ],
@@ -1382,6 +1499,10 @@ class _CategoryProductRow extends StatelessWidget {
                             height: 1.3,
                           ),
                     ),
+                    if (isUdka) ...[
+                      const SizedBox(height: 8),
+                      const _UdkaAvailabilityPanel(compact: true),
+                    ],
                     const SizedBox(height: 8),
                     _PrepTimeBadge(
                       minutes: _prepMinutesOrFallback(position),
@@ -1938,6 +2059,7 @@ class _CartSummaryScreen extends StatefulWidget {
 }
 
 class _CartSummaryScreenState extends State<_CartSummaryScreen> {
+  static const int _udkaThermalPackagingCartEntryId = -90001;
   late List<_CartEntry> _entries;
   late final List<({String title, String subtitle})> _addresses;
   final TextEditingController _noteController = TextEditingController();
@@ -1948,7 +2070,9 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   final Set<int> _sauceValidationEntryIds = <int>{};
   final Set<int> _expandedAdditionalSauceEntryIds = <int>{};
   _UdkaPickupEstimate? _udkaPickupEstimate;
+  _UdkaAvailability? _udkaAvailability;
   String _pickupLocationAddress = '';
+  bool _udkaTakeoutSelected = false;
   int _fulfillmentIndex = 0;
   int _addressIndex = 0;
   String? _selectedPaymentMethod;
@@ -1975,6 +2099,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     _enforceFulfillmentConstraints();
     _loadDeliveryEstimate();
     _refreshUdkaPickupEstimate();
+    _refreshUdkaAvailability();
     _loadPickupLocationAddress();
     _ensureCartEntryOptionsLoaded();
   }
@@ -1991,7 +2116,8 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
 
   void _ensureCartEntryOptionsLoaded() {
     for (final entry in _entries) {
-      if (!_supportsComplimentarySauceSelection(entry.position)) {
+      if (!_supportsComplimentarySauceSelection(entry.position) &&
+          !_supportsUdkaCartSauceSelection(entry.position)) {
         continue;
       }
       if (_optionsByEntryId.containsKey(entry.id) ||
@@ -2179,6 +2305,31 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     }
   }
 
+  Future<void> _refreshUdkaAvailability() async {
+    if (!_cartContainsUdka()) {
+      if (mounted &&
+          (_udkaAvailability != null || _udkaTakeoutSelected)) {
+        setState(() {
+          _udkaAvailability = null;
+          _udkaTakeoutSelected = false;
+        });
+      }
+      return;
+    }
+
+    try {
+      final availability = await _fetchUdkaAvailability();
+      if (!mounted) {
+        return;
+      }
+      setState(() => _udkaAvailability = availability);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _udkaAvailability = null);
+      }
+    }
+  }
+
   bool _cartContainsUdka() => _containsUdkaCartEntries(_entries);
 
   bool _cartContainsIceCream() => _containsIceCreamCartEntries(_entries);
@@ -2296,6 +2447,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     });
     _syncEntries();
     _refreshUdkaPickupEstimate();
+    _refreshUdkaAvailability();
   }
 
   Future<void> _openPersonalization(_CartEntry entry) async {
@@ -2319,6 +2471,14 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     _ensureCartEntryOptionsLoaded();
     _syncEntries();
     _refreshUdkaPickupEstimate();
+    _refreshUdkaAvailability();
+  }
+
+  void _setUdkaTakeoutSelected(bool value) {
+    setState(() {
+      _udkaTakeoutSelected = value;
+      _redeemedPoints = _effectiveRedeemedPoints();
+    });
   }
 
   Future<void> _showAddAddressDialog() async {
@@ -2369,6 +2529,8 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
             onCheckoutConfirmed: () {
               setState(() {
                 _entries.clear();
+                _udkaAvailability = null;
+                _udkaTakeoutSelected = false;
               });
               widget.onCartChanged(const <_CartEntry>[]);
             },
@@ -2460,11 +2622,19 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     return clampedPoints - (clampedPoints % 10);
   }
 
-  int _effectiveRedeemedPoints() {
-    final subtotal = _entries.fold<double>(
+  double _udkaThermalPackagingFee() =>
+      _udkaTakeoutSelected ? (_udkaAvailability?.thermalPackagingFee ?? 0) : 0;
+
+  double _cartSubtotalAmount() {
+    final entriesSubtotal = _entries.fold<double>(
       0,
       (sum, entry) => sum + _entryPrice(entry),
     );
+    return entriesSubtotal + _udkaThermalPackagingFee();
+  }
+
+  int _effectiveRedeemedPoints() {
+    final subtotal = _cartSubtotalAmount();
     final maxRedeemablePoints = _maxRedeemablePoints(subtotal);
     if (maxRedeemablePoints <= 0) {
       return 0;
@@ -2487,16 +2657,46 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                 : 'Adres odbioru zostanie potwierdzony przy zamowieniu',
             subtitle: _fulfillmentOptions[_fulfillmentIndex].label,
           );
-    final subtotal = _entries.fold<double>(
-      0,
-      (sum, entry) => sum + _entryPrice(entry),
-    );
+    final subtotal = _cartSubtotalAmount();
     final redeemedPoints = _effectiveRedeemedPoints();
     final redeemedAmount = _redeemedAmountForPoints(redeemedPoints);
     final double total = math.max(0.0, subtotal - redeemedAmount);
     final quickNote = _noteController.text.trim();
     final estimatedPrepMinutes = _estimatedPrepMinutes();
     final etaMinutes = _summaryEtaMinutes(estimatedPrepMinutes);
+    final notes = <String>[
+      if (quickNote.isNotEmpty) quickNote,
+      if (_udkaTakeoutSelected)
+        _udkaThermalPackagingFee() > 0
+            ? 'Udka na wynos. Opakowanie termiczne doliczone: ${_currencyLabel(_udkaThermalPackagingFee())}.'
+            : 'Udka na wynos. Koszt opakowania termicznego do potwierdzenia po uzupelnieniu danych.',
+    ].join('\n');
+    final items = _entries
+        .map(
+          (entry) => CheckoutVerificationItem(
+            cartEntryId: entry.id,
+            positionId: _positionId(entry.position),
+            name: _title(entry.position, 0),
+            description: _checkoutItemDescription(entry),
+            photoUrl: _photo(entry.position),
+            calories: _positionCalories(entry.position),
+            price: _entryPrice(entry),
+          ),
+        )
+        .toList(growable: true);
+    if (_udkaTakeoutSelected && _udkaThermalPackagingFee() > 0) {
+      items.add(
+        CheckoutVerificationItem(
+          cartEntryId: _udkaThermalPackagingCartEntryId,
+          positionId: null,
+          name: 'Opakowanie termiczne do udek',
+          description: 'Udka na wynos z doliczonym opakowaniem termicznym.',
+          photoUrl: null,
+          calories: null,
+          price: _udkaThermalPackagingFee(),
+        ),
+      );
+    }
 
     return CheckoutVerificationRequest(
       createdAt: DateTime.now().toUtc(),
@@ -2515,31 +2715,16 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
         subtitle: selectedAddress.subtitle,
         etaLabel: _addressEtaLabel(estimatedPrepMinutes),
       ),
-      items: _entries
-          .map(
-            (entry) => CheckoutVerificationItem(
-              cartEntryId: entry.id,
-              positionId: _positionId(entry.position),
-              name: _title(entry.position, 0),
-              description: _checkoutItemDescription(entry),
-              photoUrl: _photo(entry.position),
-              calories: _positionCalories(entry.position),
-              price: _entryPrice(entry),
-            ),
-          )
-          .toList(growable: false),
+      items: items,
       sessionToken: widget.authSession.sessionToken,
       userEmail: widget.authSession.email,
-      notes: quickNote.isEmpty ? null : quickNote,
+      notes: notes.isEmpty ? null : notes,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final subtotal = _entries.fold<double>(
-      0,
-      (sum, entry) => sum + _entryPrice(entry),
-    );
+    final subtotal = _cartSubtotalAmount();
     final redeemedPoints = _effectiveRedeemedPoints();
     final redeemedAmount = _redeemedAmountForPoints(redeemedPoints);
     final double total = math.max(0.0, subtotal - redeemedAmount);
@@ -2678,6 +2863,48 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                                                   ),
                                                 ),
                                               )
+                                            : _supportsUdkaCartSauceSelection(
+                                                _entries[index].position,
+                                              )
+                                                ? Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                      top: 10,
+                                                    ),
+                                                    child:
+                                                        _CartUdkaSauceSelectionCard(
+                                                      entry: _entries[index],
+                                                      options:
+                                                          _sauceOptionsForEntry(
+                                                        _entries[index],
+                                                      ),
+                                                      isLoading:
+                                                          _loadingOptionsEntryIds
+                                                              .contains(
+                                                        _entries[index].id,
+                                                      ),
+                                                      error:
+                                                          _optionsErrorsByEntryId[
+                                                              _entries[index]
+                                                                  .id],
+                                                      onRetry: () =>
+                                                          _loadEntryOptions(
+                                                        _entries[index],
+                                                      ),
+                                                      onIncrement: (label) =>
+                                                          _changeEntryAdditionalSauceCount(
+                                                        _entries[index],
+                                                        label,
+                                                        1,
+                                                      ),
+                                                      onDecrement: (label) =>
+                                                          _changeEntryAdditionalSauceCount(
+                                                        _entries[index],
+                                                        label,
+                                                        -1,
+                                                      ),
+                                                    ),
+                                                  )
                                             : null,
                                   ),
                                 ],
@@ -2695,6 +2922,62 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                               fontWeight: FontWeight.w700,
                               height: 1.35,
                             ),
+                      ),
+                    ],
+                    if (_cartContainsUdka()) ...[
+                      const SizedBox(height: 14),
+                      _SummarySection(
+                        title: 'Udka na wynos',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Udka mozna kupic na wynos. Rezerwacja aktywuje sie po oplaceniu zamowienia i przypisze odbior do wybranej transzy.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: const Color(0xFFD5C7BA),
+                                    height: 1.35,
+                                  ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _TakeoutChoiceTile(
+                                    label: 'Na miejscu',
+                                    selected: !_udkaTakeoutSelected,
+                                    onTap: () => _setUdkaTakeoutSelected(false),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: _TakeoutChoiceTile(
+                                    label: 'Na wynos',
+                                    selected: _udkaTakeoutSelected,
+                                    onTap: () => _setUdkaTakeoutSelected(true),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              _udkaTakeoutSelected
+                                  ? _udkaThermalPackagingFee() > 0
+                                      ? 'Opakowanie termiczne zostanie doliczone jako osobna pozycja: ${_currencyLabel(_udkaThermalPackagingFee())}.'
+                                      : 'Koszt opakowania termicznego uzupelnimy po dostarczeniu finalnych danych.'
+                                  : 'Po przejsciu na opcje na wynos doliczymy opakowanie termiczne, jesli bedzie wymagane.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: const Color(0xFFD5C7BA),
+                                    height: 1.35,
+                                  ),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                     const SizedBox(height: 14),
@@ -3070,6 +3353,35 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                           ),
                           Text(
                             'Punkty: - PLN ${_fmt(redeemedAmount)}',
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(
+                                  color: const Color(0xFFFFB66A),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    if (_udkaTakeoutSelected &&
+                        _udkaThermalPackagingFee() > 0) ...[
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Opakowanie termiczne: ${_currencyLabel(_udkaThermalPackagingFee())}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFFD5C7BA),
+                                  ),
+                            ),
+                          ),
+                          Text(
+                            'Na wynos',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium
@@ -3483,6 +3795,10 @@ class _ProductPreviewDialog extends StatelessWidget {
     final theme = Theme.of(context);
     final title = _title(position, 0);
     final description = _description(position);
+    final isFrozen = _isFrozenPosition(position);
+    final isFries = _isFriesPosition(position);
+    final isUdka = _categoryKeyForPosition(position) == 'udka';
+    final additionalPhotoUrls = _additionalPhotoUrls(position);
 
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
@@ -3546,14 +3862,18 @@ class _ProductPreviewDialog extends StatelessWidget {
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  if (_isFrozenPosition(position)) ...[
+                  if (isFrozen || isFries) ...[
                     const SizedBox(height: 10),
-                    const Wrap(
+                    Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        _ProductStateBadge(label: 'MROZONE'),
-                        _ProductStateBadge(label: 'DO ODGRZANIA'),
+                        if (isFrozen) ...const [
+                          _ProductStateBadge(label: 'VAC'),
+                          _ProductStateBadge(label: 'SOSY PLATNE'),
+                        ],
+                        if (isFries)
+                          const _ProductStateBadge(label: 'KETCHUP GRATIS'),
                       ],
                     ),
                   ],
@@ -3572,6 +3892,42 @@ class _ProductPreviewDialog extends StatelessWidget {
                       height: 1.5,
                     ),
                   ),
+                  if (additionalPhotoUrls.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    Text(
+                      'Dodatkowe zdjecie',
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: const Color(0xFFF8EEE0),
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 112,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: additionalPhotoUrls.length,
+                        separatorBuilder: (_, __) => const SizedBox(width: 10),
+                        itemBuilder: (context, index) => ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            width: 132,
+                            color: const Color(0xFF211A16),
+                            child: _PositionImage(
+                              photoUrl: additionalPhotoUrls[index],
+                              title: '$title ${index + 2}',
+                              fit: BoxFit.cover,
+                              alignment: Alignment.center,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  if (isUdka) ...[
+                    const SizedBox(height: 16),
+                    const _UdkaAvailabilityPanel(),
+                  ],
                   const SizedBox(height: 18),
                   Wrap(
                     spacing: 10,
@@ -3596,6 +3952,241 @@ class _ProductPreviewDialog extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _UdkaAvailabilityPanel extends StatefulWidget {
+  const _UdkaAvailabilityPanel({
+    this.compact = false,
+  });
+
+  final bool compact;
+
+  @override
+  State<_UdkaAvailabilityPanel> createState() => _UdkaAvailabilityPanelState();
+}
+
+class _UdkaAvailabilityPanelState extends State<_UdkaAvailabilityPanel> {
+  late final Future<_UdkaAvailability?> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _fetchUdkaAvailability();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder<_UdkaAvailability?>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(
+              horizontal: widget.compact ? 10 : 12,
+              vertical: widget.compact ? 8 : 10,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFF221C18),
+              borderRadius: BorderRadius.circular(widget.compact ? 12 : 14),
+              border: Border.all(color: const Color(0x18FFFFFF)),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFFE98B38),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Ladowanie dostepnosci udek...',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFFD6C4B7),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(
+              horizontal: widget.compact ? 10 : 12,
+              vertical: widget.compact ? 8 : 10,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0x221E90FF),
+              borderRadius: BorderRadius.circular(widget.compact ? 12 : 14),
+              border: Border.all(color: const Color(0x22FFFFFF)),
+            ),
+            child: Text(
+              'Dostepnosc udek odswieza sie w checkoutcie.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: const Color(0xFFD6C4B7),
+                height: 1.3,
+              ),
+            ),
+          );
+        }
+
+        final availability = snapshot.data;
+        if (availability == null) {
+          return const SizedBox.shrink();
+        }
+
+        if (widget.compact) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            decoration: BoxDecoration(
+              color: const Color(0xFF221C18),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0x1FFFFFFF)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Dostepne teraz: ${availability.availableNowPieces} szt. | transza ${_formatScheduledPickupCompact(availability.nextReadyAt)}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFFF2E6DB),
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Wypiekane: ${availability.bakingPieces} szt. | wolne miejsca: ${availability.nextBatchOpenPieces} | rezerwacja po oplaceniu',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: const Color(0xFFD2BFB2),
+                    height: 1.3,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF211A16),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0x1FFFFFFF)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Dostepnosc i rezerwacja',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: const Color(0xFFF8EEE0),
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _UdkaAvailabilityLine(
+                label: 'Dostepne teraz',
+                value: '${availability.availableNowPieces} szt.',
+              ),
+              _UdkaAvailabilityLine(
+                label: 'Wypiekane',
+                value: '${availability.bakingPieces} szt.',
+              ),
+              _UdkaAvailabilityLine(
+                label: 'Najblizsza transza gotowa o',
+                value: _formatScheduledPickupCompact(availability.nextReadyAt),
+              ),
+              _UdkaAvailabilityLine(
+                label: 'Wolne miejsca w tej transzy',
+                value: '${availability.nextBatchOpenPieces} szt.',
+              ),
+              if (availability.followingReadyAt != null)
+                _UdkaAvailabilityLine(
+                  label: 'Kolejna transza',
+                  value:
+                      '${_formatScheduledPickupCompact(availability.followingReadyAt!)} | ${availability.followingBatchOpenPieces} szt. wolnych',
+                ),
+              const SizedBox(height: 10),
+              Text(
+                availability.reservableAfterPayment
+                    ? 'Rezerwacja aktywuje sie po oplaceniu zamowienia.'
+                    : 'Rezerwacja chwilowo niedostepna.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFD7C5B8),
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                availability.takeoutSupported
+                    ? availability.thermalPackagingFee != null
+                        ? 'Na wynos: tak. Opakowanie termiczne: ${_currencyLabel(availability.thermalPackagingFee!)}.'
+                        : 'Na wynos: tak. Koszt opakowania termicznego uzupelnimy po dostarczeniu finalnych danych.'
+                    : 'Na wynos: nie.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: const Color(0xFFD7C5B8),
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _UdkaAvailabilityLine extends StatelessWidget {
+  const _UdkaAvailabilityLine({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Text(
+              '$label:',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: const Color(0xFFBDA89A),
+                height: 1.3,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            value,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFFF2E6DB),
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -3691,10 +4282,14 @@ class _SummaryProductTile extends StatelessWidget {
                       top: 6,
                       right: 6,
                       child: _PersonalizeThumbButton(
-                        label: _supportsComplimentarySauceSelection(entry.position)
+                        label: _supportsComplimentarySauceSelection(entry.position) ||
+                                _supportsUdkaCartSauceSelection(entry.position)
                             ? 'DODATKI'
                             : 'SOSY+',
                         tooltip: _supportsComplimentarySauceSelection(
+                                  entry.position,
+                                ) ||
+                                _supportsUdkaCartSauceSelection(
                           entry.position,
                         )
                             ? 'Wybierz dodatki i sposob podania'
@@ -3727,8 +4322,8 @@ class _SummaryProductTile extends StatelessWidget {
                         spacing: 6,
                         runSpacing: 6,
                         children: [
-                          _ProductStateBadge(label: 'MROZONE'),
-                          _ProductStateBadge(label: 'DO ODGRZANIA'),
+                          _ProductStateBadge(label: 'VAC'),
+                          _ProductStateBadge(label: 'SOSY PLATNE'),
                         ],
                       ),
                     ],
@@ -4035,6 +4630,147 @@ class _CartSauceSelectionCard extends StatelessWidget {
   }
 }
 
+class _CartUdkaSauceSelectionCard extends StatelessWidget {
+  const _CartUdkaSauceSelectionCard({
+    required this.entry,
+    required this.options,
+    required this.isLoading,
+    required this.error,
+    required this.onRetry,
+    required this.onIncrement,
+    required this.onDecrement,
+  });
+
+  final _CartEntry entry;
+  final List<_PersonalizationOption> options;
+  final bool isLoading;
+  final Object? error;
+  final VoidCallback onRetry;
+  final ValueChanged<String> onIncrement;
+  final ValueChanged<String> onDecrement;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final pricing = _extraPricingBreakdown(entry.customization);
+    final selectedSauceCount = entry.customization
+        .selectedLabelsForGroup('sauce')
+        .fold<int>(
+          0,
+          (sum, label) => sum + (entry.customization.extras[label] ?? 0),
+        );
+
+    Widget content;
+    if (isLoading) {
+      content = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 14),
+        child: Center(
+          child: CircularProgressIndicator(color: Color(0xFFE98B38)),
+        ),
+      );
+    } else if (error != null) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Nie udalo sie pobrac listy polew i sosow do udek.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: const Color(0xFFF7EEE8),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Sprobuj ponownie, aby odswiezyc dostepne polewy.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFFD5C7BA),
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton(
+            onPressed: onRetry,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFF7EEE6),
+              side: const BorderSide(color: Color(0x33FFFFFF)),
+            ),
+            child: const Text('Sprobuj ponownie'),
+          ),
+        ],
+      );
+    } else if (options.isEmpty) {
+      content = Text(
+        'Brak aktywnych polew i sosow dla tej pozycji.',
+        style: theme.textTheme.bodyMedium?.copyWith(
+          color: const Color(0xFFD5C7BA),
+          height: 1.35,
+        ),
+      );
+    } else {
+      content = Column(
+        children: [
+          for (var index = 0; index < options.length; index++) ...[
+            if (index > 0) const SizedBox(height: 8),
+            _AdditionalSauceRow(
+              option: options[index],
+              count: entry.customization.extras[options[index].label] ?? 0,
+              onIncrement: () => onIncrement(options[index].label),
+              onDecrement: () => onDecrement(options[index].label),
+            ),
+          ],
+        ],
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF181513),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0x22FFFFFF)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Wybierz polewe / sos do udek',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: const Color(0xFFF8EEE0),
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Text(
+                selectedSauceCount > 0
+                    ? '$selectedSauceCount wybrane | ${_currencyLabel(pricing.totalPrice)}'
+                    : 'Opcjonalne',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: const Color(0xFFD5C7BA),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Polewe i sos do udek wybierzesz bezposrednio w koszyku. Rezerwacja aktywuje sie po oplaceniu zamowienia.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: const Color(0xFFD5C7BA),
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          content,
+        ],
+      ),
+    );
+  }
+}
+
 class _InlineSauceRadioRow extends StatelessWidget {
   const _InlineSauceRadioRow({
     required this.option,
@@ -4099,12 +4835,25 @@ class _InlineSauceRadioRow extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  option.label,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFFF8EEE0),
-                        fontWeight: FontWeight.w700,
-                      ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      option.label,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFFF8EEE0),
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Kolejna sztuka: ${_currencyLabel(option.price)}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFFD5C7BA),
+                            height: 1.2,
+                          ),
+                    ),
+                  ],
                 ),
               ),
               if (isSelected)
@@ -4142,7 +4891,7 @@ class _AdditionalSaucesToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final summary = paidSauceCount > 0
-        ? '$paidSauceCount platne • PLN ${_fmt(paidSaucePrice)}'
+        ? '$paidSauceCount platne | ${_currencyLabel(paidSaucePrice)}'
         : 'Opcjonalne';
 
     return Material(
@@ -4234,7 +4983,7 @@ class _AdditionalSauceRow extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  'Kazda dodatkowa sztuka: PLN ${_fmt(option.price)}',
+                  'Kazda dodatkowa sztuka: ${_currencyLabel(option.price)}',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: const Color(0xFFD5C7BA),
                   ),
@@ -4373,8 +5122,13 @@ class _CartPersonalizationScreenState
     final description = _description(widget.entry.position);
     final isZapiekanka =
         _supportsZapiekankaServingOptions(widget.entry.position);
-    final usesCartSauceSelection =
+    final isVacPosition = _isFrozenPosition(widget.entry.position);
+    final usesComplimentaryCartSauceSelection =
         _supportsComplimentarySauceSelection(widget.entry.position);
+    final usesUdkaCartSauceSelection =
+        _supportsUdkaCartSauceSelection(widget.entry.position);
+    final usesCartSauceSelection =
+        usesComplimentaryCartSauceSelection || usesUdkaCartSauceSelection;
     final addonSections = _buildPersonalizationSections(
       _options,
       widget.entry.position,
@@ -4433,8 +5187,12 @@ class _CartPersonalizationScreenState
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 24),
           child: Text(
-            usesCartSauceSelection
-                ? 'Sosy wybierzesz bezposrednio w koszyku. Tutaj nie ma innych aktywnych dodatkow do personalizacji.'
+            isVacPosition
+                ? 'Sosy do zapiekanki VAC sa platne. Aktywne dodatki i sosy pojawia sie tutaj po podpieciu w panelu dodatkow.'
+                : usesCartSauceSelection
+                ? usesUdkaCartSauceSelection
+                    ? 'Polewe i sosy do udek wybierzesz bezposrednio w koszyku. Tutaj nie ma innych aktywnych dodatkow do personalizacji.'
+                    : 'Sosy wybierzesz bezposrednio w koszyku. Tutaj nie ma innych aktywnych dodatkow do personalizacji.'
                 : 'Dla tej pozycji nie ma aktywnych dodatkow do personalizacji.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
@@ -4474,6 +5232,7 @@ class _CartPersonalizationScreenState
                     subtitle: option.subtitle,
                     assetPath: option.assetPath,
                     emoji: option.emoji,
+                    price: option.price,
                     count: _customization.extras[option.label] ?? 0,
                     onDecrement: () => _changeExtra(option.label, -1),
                     onIncrement: () => _changeExtra(option.label, 1),
@@ -4577,13 +5336,27 @@ class _CartPersonalizationScreenState
                     _SummarySection(
                       title: usesCartSauceSelection
                           ? 'Dodatki i podanie'
-                          : 'Dodatki',
+                          : isVacPosition
+                              ? 'Dodatki i sosy VAC'
+                              : 'Dodatki',
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (usesCartSauceSelection) ...[
                             Text(
-                              'Sosy do tej zapiekanki wybierzesz w koszyku, w osobnej sekcji z limitem gratisowych sosow.',
+                              usesUdkaCartSauceSelection
+                                  ? 'Polewe i sos do udek wybierzesz w koszyku, przy konkretnej pozycji.'
+                                  : 'Sosy do tej zapiekanki wybierzesz w koszyku, w osobnej sekcji z limitem gratisowych sosow.',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFFD7C5B8),
+                                height: 1.35,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          if (isVacPosition) ...[
+                            Text(
+                              'To jest pozycja do wypieku w domu. Sosy do zapiekanek VAC sa platne i pokazujemy je tutaj jak zwykle dodatki.',
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 color: const Color(0xFFD7C5B8),
                                 height: 1.35,
@@ -4823,6 +5596,7 @@ class _CustomizationOptionTile extends StatelessWidget {
     required this.subtitle,
     required this.assetPath,
     required this.emoji,
+    required this.price,
     required this.count,
     required this.onDecrement,
     required this.onIncrement,
@@ -4832,6 +5606,7 @@ class _CustomizationOptionTile extends StatelessWidget {
   final String subtitle;
   final String? assetPath;
   final String emoji;
+  final double price;
   final int count;
   final VoidCallback onDecrement;
   final VoidCallback onIncrement;
@@ -4931,6 +5706,22 @@ class _CustomizationOptionTile extends StatelessWidget {
                   height: 1.2,
                   fontSize: 11,
                 ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0x181BC47D),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: const Color(0x3A1BC47D)),
+            ),
+            child: Text(
+              _currencyLabel(price),
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: const Color(0xFFCEF4E2),
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
@@ -5463,6 +6254,68 @@ class _AddAddressTile extends StatelessWidget {
         ),
         child:
             const Icon(Icons.add_rounded, color: Color(0xFFF6E8D9), size: 34),
+      ),
+    );
+  }
+}
+
+class _TakeoutChoiceTile extends StatelessWidget {
+  const _TakeoutChoiceTile({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0x16FFB061)
+                : const Color(0xFF211C19),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? const Color(0x88FFB061)
+                  : const Color(0x22FFFFFF),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                selected
+                    ? Icons.check_circle_rounded
+                    : Icons.radio_button_unchecked_rounded,
+                size: 18,
+                color: selected
+                    ? const Color(0xFFFFC88E)
+                    : const Color(0xFF8D8077),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: selected
+                      ? const Color(0xFFF8EEE0)
+                      : const Color(0xFFD5C7BA),
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -7135,9 +7988,6 @@ final Map<String, _PersonalizationOption> _knownPersonalizationOptionsByLabel =
 Future<List<_PersonalizationOption>> _fetchPersonalizationOptions(
   Map<String, dynamic> position,
 ) async {
-  if (_isFrozenPosition(position)) {
-    return const <_PersonalizationOption>[];
-  }
   final positionId = _positionId(position);
   if (positionId == null) {
     return const <_PersonalizationOption>[];
@@ -7450,6 +8300,13 @@ List<_DashboardCategory> _buildDashboardCategories(
       Color(0xFF6A48D7),
     ),
     (
+      'vac',
+      'Do wypieku (VAC)',
+      Icons.kitchen_rounded,
+      Color(0xFF53B9C7),
+      Color(0xFF277C8D),
+    ),
+    (
       'dodatki',
       'Dodatki',
       Icons.lunch_dining_rounded,
@@ -7503,9 +8360,21 @@ String _categoryKeyForPosition(Map<String, dynamic> position) {
       position['position_type']?.toString().trim().toLowerCase() ?? '';
   final prepGroup =
       position['prep_group_key']?.toString().trim().toLowerCase() ?? '';
-  final title = _title(position, 0).trim().toLowerCase();
-  final description = _description(position).trim().toLowerCase();
+  final title = _positionRawTitle(position, 0).trim().toLowerCase();
+  final description = _positionRawDescription(position).trim().toLowerCase();
   final haystack = '$positionType $prepGroup $title $description';
+
+  if (positionType.contains('vac') ||
+      prepGroup.contains('vac') ||
+      positionType.contains('frozen') ||
+      prepGroup.contains('frozen') ||
+      haystack.contains('vac') ||
+      haystack.contains('mroz') ||
+      haystack.contains('zamroz') ||
+      haystack.contains('odgrzan') ||
+      haystack.contains('wypieku w domu')) {
+    return 'vac';
+  }
 
   if (positionType.contains('kids') ||
       prepGroup.contains('kids') ||
@@ -7558,11 +8427,13 @@ String _categoryKeyForPosition(Map<String, dynamic> position) {
 String _categorySubtitle(String categoryKey) {
   switch (categoryKey) {
     case 'zapiekanki':
-      return 'Klasyczne oraz hermetycznie pakowane warianty do odgrzania.';
+      return 'Klasyczne zapiekanki 0,5 m z opcja gratisowego sosu.';
     case 'kids':
       return 'Mniejsze zapiekanki 25 cm w osobnej sekcji.';
+    case 'vac':
+      return 'Zapiekanki do wypieku w domu. Sosy do VAC sa platne.';
     case 'udka':
-      return 'Pakiety udek z kurczaka przygotowywane w transzach.';
+      return 'Cale nogi z kurczaka z odbiorem w transzach i opcja rezerwacji.';
     case 'lody':
       return 'Chlodne pozycje na deser i szybka przerwe.';
     case 'napoje':
@@ -7594,23 +8465,67 @@ String? _categoryEtaLabel(_DashboardCategory category) {
   return 'do ${minutes.reduce(math.max)} min';
 }
 
-String _title(Map<String, dynamic> item, int fallbackIndex) =>
+String _positionRawTitle(Map<String, dynamic> item, int fallbackIndex) =>
     item['name']?.toString() ??
     item['title']?.toString() ??
     item['position_name']?.toString() ??
     'Pozycja ${fallbackIndex + 1}';
+
+String _title(Map<String, dynamic> item, int fallbackIndex) =>
+    _normalizePositionTitle(_positionRawTitle(item, fallbackIndex), item);
+
 String _description(Map<String, dynamic> item) {
-  final value = item['description']?.toString().trim();
-  return value == null || value.isEmpty
+  final value = _positionRawDescription(item).trim();
+  final resolved = value.isEmpty
       ? 'Wyrozniona pozycja z dzisiejszego menu.'
       : value;
+  return _normalizePositionDescription(resolved, item);
+}
+
+String _positionRawDescription(Map<String, dynamic> item) =>
+    item['description']?.toString().trim() ?? '';
+
+String _normalizePositionTitle(String rawTitle, Map<String, dynamic> item) {
+  if (_categoryKeyForPosition(item) == 'udka') {
+    return 'Udko z kurczaka - cala noga';
+  }
+  if (_categoryKeyForPosition(item) == 'vac') {
+    final normalized = rawTitle
+        .replaceAll(RegExp(r'\b50cm\b', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\bmrozona\b', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\bvac\b', caseSensitive: false), '')
+        .trim();
+    if (normalized.toLowerCase() == 'salame') {
+      return 'Salami';
+    }
+    return normalized.isEmpty ? 'Zapiekanka VAC' : normalized;
+  }
+  return rawTitle;
+}
+
+String _normalizePositionDescription(String rawDescription, Map<String, dynamic> item) {
+  var normalized = rawDescription.replaceAll(
+    "a'la oscypek",
+    "ser wedzony a'la oscypek",
+  );
+  if (_categoryKeyForPosition(item) == 'udka') {
+    normalized =
+        'Jedna cala noga z kurczaka pieczona na chrupiaco. Kazda kolejna sztuka w koszyku dodaje kolejne udko.';
+  }
+  if (_isFriesPosition(item) &&
+      !normalized.toLowerCase().contains('ketchup do frytek gratis')) {
+    normalized = '$normalized Ketchup do frytek gratis.';
+  }
+  return normalized;
 }
 
 String? _photo(Map<String, dynamic> item) {
   final categoryKey = _categoryKeyForPosition(item);
   final value = item['photo_url']?.toString().trim();
 
-  if (categoryKey == 'zapiekanki' || categoryKey == 'kids') {
+  if (categoryKey == 'zapiekanki' ||
+      categoryKey == 'kids' ||
+      categoryKey == 'vac') {
     if (value != null && value.isNotEmpty && _isBundledAssetPhoto(value)) {
       return _normalizeBundledAssetPhoto(value);
     }
@@ -7631,6 +8546,43 @@ String? _photo(Map<String, dynamic> item) {
   return _deriveDrinkAssetPath(item);
 }
 
+List<String> _additionalPhotoUrls(Map<String, dynamic> item) {
+  final values = <String>[];
+
+  void addIfPresent(Object? rawValue) {
+    if (rawValue == null) {
+      return;
+    }
+    if (rawValue is Iterable) {
+      for (final entry in rawValue) {
+        addIfPresent(entry);
+      }
+      return;
+    }
+    final normalized = rawValue.toString().trim();
+    if (normalized.isEmpty) {
+      return;
+    }
+    values.add(_normalizePhotoValue(normalized));
+  }
+
+  addIfPresent(item['secondary_photo_url']);
+  addIfPresent(item['photo_url_2']);
+  addIfPresent(item['alternate_photo_url']);
+  addIfPresent(item['gallery_photos']);
+  addIfPresent(item['additional_photos']);
+
+  final primaryPhoto = _photo(item);
+  final deduped = <String>[];
+  for (final value in values) {
+    if (value.isEmpty || value == primaryPhoto || deduped.contains(value)) {
+      continue;
+    }
+    deduped.add(value);
+  }
+  return deduped;
+}
+
 String _normalizePhotoValue(String value) {
   return _isBundledAssetPhoto(value)
       ? _normalizeBundledAssetPhoto(value)
@@ -7647,6 +8599,32 @@ class _UdkaPickupEstimate {
   final int etaMinutes;
   final String etaLabel;
   final DateTime scheduledPickupAt;
+}
+
+class _UdkaAvailability {
+  const _UdkaAvailability({
+    required this.availableNowPieces,
+    required this.bakingPieces,
+    required this.nextReadyAt,
+    required this.nextBatchOpenPieces,
+    required this.followingReadyAt,
+    required this.followingBatchOpenPieces,
+    required this.reservableAfterPayment,
+    required this.takeoutSupported,
+    required this.thermalPackagingFee,
+    required this.thermalPackagingFeeLabel,
+  });
+
+  final int availableNowPieces;
+  final int bakingPieces;
+  final DateTime nextReadyAt;
+  final int nextBatchOpenPieces;
+  final DateTime? followingReadyAt;
+  final int followingBatchOpenPieces;
+  final bool reservableAfterPayment;
+  final bool takeoutSupported;
+  final double? thermalPackagingFee;
+  final String? thermalPackagingFeeLabel;
 }
 
 DateTime? _openingDelayForHours(OpeningHoursData? openingHours,
@@ -7883,6 +8861,64 @@ Future<_UdkaPickupEstimate?> _fetchUdkaPickupEstimateForEntries(
   );
 }
 
+Future<_UdkaAvailability?> _fetchUdkaAvailability() async {
+  final response = await http
+      .get(
+        Uri.parse('${AppConfig.apiBaseUrl}/checkout/udka-availability'),
+        headers: const {
+          'Accept': 'application/json',
+        },
+      )
+      .timeout(const Duration(seconds: 6));
+
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw Exception(
+      'Backend zwrocil ${response.statusCode}: ${response.body}',
+    );
+  }
+
+  final decoded = jsonDecode(response.body);
+  if (decoded is! Map<String, dynamic>) {
+    throw Exception(
+      'Nieoczekiwany format odpowiedzi z /checkout/udka-availability.',
+    );
+  }
+
+  final nextReadyAt = DateTime.tryParse(
+    decoded['next_ready_at']?.toString() ?? '',
+  );
+  if (nextReadyAt == null) {
+    throw Exception(
+      'Brak next_ready_at w odpowiedzi z /checkout/udka-availability.',
+    );
+  }
+
+  final followingReadyAt = DateTime.tryParse(
+    decoded['following_ready_at']?.toString() ?? '',
+  );
+  final thermalPackagingFeeRaw = decoded['thermal_packaging_fee'];
+  final thermalPackagingFee = thermalPackagingFeeRaw is num
+      ? thermalPackagingFeeRaw.toDouble()
+      : double.tryParse(thermalPackagingFeeRaw?.toString() ?? '');
+
+  return _UdkaAvailability(
+    availableNowPieces: _asInt(decoded['available_now_pieces']) ?? 0,
+    bakingPieces: _asInt(decoded['baking_pieces']) ?? 0,
+    nextReadyAt: nextReadyAt,
+    nextBatchOpenPieces: _asInt(decoded['next_batch_open_pieces']) ?? 0,
+    followingReadyAt: followingReadyAt,
+    followingBatchOpenPieces:
+        _asInt(decoded['following_batch_open_pieces']) ?? 0,
+    reservableAfterPayment:
+        decoded['reservable_after_payment']?.toString().toLowerCase() !=
+            'false',
+    takeoutSupported:
+        decoded['takeout_supported']?.toString().toLowerCase() != 'false',
+    thermalPackagingFee: thermalPackagingFee,
+    thermalPackagingFeeLabel: decoded['thermal_packaging_fee_label']?.toString(),
+  );
+}
+
 DateTime? _scheduledPickupDateTimeForCheckout(
   CheckoutVerificationResponse checkout,
 ) {
@@ -7931,7 +8967,9 @@ bool _checkoutContainsUdka(CheckoutVerificationResponse checkout) {
 
 String? _deriveZapiekankaAssetPath(Map<String, dynamic> item) {
   final categoryKey = _categoryKeyForPosition(item);
-  if (categoryKey != 'zapiekanki' && categoryKey != 'kids') {
+  if (categoryKey != 'zapiekanki' &&
+      categoryKey != 'kids' &&
+      categoryKey != 'vac') {
     return null;
   }
 
@@ -8140,6 +9178,7 @@ String _entryPriceLabel(_CartEntry entry) => 'PLN ${_fmt(_entryPrice(entry))}';
 
 String _priceLabel(Map<String, dynamic> item) =>
     _price(item) == null ? 'PLN --' : 'PLN ${_fmt(_price(item)!)}';
+String _currencyLabel(double value) => 'PLN ${_fmt(value)}';
 String _fmt(double value) => value.toStringAsFixed(2);
 String _kcal(Map<String, dynamic> item) =>
     item['calories'] == null ? '-- kcal' : '${item['calories']} kcal';
@@ -8410,16 +9449,21 @@ bool _supportsComplimentarySauceSelection(Map<String, dynamic> position) {
       weight >= 180;
 }
 
+bool _supportsUdkaCartSauceSelection(Map<String, dynamic> position) =>
+    _categoryKeyForPosition(position) == 'udka';
+
 bool _isFrozenPosition(Map<String, dynamic> position) {
   final positionType =
       position['position_type']?.toString().trim().toLowerCase() ?? '';
   final title = _title(position, 0).trim().toLowerCase();
   final description = _description(position).trim().toLowerCase();
   final haystack = '$positionType $title $description';
-  return haystack.contains('frozen') ||
+  return haystack.contains('vac') ||
+      haystack.contains('frozen') ||
       haystack.contains('mroz') ||
       haystack.contains('zamroz') ||
-      haystack.contains('odgrzan');
+      haystack.contains('odgrzan') ||
+      haystack.contains('wypieku w domu');
 }
 
 BoxFit _positionImageFit(
@@ -8474,8 +9518,8 @@ bool _isFriesPosition(Map<String, dynamic> item) {
       item['position_type']?.toString().trim().toLowerCase() ?? '';
   final prepGroup =
       item['prep_group_key']?.toString().trim().toLowerCase() ?? '';
-  final title = _title(item, 0).trim().toLowerCase();
-  final description = _description(item).trim().toLowerCase();
+  final title = _positionRawTitle(item, 0).trim().toLowerCase();
+  final description = _positionRawDescription(item).trim().toLowerCase();
   final photoUrl = item['photo_url']?.toString().trim().toLowerCase() ?? '';
   final haystack = '$positionType $prepGroup $title $description $photoUrl';
   return haystack.contains('frytk') ||
@@ -8524,3 +9568,4 @@ bool _samePosition(Map<String, dynamic>? first, Map<String, dynamic>? second) =>
     first != null &&
     second != null &&
     _positionKey(first) == _positionKey(second);
+
