@@ -1,5 +1,7 @@
 import java.util.Properties
 
+val googlePlayTargetSdk = 35
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -15,7 +17,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "pl.zapieapp.mobile"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = googlePlayTargetSdk
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -41,10 +43,11 @@ android {
     defaultConfig {
         applicationId = "pl.zapieapp.mobile"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = googlePlayTargetSdk
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         manifestPlaceholders["appName"] = "Zapie Appka"
+        manifestPlaceholders["usesCleartextTraffic"] = "false"
     }
 
     flavorDimensions += "env"
@@ -54,10 +57,12 @@ android {
             applicationIdSuffix = ".dev"
             versionNameSuffix = "-dev"
             manifestPlaceholders["appName"] = "Zapie Appka DEV"
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
         }
         create("prod") {
             dimension = "env"
             manifestPlaceholders["appName"] = "Zapie Appka"
+            manifestPlaceholders["usesCleartextTraffic"] = "false"
         }
     }
 
@@ -96,6 +101,22 @@ gradle.taskGraph.whenReady {
     if (blockedTasks.isNotEmpty()) {
         throw GradleException(
             "Unflavored Android build is disabled. Use --flavor dev or --flavor prod.",
+        )
+    }
+
+    val prodReleaseTasks = allTasks
+        .map { it.name }
+        .filter { taskName ->
+            taskName in setOf(
+                "assembleProdRelease",
+                "bundleProdRelease",
+                "installProdRelease",
+            )
+        }
+
+    if (prodReleaseTasks.isNotEmpty() && !keystorePropertiesFile.exists()) {
+        throw GradleException(
+            "Production release builds require android/key.properties with the Play upload key.",
         )
     }
 }
