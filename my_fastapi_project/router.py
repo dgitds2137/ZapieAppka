@@ -48,6 +48,33 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         decoded_pwd = base64.b64decode(password.encode("utf-8")).decode("utf-8")
         return UserService(db).login(email, decoded_pwd)
 
+    @r.post("/register")
+    def register(
+        email: str = Form(...),
+        password: str = Form(...),
+        name: str | None = Form(None),
+        phone: str | None = Form(None),
+        db: Session = Depends(get_db),
+    ):
+        decoded_pwd = base64.b64decode(password.encode("utf-8")).decode("utf-8")
+        return UserService(db).register(
+            email=email,
+            password=decoded_pwd,
+            name=name,
+            phone=phone,
+        )
+
+    @r.delete("/account")
+    def delete_account(
+        session_token: str = Form(...),
+        email: str | None = Form(None),
+        db: Session = Depends(get_db),
+    ):
+        return UserService(db).delete_account(
+            session_token=session_token,
+            email=email,
+        )
+
     @r.get("/get_user/{email}", response_model=UserSchema)
     def get_user(email: str, db: Session = Depends(get_db)):
         user = UserService(db).get_user(email)
