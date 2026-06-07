@@ -107,13 +107,16 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
     try {
       final response = await http.post(
         uri,
-        headers: const {'Accept': 'application/json'},
-        body: {
+        headers: const {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
           'code': code,
           if (state != null) 'state': state,
           if (email != null && email.isNotEmpty) 'email': email,
           'redirect_uri': AppConfig.authRedirectUri,
-        },
+        }),
       ).timeout(const Duration(seconds: 10));
 
       final body = response.body.isEmpty
@@ -241,9 +244,37 @@ Map<String, Object?> _decodeState(String? value) {
     return const {};
   }
 
+  Map<String, Object?>? tryDecodeSegment(String raw) {
+    try {
+      final normalized = base64Url.normalize(raw);
+      final decoded = jsonDecode(utf8.decode(base64Url.decode(normalized)));
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return Map<String, Object?>.from(decoded);
+      }
+    } catch (_) {
+      // Ignore and continue with other state formats.
+    }
+    return null;
+  }
+
+  final directDecoded = tryDecodeSegment(value);
+  if (directDecoded != null) {
+    return directDecoded;
+  }
+
+  final parts = value.split('.');
+  if (parts.length == 3) {
+    final jwtPayload = tryDecodeSegment(parts[1]);
+    if (jwtPayload != null) {
+      return jwtPayload;
+    }
+  }
+
   try {
-    final normalized = base64Url.normalize(value);
-    final decoded = jsonDecode(utf8.decode(base64Url.decode(normalized)));
+    final decoded = jsonDecode(value);
     if (decoded is Map<String, dynamic>) {
       return decoded;
     }

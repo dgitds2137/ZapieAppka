@@ -399,6 +399,29 @@ class GoogleAuthRequest(BaseModel):
     token: str
 
 
+class AuthSessionOut(BaseModel):
+    jwt: str
+    session_token: str
+    role: str
+    user_id: int
+    email: EmailStr
+    loyalty_points: int = 0
+
+
+class OAuthAuthorizationStartOut(BaseModel):
+    provider: str
+    authorization_url: str
+    redirect_uri: str
+    state: str
+
+
+class OAuthCodeExchangeIn(BaseModel):
+    code: str
+    state: str
+    redirect_uri: str
+    email: EmailStr | None = None
+
+
 class AddressCreate(BaseModel):
     user_id: int
     street: str

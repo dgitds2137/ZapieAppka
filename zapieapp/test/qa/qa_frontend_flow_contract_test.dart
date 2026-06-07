@@ -7,6 +7,7 @@ import 'package:zapieapp_flutter_starter/data/models/auth_session.dart';
 import 'package:zapieapp_flutter_starter/data/models/checkout_verification.dart';
 import 'package:zapieapp_flutter_starter/data/repositories/admin_dashboard_repository.dart';
 import 'package:zapieapp_flutter_starter/data/repositories/checkout_repository.dart';
+import 'package:zapieapp_flutter_starter/data/repositories/social_auth_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -238,6 +239,48 @@ void main() {
   });
 
   group('Frontend QA: admin catalog and auth session', () {
+    test('google auth start endpoint returns external authorization URL', () async {
+      final mockClient = MockClient((http.Request request) async {
+        if (request.method == 'GET' && request.url.path == '/google-auth/start') {
+          expect(request.url.queryParameters['email'], 'user@zapieapp.pl');
+          expect(
+            request.url.queryParameters['redirect_uri'],
+            'zapieapp://auth/callback',
+          );
+
+          return _jsonResponse(
+            jsonEncode({
+              'provider': 'google',
+              'authorization_url':
+                  'https://accounts.google.com/o/oauth2/v2/auth?client_id=test',
+              'redirect_uri': 'zapieapp://auth/callback',
+              'state': 'signed-state',
+            }),
+          );
+        }
+
+        return _jsonResponse('not implemented', statusCode: 500);
+      });
+
+      final repo = HttpSocialAuthRepository(
+        client: mockClient,
+        apiBaseUrl: 'https://zapieapp-api.qa.local',
+      );
+
+      final result = await repo.startGoogleAuth(
+        email: 'user@zapieapp.pl',
+        redirectUri: 'zapieapp://auth/callback',
+      );
+
+      expect(result.provider, 'google');
+      expect(
+        result.authorizationUrl,
+        'https://accounts.google.com/o/oauth2/v2/auth?client_id=test',
+      );
+      expect(result.redirectUri, 'zapieapp://auth/callback');
+      expect(result.state, 'signed-state');
+    });
+
     test(
         'admin catalog endpoints accept price updates for positions and addons',
         () async {

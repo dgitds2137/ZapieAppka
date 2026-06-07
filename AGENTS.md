@@ -21,6 +21,8 @@ Backend i frontend sa juz polaczone i uzywane na Azure Container Apps (`zapieapp
 ## 3) Najwazniejsze endpointy
 ### Public / klient
 - `GET /health`, `GET /health/db`
+- `GET /google-auth/start`
+- `POST /google-auth/callback`
 - `GET /positions`
 - `GET /position/{position_id}/addons`
 - `GET /opening-hours`
@@ -53,23 +55,43 @@ Role w app backendu to: `user`, `employee`, `driver`, `admin`.
 - `POST /login` i `POST /register` przyjmuja `Form` + base64 password (front to koduje po stronie klienta).
 - `UserService` zwraca `jwt`, `session_token`, `role`, `user_id`, `email`.
 - Wiele endpointow przyjmuje `session_token` i/lub `email` jako identyfikatory uzytkownika.
+- Fundament Google OAuth jest juz dodany:
+  - backend startuje flow przez `GET /google-auth/start`
+  - frontend otwiera URL autoryzacji dostarczony przez backend
+  - callback wraca na `zapieapp://auth/callback` albo webowy `/auth/callback`
+  - backend finalizuje logowanie przez `POST /google-auth/callback`
+  - po sukcesie koncowym artefaktem nadal jest standardowa sesja aplikacji (`jwt` + `session_token`)
+- Konfiguracja Google OAuth siedzi w `.env` backendu:
+  - `GOOGLE_AUTH_CLIENT_ID`
+  - `GOOGLE_AUTH_CLIENT_SECRET`
+  - `GOOGLE_AUTH_DEFAULT_REDIRECT_URI`
+  - `GOOGLE_AUTH_ALLOWED_REDIRECT_URIS`
+  - `GOOGLE_AUTH_STATE_TTL_SECONDS`
 
 ## 5) Frontend skrot (Flutter)
 - Punkt wejscia API: `zapieapp/lib/core/config/app_config.dart` -> `API_BASE_URL` (domyslnie `http://127.0.0.1:8000`).
 - Router UI: `zapieapp/lib/router/app_router.dart`.
 - Ekran logowania/rejestracji: `zapieapp/lib/features/auth/login_screen.dart`.
+- Callback auth: `zapieapp/lib/features/auth/auth_callback_screen.dart`.
 - Dashboard klienta: `zapieapp/lib/features/dashboard/dashboard_screen.dart`.
 - Dashboard admin/staff/driver: `zapieapp/lib/features/admin/admin_dashboard_screen.dart`.
 - Repozytorium HTTP checkout/admin: `zapieapp/lib/data/repositories/checkout_repository.dart`, `admin_dashboard_repository.dart`.
+- Repozytorium social auth: `zapieapp/lib/data/repositories/social_auth_repository.dart`.
 
 ## 6) QA / testy
 - Testy funkcjonalne backendu: `my_fastapi_project/qa/tests/*.py`.
+- Testy lokalne fundamentu Google OAuth:
+  - `my_fastapi_project/tests/test_google_oauth_foundations.py`
+  - `my_fastapi_project/tests/test_google_oauth_endpoints.py`
+  - `my_fastapi_project/tests/run_google_oauth_foundation_suite.py`
 - Scenariusze i smoke:
   - `my_fastapi_project/qa/scenarios/`
   - `my_fastapi_project/qa/run_e2e_smoke.ps1`
   - `my_fastapi_project/qa/run_e2e_smoke.sh`
   - `my_fastapi_project/qa/run_smoke_order_flow.py`
 - Aktualnie pokrywane scenariusze skupiaja sie na glownej sciezce: user -> employee -> driver.
+- Jedna komenda do czytelnego sprawdzenia Google OAuth foundation:
+  - `python my_fastapi_project/tests/run_google_oauth_foundation_suite.py`
 
 ## 7) Lokalny rozwoj (backend)
 - Instalacja:
@@ -82,6 +104,7 @@ Role w app backendu to: `user`, `employee`, `driver`, `admin`.
 - Szybki check:
   - `curl http://127.0.0.1:8000/health`
   - `curl http://127.0.0.1:8000/health/db`
+  - `python tests/run_google_oauth_foundation_suite.py`
 
 ## 8) Deploy i infra (skrot)
 - CI dla API: `.github/workflows/deploy-api-containerapp.yml` (trigger: push do main + workflow_dispatch).

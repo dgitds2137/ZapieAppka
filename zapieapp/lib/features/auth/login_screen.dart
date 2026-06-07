@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
 import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
+import '../../data/repositories/social_auth_repository.dart';
 import '../../router/app_router.dart';
 
 enum _LoginProvider {
@@ -59,6 +60,10 @@ class _LoginScreenState extends State<LoginScreen> {
   static const _watermarkAsset =
       'assets/images/BrancMadeImages/LogoCorner.png';
   static const _apiBaseUrl = AppConfig.apiBaseUrl;
+  static final SocialAuthRepository _socialAuthRepository =
+      HttpSocialAuthRepository(
+    apiBaseUrl: _apiBaseUrl,
+  );
 
   final _formKey = GlobalKey<FormState>();
   final emailController = TextEditingController();
@@ -237,10 +242,19 @@ class _LoginScreenState extends State<LoginScreen> {
     required String email,
     required _LoginProvider provider,
   }) async {
-    final uri = buildProviderAuthorizationUri(
-      email: email,
-      provider: provider,
-    );
+    final Uri uri;
+    if (provider == _LoginProvider.google) {
+      final authStart = await _socialAuthRepository.startGoogleAuth(
+        email: email,
+        redirectUri: AppConfig.authRedirectUri,
+      );
+      uri = Uri.parse(authStart.authorizationUrl);
+    } else {
+      uri = buildProviderAuthorizationUri(
+        email: email,
+        provider: provider,
+      );
+    }
     return launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
@@ -306,7 +320,7 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    if (_clientIdFor(provider).isEmpty) {
+    if (provider != _LoginProvider.google && _clientIdFor(provider).isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -321,16 +335,29 @@ class _LoginScreenState extends State<LoginScreen> {
     FocusScope.of(context).unfocus();
     setState(() => socialLoadingProvider = provider);
 
-    final opened = await openProviderAuthorization(
-      email: email,
-      provider: provider,
-    );
+    bool opened = false;
+    String? providerError;
+    try {
+      opened = await openProviderAuthorization(
+        email: email,
+        provider: provider,
+      );
+    } catch (error) {
+      providerError = error.toString();
+    }
 
     if (!mounted) {
       return;
     }
 
     setState(() => socialLoadingProvider = null);
+
+    if (providerError != null && providerError.trim().isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(providerError)),
+      );
+      return;
+    }
 
     if (!opened) {
       ScaffoldMessenger.of(context).showSnackBar(

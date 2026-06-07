@@ -26,6 +26,15 @@ def _bool(value: str | None, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _int(value: str | None, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value.strip())
+    except (TypeError, ValueError):
+        return default
+
+
 class Settings:
     def __init__(self) -> None:
         self.app_name = os.getenv("APP_NAME", "ZapieApp API")
@@ -41,6 +50,22 @@ class Settings:
         self.require_database_on_startup = _bool(
             os.getenv("REQUIRE_DATABASE_ON_STARTUP"),
             False,
+        )
+        self.google_auth_client_id = os.getenv("GOOGLE_AUTH_CLIENT_ID", "").strip()
+        self.google_auth_client_secret = os.getenv(
+            "GOOGLE_AUTH_CLIENT_SECRET",
+            "",
+        ).strip()
+        self.google_auth_default_redirect_uri = os.getenv(
+            "GOOGLE_AUTH_DEFAULT_REDIRECT_URI",
+            "",
+        ).strip()
+        self.google_auth_allowed_redirect_uris = _csv(
+            os.getenv("GOOGLE_AUTH_ALLOWED_REDIRECT_URIS"),
+        )
+        self.google_auth_state_ttl_seconds = _int(
+            os.getenv("GOOGLE_AUTH_STATE_TTL_SECONDS"),
+            600,
         )
 
 

@@ -33,6 +33,8 @@ from models import (
     UserDB,
     UserSchema,
 )
+from oauth_router import oauth_routes
+from oauth_service import GoogleOAuthService, build_google_user_defaults
 from prep_time_config import infer_prep_group_key, prep_group_label
 from router import routes
 
@@ -336,6 +338,54 @@ class UserService:
 
         return self._create_session_response(user)
 
+    def login_or_register_google_user(
+        self,
+        email: str,
+        name: str | None = None,
+    ):
+        normalized_email = self._normalize_email(email)
+        if not normalized_email:
+            raise HTTPException(status_code=400, detail="Email is required")
+
+        user = (
+            self.db.query(UserDB)
+            .filter(UserDB.email == normalized_email)
+            .first()
+        )
+        if user is None:
+            defaults = build_google_user_defaults(name)
+            user = UserDB(
+                name=defaults["name"],
+                email=normalized_email,
+                password=defaults["password"],
+                phone=None,
+                role=DEFAULT_USER_ROLE,
+                loyalty_points=0,
+            )
+            self.db.add(user)
+            try:
+                self.db.commit()
+            except IntegrityError:
+                self.db.rollback()
+                user = (
+                    self.db.query(UserDB)
+                    .filter(UserDB.email == normalized_email)
+                    .first()
+                )
+                if user is None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="User already exists",
+                    ) from None
+            else:
+                self.db.refresh(user)
+        elif (user.name or "").strip() == "" and (name or "").strip():
+            user.name = name.strip()
+            self.db.commit()
+            self.db.refresh(user)
+
+        return self._create_session_response(user)
+
     def delete_account(self, session_token: str, email: str | None = None):
         session_token = (session_token or "").strip()
         if not session_token:
@@ -437,6 +487,13 @@ app.include_router(
         MenuService,
         UserService,
         CheckoutService,
+        get_db,
+    )
+)
+
+app.include_router(
+    oauth_routes(
+        lambda db: GoogleOAuthService(db, UserService),
         get_db,
     )
 )
