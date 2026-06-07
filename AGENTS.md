@@ -7,6 +7,10 @@ Repo ma dwa glowne komponenty:
 
 Backend i frontend sa juz polaczone i uzywane na Azure Container Apps (`zapieapp-api-dev-alpha`) z baza SQL.
 
+Pliki kontekstowe dla kolejnych watkow:
+- `AGENTS.md` - stan projektu, architektura, endpointy, onboarding.
+- `CHANGELOG_AGENT.md` - ostatnie zmiany z timestampami, zeby szybko dojsc co bylo robione i co zostalo po drodze ustalone.
+
 ## 2) Backend szybki przeglad
 - Glowne wejscie: `my_fastapi_project/main.py` (`FastAPI(...)`, `/health`, `/health/db`, `app.include_router(routes(...))`).
 - Router API: `my_fastapi_project/router.py`.
