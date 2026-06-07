@@ -122,6 +122,12 @@ BEGIN
             N'Dodatkowe zdjecie udek (kubeczek)' AS label,
             CAST(0.00 AS DECIMAL(10, 2)) AS decimal_value,
             CAST(N'assets/images/chickenLegCup.png' AS NVARCHAR(500)) AS string_value
+        UNION ALL
+        SELECT
+            N'kitchen_eta_override_minutes' AS setting_key,
+            N'Ręczny narzut czasu realizacji przez kuchnie (min)' AS label,
+            CAST(0.00 AS DECIMAL(10, 2)) AS decimal_value,
+            CAST(NULL AS NVARCHAR(500)) AS string_value
     ) AS source
         ON target.setting_key = source.setting_key
     WHEN MATCHED THEN

@@ -136,6 +136,7 @@ class AdminCatalogData {
     required this.deliveryMinimumAmount,
     required this.deliveryRadiusKm,
     required this.deliveryOriginAddress,
+    required this.kitchenEtaOverrideMinutes,
     required this.openingHours,
     required this.positions,
     required this.addons,
@@ -144,6 +145,7 @@ class AdminCatalogData {
   final double deliveryMinimumAmount;
   final double deliveryRadiusKm;
   final String deliveryOriginAddress;
+  final int kitchenEtaOverrideMinutes;
   final OpeningHoursData openingHours;
   final List<AdminCatalogPosition> positions;
   final List<AdminCatalogAddon> addons;
@@ -157,6 +159,7 @@ class AdminCatalogData {
       deliveryMinimumAmount: _asDouble(json['delivery_minimum_amount']) ?? 20,
       deliveryRadiusKm: _asDouble(json['delivery_radius_km']) ?? 8,
       deliveryOriginAddress: json['delivery_origin_address']?.toString() ?? '',
+      kitchenEtaOverrideMinutes: _asInt(json['kitchen_eta_override_minutes']) ?? 0,
       openingHours: openingHoursJson is Map
           ? OpeningHoursData.fromJson(
               Map<String, dynamic>.from(openingHoursJson),

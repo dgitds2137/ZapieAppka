@@ -474,6 +474,7 @@ class AdminCatalogOut(BaseModel):
     delivery_radius_km: float
     delivery_origin_address: str
     opening_hours: OpeningHoursOut
+    kitchen_eta_override_minutes: int
     positions: list[AdminCatalogPositionOut]
     addons: list[AdminCatalogAddonOut]
 
@@ -493,6 +494,12 @@ class AdminCatalogDeliveryMinimumUpdateIn(BaseModel):
 
 class AdminCatalogDeliveryRadiusUpdateIn(BaseModel):
     radius_km: float
+    session_token: str | None = None
+    user_email: EmailStr | None = None
+
+
+class AdminCatalogKitchenEtaOverrideUpdateIn(BaseModel):
+    minutes: int
     session_token: str | None = None
     user_email: EmailStr | None = None
 

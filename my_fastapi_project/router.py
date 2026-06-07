@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from models import (
     AdminCatalogAddonOut,
     AdminCatalogDeliveryMinimumUpdateIn,
+    AdminCatalogKitchenEtaOverrideUpdateIn,
     AdminCatalogOpeningHoursUpdateIn,
     AdminCatalogDeliveryOriginAddressUpdateIn,
     AdminCatalogDeliveryRadiusUpdateIn,
@@ -339,6 +340,18 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         db: Session = Depends(get_db),
     ):
         return CheckoutService(db).update_delivery_origin_address(
+            payload=payload,
+        )
+
+    @r.patch(
+        "/admin/catalog/kitchen-eta",
+        response_model=AdminCatalogOut,
+    )
+    def update_admin_kitchen_eta_override(
+        payload: AdminCatalogKitchenEtaOverrideUpdateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).update_kitchen_eta_override(
             payload=payload,
         )
 

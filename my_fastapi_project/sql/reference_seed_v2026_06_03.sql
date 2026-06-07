@@ -21,7 +21,7 @@ IF OBJECT_ID(N'dbo.SeedMigrations', N'U') IS NOT NULL
    AND NOT EXISTS (
     SELECT 1
     FROM dbo.SeedMigrations
-    WHERE seed_version = N'reference-v2026.06.03.1'
+    WHERE seed_version = N'reference-v2026.06.03.2'
 )
 BEGIN
     IF OBJECT_ID(N'dbo.AppRuntimeSettings', N'U') IS NOT NULL
@@ -31,7 +31,8 @@ BEGIN
             FROM (VALUES
                 (N'delivery_minimum_amount', N'Minimalna wartosc zamowienia z dostawa', CAST(50.00 AS DECIMAL(10, 2)), CAST(NULL AS NVARCHAR(500))),
                 (N'delivery_radius_km', N'Promien dostawy', CAST(5.00 AS DECIMAL(10, 2)), CAST(NULL AS NVARCHAR(500))),
-                (N'delivery_origin_address', N'Adres lokalu dla dostaw', CAST(0.00 AS DECIMAL(10, 2)), CAST(N'Z pol Metra Ciete, Zapiekanki z Pieca i Udka z Rozna, 87/89, Radzyminska, Targowek Mieszkaniowy, Targowek, Warszawa, wojewodztwo mazowieckie, 03-512, Polska' AS NVARCHAR(500)))
+                (N'delivery_origin_address', N'Adres lokalu dla dostaw', CAST(0.00 AS DECIMAL(10, 2)), CAST(N'Z pol Metra Ciete, Zapiekanki z Pieca i Udka z Rozna, 87/89, Radzyminska, Targowek Mieszkaniowy, Targowek, Warszawa, wojewodztwo mazowieckie, 03-512, Polska' AS NVARCHAR(500))),
+                (N'kitchen_eta_override_minutes', N'Reczny narzut czasu realizacji przez kuchnie (min)', CAST(0.00 AS DECIMAL(10, 2)), CAST(NULL AS NVARCHAR(500)))
             ) AS src(setting_key, label, decimal_value, string_value)
         )
         MERGE dbo.AppRuntimeSettings AS target
@@ -144,6 +145,6 @@ BEGIN
             VALUES (source.position_id, source.addon_id, source.is_default, source.default_quantity);
     END;
 
-    INSERT INTO dbo.SeedMigrations (seed_version) VALUES (N'reference-v2026.06.03.1');
+    INSERT INTO dbo.SeedMigrations (seed_version) VALUES (N'reference-v2026.06.03.2');
 END;
 GO

@@ -74,6 +74,11 @@ abstract class AdminDashboardRepository {
     required String openTime,
     required String closeTime,
   });
+
+  Future<AdminCatalogData> updateKitchenEtaOverride({
+    required AuthSession authSession,
+    required int minutes,
+  });
 }
 
 class HttpAdminDashboardRepository implements AdminDashboardRepository {
@@ -497,6 +502,42 @@ class HttpAdminDashboardRepository implements AdminDashboardRepository {
     if (decoded is! Map<String, dynamic>) {
       throw Exception(
         'Nieoczekiwany format odpowiedzi z /admin/catalog/opening-hours.',
+      );
+    }
+
+    return AdminCatalogData.fromJson(decoded);
+  }
+
+  @override
+  Future<AdminCatalogData> updateKitchenEtaOverride({
+    required AuthSession authSession,
+    required int minutes,
+  }) async {
+    final response = await _client
+        .patch(
+          Uri.parse('$_apiBaseUrl/admin/catalog/kitchen-eta'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'minutes': minutes,
+            'session_token': authSession.sessionToken,
+            'user_email': authSession.email,
+          }),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Backend zwrocil ${response.statusCode}: ${response.body}',
+      );
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception(
+        'Nieoczekiwany format odpowiedzi z /admin/catalog/kitchen-eta.',
       );
     }
 

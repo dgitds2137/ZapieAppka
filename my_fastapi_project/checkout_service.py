@@ -28,6 +28,7 @@ from models import (
     AdminDashboardActiveEmployeeOut,
     AdminCatalogAddonOut,
     AdminCatalogDeliveryMinimumUpdateIn,
+    AdminCatalogKitchenEtaOverrideUpdateIn,
     AdminCatalogOpeningHoursUpdateIn,
     AdminCatalogDeliveryOriginAddressUpdateIn,
     AdminCatalogDeliveryRadiusUpdateIn,
@@ -102,6 +103,10 @@ class CheckoutService:
     _DEFAULT_CLOSING_TIME = "21:00"
     _OPENING_TIME_SETTING_KEY = "opening_hours_open_time"
     _CLOSING_TIME_SETTING_KEY = "opening_hours_close_time"
+    _KITCHEN_ETA_OVERRIDE_SETTING_KEY = "kitchen_eta_override_minutes"
+    _KITCHEN_ETA_OVERRIDE_DEFAULT_MINUTES = 0
+    _ALLOWED_KITCHEN_ETA_OVERRIDE_MINUTES = (0, 10, 20, 30, 40)
+    _MAX_TOTAL_KITCHEN_ETA_MINUTES = 60
     _DELIVERY_IN_PROGRESS_STAGES = {
         "on_the_way",
         "delivery_started",
@@ -722,6 +727,7 @@ class CheckoutService:
             delivery_radius_km=self._get_delivery_radius_km(),
             delivery_origin_address=self._get_delivery_origin_address(),
             opening_hours=self.get_opening_hours(),
+            kitchen_eta_override_minutes=self._get_kitchen_eta_override_minutes(),
             positions=[
                 AdminCatalogPositionOut(
                     position_id=position.position_id,
@@ -900,6 +906,36 @@ class CheckoutService:
             setting_key=self._DELIVERY_ORIGIN_ADDRESS_SETTING_KEY,
             label="Adres lokalu dla dostaw",
             string_value=normalized_address,
+            updated_by_user_id=operator.user_id,
+        )
+        return self.get_admin_catalog(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+
+    def update_kitchen_eta_override(
+        self,
+        payload: AdminCatalogKitchenEtaOverrideUpdateIn,
+    ) -> AdminCatalogOut:
+        operator = self._require_admin_role(
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+        )
+        if payload.minutes not in self._ALLOWED_KITCHEN_ETA_OVERRIDE_MINUTES:
+            allowed_values = ", ".join(
+                str(value) for value in self._ALLOWED_KITCHEN_ETA_OVERRIDE_MINUTES
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Dopuszczalne wartosci opoznienia kuchni: {allowed_values} minut."
+                ),
+            )
+
+        self._set_decimal_runtime_setting(
+            setting_key=self._KITCHEN_ETA_OVERRIDE_SETTING_KEY,
+            label="Ręczna korekta estymacji kuchni (minuty)",
+            decimal_value=payload.minutes,
             updated_by_user_id=operator.user_id,
         )
         return self.get_admin_catalog(
@@ -2020,6 +2056,27 @@ class CheckoutService:
         self.db.commit()
         self.db.refresh(setting)
 
+    def _get_kitchen_eta_override_minutes(self) -> int:
+        raw_value = self._get_decimal_runtime_setting(
+            setting_key=self._KITCHEN_ETA_OVERRIDE_SETTING_KEY,
+            default_value=float(self._KITCHEN_ETA_OVERRIDE_DEFAULT_MINUTES),
+        )
+        try:
+            candidate = int(round(float(raw_value), 0))
+        except (TypeError, ValueError):
+            return self._KITCHEN_ETA_OVERRIDE_DEFAULT_MINUTES
+
+        if candidate not in self._ALLOWED_KITCHEN_ETA_OVERRIDE_MINUTES:
+            return self._KITCHEN_ETA_OVERRIDE_DEFAULT_MINUTES
+        return candidate
+
+    def _cap_kitchen_eta_total_minutes(self, automatic_minutes: int) -> int:
+        override_minutes = self._get_kitchen_eta_override_minutes()
+        return min(
+            self._MAX_TOTAL_KITCHEN_ETA_MINUTES,
+            max(1, int(automatic_minutes) + override_minutes),
+        )
+
     def _get_string_runtime_setting(
         self,
         setting_key: str,
@@ -2253,6 +2310,16 @@ class CheckoutService:
                 ),
             )
 
+        if self._contains_zapiekanki_positions(resolved_positions):
+            base_eta = self._kitchen_eta_bucket_minutes_by_queue()
+            base_eta = self._cap_kitchen_eta_total_minutes(base_eta)
+            if available_from is None:
+                return base_eta
+            return base_eta + self._minutes_until_opening(
+                now=now,
+                available_from=available_from,
+            )
+
         prep_settings_by_group = {
             setting.group_key: setting
             for setting in self._get_prep_time_settings_rows()
@@ -2279,6 +2346,72 @@ class CheckoutService:
             now=now,
             available_from=available_from,
         )
+
+    def _contains_zapiekanki_positions(
+        self,
+        positions: list[MenuPositionDB],
+    ) -> bool:
+        return any(
+            infer_prep_group_key(position.position_type, position.name) == "zapiekanki"
+            for position in positions
+        )
+
+    def _is_zapiekanki_order_item(self, item_name: str | None, item_description: str | None) -> bool:
+        group_key = infer_prep_group_key(
+            None,
+            " ".join(
+                part.strip()
+                for part in (item_name or "", item_description or "")
+                if part and part.strip()
+            ),
+        )
+        return group_key == "zapiekanki"
+
+    def _is_zapiekanki_queue_order(
+        self,
+        checkout_order: CheckoutOrderDB,
+    ) -> bool:
+        if not checkout_order.items:
+            return False
+        return any(
+            self._is_zapiekanki_order_item(item.name, item.description)
+            for item in checkout_order.items
+            if item.name
+        )
+
+    def _count_active_zapiekanki_queue(self) -> int:
+        query = (
+            self.db.query(CheckoutOrderDB)
+            .options(joinedload(CheckoutOrderDB.items))
+            .filter(
+                CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.status != CHECKOUT_ORDER_STATUS_CANCELLED,
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_CANCELLED,
+            )
+        )
+        return sum(
+            1
+            for order in query.all()
+            if self._is_zapiekanki_queue_order(order)
+            and self._order_oven_kind(order) == "zapiekanki"
+        )
+
+    def _kitchen_eta_bucket_minutes_by_queue(
+        self,
+        queue_size: int | None = None,
+    ) -> int:
+        resolved_queue = self._count_active_zapiekanki_queue() if queue_size is None else queue_size
+
+        if resolved_queue <= 0:
+            return 6
+        if resolved_queue <= 3:
+            return 7
+        if resolved_queue <= 8:
+            return 10
+        if resolved_queue <= 13:
+            return 15
+        return 20
 
     def _is_delivery_fulfillment(
         self,
