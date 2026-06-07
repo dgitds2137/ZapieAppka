@@ -15,4 +15,19 @@ class AppConfig {
     'PERSISTED_LOGIN_DAYS',
     defaultValue: 30,
   );
+
+  static const googleAuthClientId = String.fromEnvironment(
+    'GOOGLE_AUTH_CLIENT_ID',
+    defaultValue: '',
+  );
+
+  static const appleAuthClientId = String.fromEnvironment(
+    'APPLE_AUTH_CLIENT_ID',
+    defaultValue: '',
+  );
+
+  static const authRedirectUri = String.fromEnvironment(
+    'AUTH_REDIRECT_URI',
+    defaultValue: 'zapieapp://auth/callback',
+  );
 }

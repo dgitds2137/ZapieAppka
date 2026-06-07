@@ -469,7 +469,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               : Icons.support_agent_outlined,
           value: dashboard.pendingOrderCount.toString(),
           label: isDriver ? 'Oczekujace\ndostawy' : 'Oczekujace\nzamowienia',
-          onTap: () => _scrollToPendingOrders(dashboard.pendingOrders.isNotEmpty),
+          onTap: () =>
+              _scrollToPendingOrders(dashboard.pendingOrders.isNotEmpty),
         ),
         _StatCardData(
           icon: isDriver ? Icons.route_outlined : Icons.room_service_outlined,
@@ -647,39 +648,40 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 ...() {
                   final canTakePendingOrders =
                       isDriver || dashboard.openingHours.isOpenNow;
-                  final pendingBlockedReason =
-                      !isDriver && !dashboard.openingHours.isOpenNow
-                          ? 'Lokal otwiera sie o ${dashboard.openingHours.openTime}. Zamowienia mozna podjac dopiero po otwarciu.'
-                          : null;
+                  final pendingBlockedReason = !isDriver &&
+                          !dashboard.openingHours.isOpenNow
+                      ? 'Lokal otwiera sie o ${dashboard.openingHours.openTime}. Zamowienia mozna podjac dopiero po otwarciu.'
+                      : null;
                   return <Widget>[
-                for (final order in dashboard.pendingOrders) ...[
-                  KeyedSubtree(
-                    key: order == dashboard.pendingOrders.first
-                        ? _firstPendingOrderKey
-                        : null,
-                    child: _AdminOrderCard(
-                      order: order,
-                      busy: _busyOrderIds.contains(order.checkoutOrderId),
-                      accentColor: const Color(0xFFE48A32),
-                      statusLabel: isDriver ? 'Do odbioru' : 'Niepodjete',
-                      primaryActionLabel:
-                          isDriver ? 'Podejmij dostawe' : 'Podejmij',
-                      onPrimaryAction: canTakePendingOrders
-                          ? () => _updateOrderStatus(
-                                order,
-                                'assigned',
-                                isDriver
-                                    ? 'Dostawa #${order.checkoutOrderId} zostala przypisana do Ciebie.'
-                                    : 'Zamowienie #${order.checkoutOrderId} zostalo podjete.',
-                              )
-                          : null,
-                      primaryDisabledReason: pendingBlockedReason,
-                      onTap:
-                          isDriver ? () => _openTakenOrderDetails(order) : null,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                    for (final order in dashboard.pendingOrders) ...[
+                      KeyedSubtree(
+                        key: order == dashboard.pendingOrders.first
+                            ? _firstPendingOrderKey
+                            : null,
+                        child: _AdminOrderCard(
+                          order: order,
+                          busy: _busyOrderIds.contains(order.checkoutOrderId),
+                          accentColor: const Color(0xFFE48A32),
+                          statusLabel: isDriver ? 'Do odbioru' : 'Niepodjete',
+                          primaryActionLabel:
+                              isDriver ? 'Podejmij dostawe' : 'Podejmij',
+                          onPrimaryAction: canTakePendingOrders
+                              ? () => _updateOrderStatus(
+                                    order,
+                                    'assigned',
+                                    isDriver
+                                        ? 'Dostawa #${order.checkoutOrderId} zostala przypisana do Ciebie.'
+                                        : 'Zamowienie #${order.checkoutOrderId} zostalo podjete.',
+                                  )
+                              : null,
+                          primaryDisabledReason: pendingBlockedReason,
+                          onTap: isDriver
+                              ? () => _openTakenOrderDetails(order)
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                   ];
                 }(),
               const SizedBox(height: 10),
@@ -708,7 +710,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       : 'Po podjeciu zlecenia pojawi sie ono w tej sekcji.',
                 )
               else
-                for (var index = 0; index < inProgressOrders.length; index++) ...[
+                for (var index = 0;
+                    index < inProgressOrders.length;
+                    index++) ...[
                   KeyedSubtree(
                     key: index == 0 ? _firstInProgressOrderKey : null,
                     child: _AdminOrderCard(
@@ -721,14 +725,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         inProgressOrders[index],
                         isDriverView: isDriver,
                       ),
-                      primaryActionLabel:
-                          isDriver || _isReadyForDeliveryStage(inProgressOrders[index])
-                              ? 'Szczegoly'
-                              : 'Zakoncz',
-                      secondaryActionLabel:
-                          isDriver || _isReadyForDeliveryStage(inProgressOrders[index])
-                              ? null
-                              : 'Cofnij',
+                      primaryActionLabel: isDriver ||
+                              _isReadyForDeliveryStage(inProgressOrders[index])
+                          ? 'Szczegoly'
+                          : 'Zakoncz',
+                      secondaryActionLabel: isDriver ||
+                              _isReadyForDeliveryStage(inProgressOrders[index])
+                          ? null
+                          : 'Cofnij',
                       onPrimaryAction: () => isDriver
                           ? _openTakenOrderDetails(inProgressOrders[index])
                           : _isReadyForDeliveryStage(inProgressOrders[index])
@@ -745,7 +749,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 'unassigned',
                                 'Zamowienie #${inProgressOrders[index].checkoutOrderId} wrocilo do oczekujacych.',
                               ),
-                      onTap: () => _openTakenOrderDetails(inProgressOrders[index]),
+                      onTap: () =>
+                          _openTakenOrderDetails(inProgressOrders[index]),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -1695,7 +1700,8 @@ class _AdminOrderCard extends StatelessWidget {
               ),
             ),
           ],
-          if (primaryDisabledReason != null && primaryDisabledReason!.isNotEmpty) ...[
+          if (primaryDisabledReason != null &&
+              primaryDisabledReason!.isNotEmpty) ...[
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
@@ -2800,7 +2806,7 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
                               : onMarkReadyForDispatch != null
                                   ? 'Aktualny etap: $stageLabel. Po oznaczeniu gotowosci zlecenie trafi do kolejki kierowcy.'
                                   : 'Aktualny etap: $stageLabel. Te akcje od razu aktualizuja tracker klienta.'
-                      : 'To zamowienie nie korzysta z etapow posrednich. Mozesz je tylko podjac i zakonczyc.',
+                          : 'To zamowienie nie korzysta z etapow posrednich. Mozesz je tylko podjac i zakonczyc.',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                             color: const Color(0xFFD6C6BA),
                             height: 1.35,
@@ -3232,6 +3238,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
       deliveryMinimumAmount: current.deliveryMinimumAmount,
       deliveryRadiusKm: current.deliveryRadiusKm,
       deliveryOriginAddress: current.deliveryOriginAddress,
+      kitchenEtaOverrideMinutes: current.kitchenEtaOverrideMinutes,
       openingHours: current.openingHours,
       positions: positions ?? current.positions,
       addons: addons ?? current.addons,
@@ -3532,8 +3539,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
 
   String? _normalizeOpeningHoursValue(String rawValue) {
     final normalized = rawValue.trim();
-    final match =
-        RegExp(r'^([01]\d|2[0-3]):([0-5]\d)$').firstMatch(normalized);
+    final match = RegExp(r'^([01]\d|2[0-3]):([0-5]\d)$').firstMatch(normalized);
     if (match == null) {
       return null;
     }
@@ -3722,6 +3728,134 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Zaktualizowano godziny otwarcia lokalu.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busyItems.remove(busyKey);
+        });
+      }
+    }
+  }
+
+  String _formatKitchenEtaOverrideLabel(int minutes) {
+    if (minutes <= 0) {
+      return 'Bez ręcznego narzutu';
+    }
+    return '+$minutes min';
+  }
+
+  Future<void> _editKitchenEtaOverride() async {
+    final catalog = _catalog;
+    if (catalog == null) {
+      return;
+    }
+
+    final allowedMinutes = const [0, 10, 20, 30, 40];
+    int selectedMinutes = catalog.kitchenEtaOverrideMinutes;
+    if (!allowedMinutes.contains(selectedMinutes)) {
+      selectedMinutes = 0;
+    }
+
+    final nextMinutes = await showDialog<int>(
+      context: context,
+      barrierColor: const Color(0xC4000000),
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF181311),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(22),
+        ),
+        title: Text(
+          'Ręczna korekta czasu kuchni',
+          style: Theme.of(dialogContext).textTheme.titleLarge?.copyWith(
+                color: const Color(0xFFF8EEE7),
+                fontWeight: FontWeight.w900,
+              ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Wybierz, o ile minut wydłużyć ETA (dla nowych zamówień):',
+              style: TextStyle(
+                color: Color(0xFFD8C4B4),
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: allowedMinutes
+                  .map(
+                    (minutes) => ChoiceChip(
+                      label: Text(minutes == 0 ? '0' : '+$minutes min'),
+                      selected: selectedMinutes == minutes,
+                      onSelected: (_) {
+                        Navigator.of(dialogContext).pop(minutes);
+                      },
+                      selectedColor: const Color(0xFFE98B38),
+                      labelStyle: TextStyle(
+                        color: selectedMinutes == minutes
+                            ? const Color(0xFFFFFFFF)
+                            : const Color(0xFFF8EEE7),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text(
+              'Anuluj',
+              style: TextStyle(
+                color: Color(0xFFD0C1B5),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (nextMinutes == null || !mounted) {
+      return;
+    }
+
+    const busyKey = 'kitchen-eta-override';
+    setState(() {
+      _busyItems.add(busyKey);
+    });
+
+    try {
+      final updatedCatalog = await widget.repository.updateKitchenEtaOverride(
+        authSession: widget.authSession,
+        minutes: nextMinutes,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _catalog = updatedCatalog;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Zaktualizowano ręczny narzut kuchni: ${_formatKitchenEtaOverrideLabel(nextMinutes)}',
+          ),
         ),
       );
     } catch (error) {
@@ -4071,6 +4205,17 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
             busy: _busyItems.contains('opening-hours'),
             onEdit: _editOpeningHours,
           ),
+          const SizedBox(height: 10),
+          _CatalogSettingTile(
+            title: 'Ręczna korekta czasu kuchni',
+            valueLabel: _formatKitchenEtaOverrideLabel(
+              catalog?.kitchenEtaOverrideMinutes ?? 0,
+            ),
+            subtitle:
+                'Wpływa na ETA nowych zamówień: 0, +10, +20, +30, +40 minut.',
+            busy: _busyItems.contains('kitchen-eta-override'),
+            onEdit: _editKitchenEtaOverride,
+          ),
           const SizedBox(height: 18),
           _CatalogSectionHeader(
             title: 'Produkty',
@@ -4090,6 +4235,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
               _CatalogPositionTile(
                 position: position,
                 busy: _busyItems.contains('position:${position.positionId}'),
+                canEditPrice: widget.authSession.isAdmin,
                 onToggle: () => _togglePosition(position),
                 onEditPrice: () => _editPositionPrice(position),
               ),
@@ -4114,6 +4260,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
               _CatalogAddonTile(
                 addon: addon,
                 busy: _busyItems.contains('addon:${addon.addonId}'),
+                canEditPrice: widget.authSession.isAdmin,
                 onToggle: () => _toggleAddon(addon),
                 onEditPrice: () => _editAddonPrice(addon),
               ),
@@ -4332,12 +4479,14 @@ class _CatalogPositionTile extends StatelessWidget {
   const _CatalogPositionTile({
     required this.position,
     required this.busy,
+    required this.canEditPrice,
     required this.onToggle,
     required this.onEditPrice,
   });
 
   final AdminCatalogPosition position;
   final bool busy;
+  final bool canEditPrice;
   final VoidCallback onToggle;
   final VoidCallback onEditPrice;
 
@@ -4353,8 +4502,10 @@ class _CatalogPositionTile extends StatelessWidget {
       metaLabel: position.positionType.trim().isEmpty
           ? priceLabel
           : '${position.positionType} | $priceLabel',
+      priceLabel: priceLabel,
       isActive: position.isActive,
       busy: busy,
+      canEditPrice: canEditPrice,
       onEditPrice: onEditPrice,
       onToggle: onToggle,
     );
@@ -4365,24 +4516,29 @@ class _CatalogAddonTile extends StatelessWidget {
   const _CatalogAddonTile({
     required this.addon,
     required this.busy,
+    required this.canEditPrice,
     required this.onToggle,
     required this.onEditPrice,
   });
 
   final AdminCatalogAddon addon;
   final bool busy;
+  final bool canEditPrice;
   final VoidCallback onToggle;
   final VoidCallback onEditPrice;
 
   @override
   Widget build(BuildContext context) {
+    final priceLabel = 'PLN ${addon.price.toStringAsFixed(2)}';
+
     return _CatalogEntryTile(
       title: addon.name,
       subtitle: addon.description ?? 'Dodatek bez dodatkowego opisu.',
-      metaLabel:
-          'Dodatek | PLN ${addon.price.toStringAsFixed(2)} | sort ${addon.sortOrder}',
+      metaLabel: 'Dodatek | $priceLabel | sort ${addon.sortOrder}',
+      priceLabel: priceLabel,
       isActive: addon.isActive,
       busy: busy,
+      canEditPrice: canEditPrice,
       onEditPrice: onEditPrice,
       onToggle: onToggle,
     );
@@ -4394,8 +4550,10 @@ class _CatalogEntryTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.metaLabel,
+    required this.priceLabel,
     required this.isActive,
     required this.busy,
+    required this.canEditPrice,
     required this.onEditPrice,
     required this.onToggle,
   });
@@ -4403,8 +4561,10 @@ class _CatalogEntryTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final String metaLabel;
+  final String priceLabel;
   final bool isActive;
   final bool busy;
+  final bool canEditPrice;
   final VoidCallback onEditPrice;
   final VoidCallback onToggle;
 
@@ -4429,35 +4589,68 @@ class _CatalogEntryTile extends StatelessWidget {
             ),
       ),
     );
+    final availabilityControl = busy
+        ? const SizedBox(
+            height: 24,
+            width: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.2,
+              color: Color(0xFFE98B38),
+            ),
+          )
+        : Switch.adaptive(
+            value: isActive,
+            onChanged: (_) => onToggle(),
+            activeThumbColor: const Color(0xFF79F5B8),
+          );
+    final availabilityRow = Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(
+          'Dostepnosc',
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: const Color(0xFFD4C4B8),
+                fontWeight: FontWeight.w700,
+              ),
+        ),
+        const SizedBox(width: 8),
+        availabilityControl,
+      ],
+    );
     final actionControls = Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         statusBadge,
         const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: busy ? null : onEditPrice,
-          icon: const Icon(Icons.edit_outlined, size: 18),
-          label: const Text('Cena'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: const Color(0xFFFFD7B5),
-            side: const BorderSide(color: Color(0x40FFB061)),
+        availabilityRow,
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF26201D),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0x24FFFFFF)),
+          ),
+          child: Text(
+            priceLabel,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: const Color(0xFFFFD7B5),
+                  fontWeight: FontWeight.w900,
+                ),
           ),
         ),
-        const SizedBox(height: 10),
-        busy
-            ? const SizedBox(
-                height: 24,
-                width: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
-                  color: Color(0xFFE98B38),
-                ),
-              )
-            : Switch.adaptive(
-                value: isActive,
-                onChanged: (_) => onToggle(),
-                activeThumbColor: const Color(0xFF79F5B8),
-              ),
+        if (canEditPrice) ...[
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: busy ? null : onEditPrice,
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Cena'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFFFFD7B5),
+              side: const BorderSide(color: Color(0x40FFB061)),
+            ),
+          ),
+        ],
       ],
     );
 
@@ -4529,7 +4722,6 @@ class _CatalogEntryTile extends StatelessWidget {
       ),
     );
   }
-
 }
 
 class _StaffPresenceDialog extends StatefulWidget {
@@ -4624,7 +4816,8 @@ class _StaffPresenceDialogState extends State<_StaffPresenceDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final data = _data;
-    final searchResults = data?.allResults ?? const <AdminStaffPresencePerson>[];
+    final searchResults =
+        data?.allResults ?? const <AdminStaffPresencePerson>[];
     final currentlyAvailable =
         data?.currentlyAvailable ?? const <AdminStaffPresencePerson>[];
     final recentlyAvailable =
@@ -4717,7 +4910,8 @@ class _StaffPresenceDialogState extends State<_StaffPresenceDialog> {
                         return const _StaffPresenceEmptyState(
                           icon: Icons.search_off_rounded,
                           title: 'Brak wynikow',
-                          subtitle: 'Nie znaleziono pracownikow dla podanej frazy.',
+                          subtitle:
+                              'Nie znaleziono pracownikow dla podanej frazy.',
                         );
                       }
                       return _StaffPresenceSection(
@@ -4807,7 +5001,8 @@ class _StaffPresencePersonTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final title = person.displayName.trim().isEmpty ? person.email : person.displayName;
+    final title =
+        person.displayName.trim().isEmpty ? person.email : person.displayName;
     final subtitle = person.email.trim().isNotEmpty &&
             person.email.trim().toLowerCase() != title.trim().toLowerCase()
         ? person.email
@@ -4886,11 +5081,13 @@ class _StaffPresencePersonTile extends StatelessWidget {
                             const SizedBox(width: 5),
                             Text(
                               'Dostepny',
-                              style:
-                                  Theme.of(context).textTheme.labelSmall?.copyWith(
-                                        color: const Color(0xFFBFF2D3),
-                                        fontWeight: FontWeight.w800,
-                                      ),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelSmall
+                                  ?.copyWith(
+                                    color: const Color(0xFFBFF2D3),
+                                    fontWeight: FontWeight.w800,
+                                  ),
                             ),
                           ],
                         ),

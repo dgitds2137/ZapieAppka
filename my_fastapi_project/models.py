@@ -399,6 +399,29 @@ class GoogleAuthRequest(BaseModel):
     token: str
 
 
+class AuthSessionOut(BaseModel):
+    jwt: str
+    session_token: str
+    role: str
+    user_id: int
+    email: EmailStr
+    loyalty_points: int = 0
+
+
+class OAuthAuthorizationStartOut(BaseModel):
+    provider: str
+    authorization_url: str
+    redirect_uri: str
+    state: str
+
+
+class OAuthCodeExchangeIn(BaseModel):
+    code: str
+    state: str
+    redirect_uri: str
+    email: EmailStr | None = None
+
+
 class AddressCreate(BaseModel):
     user_id: int
     street: str
@@ -474,6 +497,7 @@ class AdminCatalogOut(BaseModel):
     delivery_radius_km: float
     delivery_origin_address: str
     opening_hours: OpeningHoursOut
+    kitchen_eta_override_minutes: int
     positions: list[AdminCatalogPositionOut]
     addons: list[AdminCatalogAddonOut]
 
@@ -493,6 +517,12 @@ class AdminCatalogDeliveryMinimumUpdateIn(BaseModel):
 
 class AdminCatalogDeliveryRadiusUpdateIn(BaseModel):
     radius_km: float
+    session_token: str | None = None
+    user_email: EmailStr | None = None
+
+
+class AdminCatalogKitchenEtaOverrideUpdateIn(BaseModel):
+    minutes: int
     session_token: str | None = None
     user_email: EmailStr | None = None
 
@@ -570,6 +600,19 @@ class CheckoutPickupSlotEstimateOut(BaseModel):
     eta_minutes: int
     eta_label: str
     scheduled_pickup_at: datetime
+
+
+class UdkaAvailabilityOut(BaseModel):
+    available_now_pieces: int
+    baking_pieces: int
+    next_ready_at: datetime
+    next_batch_open_pieces: int
+    following_ready_at: datetime | None = None
+    following_batch_open_pieces: int = 0
+    reservable_after_payment: bool = True
+    takeout_supported: bool = True
+    thermal_packaging_fee: float | None = None
+    thermal_packaging_fee_label: str | None = None
 
 
 class CheckoutVerificationOut(BaseModel):

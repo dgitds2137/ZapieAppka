@@ -2,11 +2,46 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/config/app_config.dart';
 import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
+import '../../data/repositories/social_auth_repository.dart';
 import '../../router/app_router.dart';
+
+enum _LoginProvider {
+  google(
+    id: 'google',
+    label: 'Google',
+    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+    scope: 'openid email profile',
+    icon: _ProviderIcon.google,
+  ),
+  apple(
+    id: 'apple',
+    label: 'Apple',
+    authorizationEndpoint: 'https://appleid.apple.com/auth/authorize',
+    scope: 'name email',
+    icon: _ProviderIcon.apple,
+  );
+
+  const _LoginProvider({
+    required this.id,
+    required this.label,
+    required this.authorizationEndpoint,
+    required this.scope,
+    required this.icon,
+  });
+
+  final String id;
+  final String label;
+  final String authorizationEndpoint;
+  final String scope;
+  final _ProviderIcon icon;
+}
+
+enum _ProviderIcon { google, apple }
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -25,18 +60,30 @@ class _LoginScreenState extends State<LoginScreen> {
   static const _watermarkAsset =
       'assets/images/BrancMadeImages/LogoCorner.png';
   static const _apiBaseUrl = AppConfig.apiBaseUrl;
+  static final SocialAuthRepository _socialAuthRepository =
+      HttpSocialAuthRepository(
+    apiBaseUrl: _apiBaseUrl,
+  );
 
   final _formKey = GlobalKey<FormState>();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
+  final nameController = TextEditingController();
+  final phoneController = TextEditingController();
 
   bool loading = false;
+  bool registering = false;
   bool obscurePassword = true;
+  _LoginProvider? socialLoadingProvider;
+
+  bool get isBusy => loading || socialLoadingProvider != null;
 
   @override
   void dispose() {
     emailController.dispose();
     passwordController.dispose();
+    nameController.dispose();
+    phoneController.dispose();
     super.dispose();
   }
 
@@ -93,6 +140,124 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<_LoginResult> registerAccount({
+    required String email,
+    required String password,
+    required String name,
+    required String phone,
+  }) async {
+    final uri = Uri.parse('$_apiBaseUrl/register');
+    final encodedPassword = base64Encode(utf8.encode(password));
+
+    try {
+      final response = await http.post(
+        uri,
+        headers: const {
+          'Accept': 'application/json',
+        },
+        body: {
+          'email': email,
+          'password': encodedPassword,
+          if (name.trim().isNotEmpty) 'name': name.trim(),
+          if (phone.trim().isNotEmpty) 'phone': phone.trim(),
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final body = response.body.isEmpty
+            ? <String, dynamic>{}
+            : jsonDecode(response.body) as Map<String, dynamic>;
+
+        return _LoginResult.success(
+          jwt: body['jwt']?.toString(),
+          sessionToken: body['session_token']?.toString(),
+          role: body['role']?.toString(),
+          loyaltyPoints: _asInt(body['loyalty_points']) ?? 0,
+        );
+      }
+
+      String message = 'Rejestracja nie powiodla sie.';
+      if (response.body.isNotEmpty) {
+        try {
+          final body = jsonDecode(response.body) as Map<String, dynamic>;
+          final detail = body['detail'];
+          if (detail is String && detail.isNotEmpty) {
+            message = detail;
+          }
+        } catch (_) {
+          message = response.body;
+        }
+      }
+
+      return _LoginResult.failure(message);
+    } catch (_) {
+      return const _LoginResult.failure(
+        'Brak polaczenia z backendem. Sprawdz czy FastAPI dziala pod ${AppConfig.apiBaseUrl}.',
+      );
+    }
+  }
+
+  Uri buildProviderAuthorizationUri({
+    required String email,
+    required _LoginProvider provider,
+  }) {
+    final state = base64Url
+        .encode(
+          utf8.encode(
+            jsonEncode({
+              'provider': provider.id,
+              'email': email,
+              'nonce': DateTime.now().millisecondsSinceEpoch.toString(),
+            }),
+          ),
+        )
+        .replaceAll('=', '');
+
+    final queryParameters = <String, String>{
+      'client_id': _clientIdFor(provider),
+      'redirect_uri': AppConfig.authRedirectUri,
+      'response_type': 'code',
+      'scope': provider.scope,
+      'state': state,
+    };
+
+    if (provider == _LoginProvider.google) {
+      queryParameters.addAll({
+        'access_type': 'offline',
+        'prompt': 'select_account',
+        'login_hint': email,
+      });
+    }
+
+    if (provider == _LoginProvider.apple) {
+      queryParameters['response_mode'] = 'query';
+    }
+
+    return Uri.parse(provider.authorizationEndpoint).replace(
+      queryParameters: queryParameters,
+    );
+  }
+
+  Future<bool> openProviderAuthorization({
+    required String email,
+    required _LoginProvider provider,
+  }) async {
+    final Uri uri;
+    if (provider == _LoginProvider.google) {
+      final authStart = await _socialAuthRepository.startGoogleAuth(
+        email: email,
+        redirectUri: AppConfig.authRedirectUri,
+      );
+      uri = Uri.parse(authStart.authorizationUrl);
+    } else {
+      uri = buildProviderAuthorizationUri(
+        email: email,
+        provider: provider,
+      );
+    }
+    return launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   Future<void> submit() async {
     final form = _formKey.currentState;
     if (form == null || !form.validate()) {
@@ -102,10 +267,17 @@ class _LoginScreenState extends State<LoginScreen> {
     FocusScope.of(context).unfocus();
     setState(() => loading = true);
 
-    final result = await authenticate(
-      email: emailController.text.trim(),
-      password: passwordController.text,
-    );
+    final result = registering
+        ? await registerAccount(
+            email: emailController.text.trim(),
+            password: passwordController.text,
+            name: nameController.text,
+            phone: phoneController.text,
+          )
+        : await authenticate(
+            email: emailController.text.trim(),
+            password: passwordController.text,
+          );
 
     if (!mounted) {
       return;
@@ -116,18 +288,99 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!result.isSuccess) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result.message ?? 'Logowanie nie powiodlo sie.'),
+          content: Text(
+            result.message ??
+                (registering
+                    ? 'Rejestracja nie powiodla sie.'
+                    : 'Logowanie nie powiodlo sie.'),
+          ),
         ),
       );
       return;
     }
 
-    final authSession = AuthSession(
+    await _finishLogin(
       email: emailController.text.trim(),
+      providerId: 'password',
+      result: result,
+    );
+  }
+
+  Future<void> submitProvider(_LoginProvider provider) async {
+    final email = emailController.text.trim();
+    final emailError = _validateEmail(email);
+    if (emailError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$emailError Najpierw wpisz e-mail, potem wybierz provider.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (provider != _LoginProvider.google && _clientIdFor(provider).isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Brakuje konfiguracji ${provider.label}. '
+            'Ustaw ${_clientIdKeyFor(provider)}.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+    setState(() => socialLoadingProvider = provider);
+
+    bool opened = false;
+    String? providerError;
+    try {
+      opened = await openProviderAuthorization(
+        email: email,
+        provider: provider,
+      );
+    } catch (error) {
+      providerError = error.toString();
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() => socialLoadingProvider = null);
+
+    if (providerError != null && providerError.trim().isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(providerError)),
+      );
+      return;
+    }
+
+    if (!opened) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Nie udalo sie otworzyc oficjalnego logowania ${provider.label}.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _finishLogin({
+    required String email,
+    required String providerId,
+    required _LoginResult result,
+  }) async {
+    final authSession = AuthSession(
+      email: email,
       jwt: result.jwt,
       sessionToken: result.sessionToken,
       role: result.role,
-      authProvider: 'password',
+      authProvider: providerId,
       loyaltyPoints: result.loyaltyPoints ?? 0,
     );
 
@@ -145,6 +398,38 @@ class _LoginScreenState extends State<LoginScreen> {
       AppRoutes.dashboard,
       arguments: authSession.toRouteArgs(),
     );
+  }
+
+  void toggleAuthenticationMode(bool register) {
+    if (isBusy || registering == register) {
+      return;
+    }
+
+    setState(() {
+      registering = register;
+    });
+  }
+
+  void fillCustomerOneCredentials() {
+    nameController.text = 'Klient Testowy 1';
+    emailController.text = 'customer1@zapieapp.pl';
+    phoneController.text = '500100100';
+    passwordController.text = 'Haslo123!';
+  }
+
+  void fillCustomerTwoCredentials() {
+    nameController.text = 'Klient Testowy 2';
+    emailController.text = 'customer2@zapieapp.pl';
+    phoneController.text = '500200200';
+    passwordController.text = 'Haslo123!';
+  }
+
+
+  void fillCustomerThreeCredentials() {
+    nameController.text = 'Klient Testowy 3';
+    emailController.text = 'customer3@zapieapp.pl';
+    phoneController.text = '500300300';
+    passwordController.text = 'Haslo123!';
   }
 
   void fillDemoCredentials() {
@@ -307,7 +592,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                       const SizedBox(height: 22),
                                       Text(
-                                        'Logowanie',
+                                        registering ? 'Rejestracja' : 'Logowanie',
                                         textAlign: TextAlign.center,
                                         style: theme.textTheme.headlineSmall
                                             ?.copyWith(
@@ -317,7 +602,9 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                       const SizedBox(height: 8),
                                       Text(
-                                        'Zaloguj sie do panelu i rozpocznij prace z aplikacja.',
+                                        registering
+                                            ? 'Utworz konto klienta i od razu przejdz do aplikacji.'
+                                            : 'Zaloguj sie do panelu i rozpocznij prace z aplikacja.',
                                         textAlign: TextAlign.center,
                                         style:
                                             theme.textTheme.bodyMedium?.copyWith(
@@ -326,6 +613,65 @@ class _LoginScreenState extends State<LoginScreen> {
                                         ),
                                       ),
                                       const SizedBox(height: 20),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: FilledButton.tonal(
+                                              onPressed: isBusy
+                                                  ? null
+                                                  : () =>
+                                                      toggleAuthenticationMode(
+                                                        false,
+                                                      ),
+                                              child: const Text('Mam konto'),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: OutlinedButton(
+                                              onPressed: isBusy
+                                                  ? null
+                                                  : () =>
+                                                      toggleAuthenticationMode(
+                                                        true,
+                                                      ),
+                                              child: const Text('Rejestracja'),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (registering) ...[
+                                        const SizedBox(height: 16),
+                                        TextFormField(
+                                          controller: nameController,
+                                          textInputAction: TextInputAction.next,
+                                          autofillHints: const [
+                                            AutofillHints.name,
+                                          ],
+                                          decoration: const InputDecoration(
+                                            labelText: 'Imie i nazwisko',
+                                            prefixIcon: Icon(
+                                              Icons.person_outline,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 16),
+                                        TextFormField(
+                                          controller: phoneController,
+                                          keyboardType: TextInputType.phone,
+                                          textInputAction: TextInputAction.next,
+                                          autofillHints: const [
+                                            AutofillHints.telephoneNumber,
+                                          ],
+                                          decoration: const InputDecoration(
+                                            labelText: 'Telefon (opcjonalnie)',
+                                            prefixIcon: Icon(
+                                              Icons.phone_outlined,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 16),
                                       TextFormField(
                                         controller: emailController,
                                         keyboardType:
@@ -339,17 +685,8 @@ class _LoginScreenState extends State<LoginScreen> {
                                           prefixIcon:
                                               Icon(Icons.mail_outline),
                                         ),
-                                        validator: (value) {
-                                          final email = value?.trim() ?? '';
-                                          if (email.isEmpty) {
-                                            return 'Podaj adres e-mail.';
-                                          }
-                                          if (!email.contains('@') ||
-                                              !email.contains('.')) {
-                                            return 'Podaj poprawny adres e-mail.';
-                                          }
-                                          return null;
-                                        },
+                                        validator: (value) =>
+                                            _validateEmail(value?.trim() ?? ''),
                                       ),
                                       const SizedBox(height: 16),
                                       TextFormField(
@@ -360,7 +697,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                           AutofillHints.password,
                                         ],
                                         onFieldSubmitted: (_) {
-                                          if (!loading) {
+                                          if (!isBusy) {
                                             submit();
                                           }
                                         },
@@ -370,7 +707,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                             Icons.lock_outline,
                                           ),
                                           suffixIcon: IconButton(
-                                            onPressed: loading
+                                            onPressed: isBusy
                                                 ? null
                                                 : () {
                                                     setState(() {
@@ -399,16 +736,81 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                       const SizedBox(height: 24),
                                       FilledButton(
-                                        onPressed: loading ? null : submit,
+                                        onPressed: isBusy ? null : submit,
                                         style: FilledButton.styleFrom(
                                           minimumSize:
                                               const Size.fromHeight(52),
                                         ),
                                         child: Text(
                                           loading
-                                              ? 'Logowanie...'
-                                              : 'Zaloguj sie',
+                                              ? (registering
+                                                  ? 'Rejestracja...'
+                                                  : 'Logowanie...')
+                                              : (registering
+                                                  ? 'Zarejestruj sie'
+                                                  : 'Zaloguj sie'),
                                         ),
+                                      ),
+                                      const SizedBox(height: 18),
+                                      Row(
+                                        children: [
+                                          const Expanded(
+                                            child: Divider(
+                                              color: Color(0x24FFFFFF),
+                                            ),
+                                          ),
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                            ),
+                                            child: Text(
+                                              'albo',
+                                              style: theme.textTheme.bodySmall
+                                                  ?.copyWith(
+                                                color: const Color(0xFFD6C4B8),
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                          const Expanded(
+                                            child: Divider(
+                                              color: Color(0x24FFFFFF),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Text(
+                                        'Wpisz e-mail i przejdz do oficjalnego logowania Google lub Apple.',
+                                        textAlign: TextAlign.center,
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          color: const Color(0xFFD6C4B8),
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      _ProviderLoginButton(
+                                        provider: _LoginProvider.google,
+                                        loading: socialLoadingProvider ==
+                                            _LoginProvider.google,
+                                        onPressed: isBusy
+                                            ? null
+                                            : () => submitProvider(
+                                                  _LoginProvider.google,
+                                                ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      _ProviderLoginButton(
+                                        provider: _LoginProvider.apple,
+                                        loading: socialLoadingProvider ==
+                                            _LoginProvider.apple,
+                                        onPressed: isBusy
+                                            ? null
+                                            : () => submitProvider(
+                                                  _LoginProvider.apple,
+                                                ),
                                       ),
                                       const SizedBox(height: 12),
                                       Text(
@@ -427,25 +829,43 @@ class _LoginScreenState extends State<LoginScreen> {
                                         children: [
                                           _QuickFillButton(
                                             label: 'Demo',
-                                            onPressed: loading
+                                            onPressed: isBusy
                                                 ? null
                                                 : fillDemoCredentials,
                                           ),
                                           _QuickFillButton(
+                                            label: 'Klient 1',
+                                            onPressed: isBusy
+                                                ? null
+                                                : fillCustomerOneCredentials,
+                                          ),
+                                          _QuickFillButton(
+                                            label: 'Klient 2',
+                                            onPressed: isBusy
+                                                ? null
+                                                : fillCustomerTwoCredentials,
+                                          ),
+                                          _QuickFillButton(
+                                            label: 'Klient 3',
+                                            onPressed: isBusy
+                                                ? null
+                                                : fillCustomerThreeCredentials,
+                                          ),
+                                          _QuickFillButton(
                                             label: 'Admin',
-                                            onPressed: loading
+                                            onPressed: isBusy
                                                 ? null
                                                 : fillAdminCredentials,
                                           ),
                                           _QuickFillButton(
                                             label: 'Pracownik',
-                                            onPressed: loading
+                                            onPressed: isBusy
                                                 ? null
                                                 : fillEmployeeCredentials,
                                           ),
                                           _QuickFillButton(
                                             label: 'Kierowca',
-                                            onPressed: loading
+                                            onPressed: isBusy
                                                 ? null
                                                 : fillDriverCredentials,
                                           ),
@@ -480,6 +900,21 @@ class _LoginScreenState extends State<LoginScreen> {
                                             _CredentialHint(
                                               label:
                                                   'Demo user: demo@zapieapp.pl / Haslo123!',
+                                            ),
+                                            const SizedBox(height: 6),
+                                            _CredentialHint(
+                                              label:
+                                                  'Klient 1: customer1@zapieapp.pl / Haslo123!',
+                                            ),
+                                            const SizedBox(height: 6),
+                                            _CredentialHint(
+                                              label:
+                                                  'Klient 2: customer2@zapieapp.pl / Haslo123!',
+                                            ),
+                                            const SizedBox(height: 6),
+                                            _CredentialHint(
+                                              label:
+                                                  'Klient 3: customer3@zapieapp.pl / Haslo123!',
                                             ),
                                             const SizedBox(height: 6),
                                             _CredentialHint(
@@ -543,6 +978,67 @@ class _LoginResult {
   final int? loyaltyPoints;
 }
 
+class _ProviderLoginButton extends StatelessWidget {
+  const _ProviderLoginButton({
+    required this.provider,
+    required this.loading,
+    required this.onPressed,
+  });
+
+  final _LoginProvider provider;
+  final bool loading;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: loading
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : _ProviderIconBadge(icon: provider.icon),
+      label: Text(
+        loading
+            ? 'Laczenie z ${provider.label}...'
+            : 'Kontynuuj z ${provider.label}',
+      ),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(50),
+        foregroundColor: const Color(0xFFFFF4EC),
+        side: const BorderSide(color: Color(0x33FFFFFF)),
+        backgroundColor: const Color(0x1AFFFFFF),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProviderIconBadge extends StatelessWidget {
+  const _ProviderIconBadge({required this.icon});
+
+  final _ProviderIcon icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return switch (icon) {
+      _ProviderIcon.google => const Text(
+          'G',
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            fontSize: 18,
+            color: Color(0xFF4285F4),
+          ),
+        ),
+      _ProviderIcon.apple => const Icon(Icons.apple, size: 22),
+    };
+  }
+}
+
 class _QuickFillButton extends StatelessWidget {
   const _QuickFillButton({
     required this.label,
@@ -584,6 +1080,30 @@ class _CredentialHint extends StatelessWidget {
           ),
     );
   }
+}
+
+String _clientIdFor(_LoginProvider provider) {
+  return switch (provider) {
+    _LoginProvider.google => AppConfig.googleAuthClientId,
+    _LoginProvider.apple => AppConfig.appleAuthClientId,
+  };
+}
+
+String _clientIdKeyFor(_LoginProvider provider) {
+  return switch (provider) {
+    _LoginProvider.google => 'GOOGLE_AUTH_CLIENT_ID',
+    _LoginProvider.apple => 'APPLE_AUTH_CLIENT_ID',
+  };
+}
+
+String? _validateEmail(String email) {
+  if (email.isEmpty) {
+    return 'Podaj adres e-mail.';
+  }
+  if (!email.contains('@') || !email.contains('.')) {
+    return 'Podaj poprawny adres e-mail.';
+  }
+  return null;
 }
 
 int? _asInt(Object? value) {

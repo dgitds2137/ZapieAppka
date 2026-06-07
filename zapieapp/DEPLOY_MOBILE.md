@@ -17,14 +17,15 @@ This lets testers install `DEV` next to production without replacing it.
 
 ## Android
 
+For Google Play uploads, use the full checklist in `GOOGLE_PLAY_RELEASE_CHECKLIST.md` before building or uploading an AAB.
+
 ### Signing
 
 1. Copy `android/key.properties.example` to `android/key.properties`.
 2. Fill it with the real upload keystore values.
 3. Put the keystore file in a safe local path, for example `android/keystores/`.
 
-If `android/key.properties` is missing, release builds fall back to the debug key.
-That is acceptable only for local smoke testing, not for Play upload.
+If `android/key.properties` is missing, production release builds fail before creating a Play artifact. Development release builds may still fall back to the debug key for local smoke testing only.
 
 ### Build DEV for testers
 

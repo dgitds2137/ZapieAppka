@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
+import '../../core/config/app_config.dart';
 import '../../data/local/session_persistence.dart';
 import '../../data/models/auth_session.dart';
 import '../../data/models/checkout_verification.dart';
@@ -171,6 +173,88 @@ class _OrderListScreenState extends State<OrderListScreen> {
     );
   }
 
+  Future<void> _confirmDeleteAccount() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Usunac konto?'),
+        content: const Text(
+          'Tej operacji nie mozna cofnac. Usuniemy konto i wylogujemy Cie z aplikacji.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFD04437),
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Usun konto'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
+
+    await _deleteAccount();
+  }
+
+  Future<void> _deleteAccount() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final sessionToken = widget.authSession.sessionToken?.trim();
+    if (sessionToken == null || sessionToken.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Brak aktywnej sesji do usuniecia konta.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      final response = await http.delete(
+        Uri.parse('${AppConfig.apiBaseUrl}/account'),
+        headers: const {'Accept': 'application/json'},
+        body: {
+          'session_token': sessionToken,
+          if ((widget.authSession.email ?? '').trim().isNotEmpty)
+            'email': widget.authSession.email!.trim(),
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(response.body);
+      }
+
+      widget.checkoutRepository.rememberActiveCheckout(null);
+      await SessionPersistence.clearAll();
+
+      if (!mounted) {
+        return;
+      }
+
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        AppRoutes.login,
+        (route) => false,
+      );
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Nie udalo sie usunac konta. Sprobuj ponownie.'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeCheckout = widget.activeCheckout;
@@ -222,11 +306,20 @@ class _OrderListScreenState extends State<OrderListScreen> {
                     const SizedBox(width: 8),
                     _TopActionButton(
                       icon: Icons.logout_rounded,
+                      tooltip: 'Wyloguj',
                       onTap: _logout,
                     ),
                     const SizedBox(width: 8),
                     _TopActionButton(
+                      icon: Icons.delete_outline_rounded,
+                      tooltip: 'Usun konto',
+                      foregroundColor: const Color(0xFFFF8A7A),
+                      onTap: _confirmDeleteAccount,
+                    ),
+                    const SizedBox(width: 8),
+                    _TopActionButton(
                       icon: Icons.arrow_back_rounded,
+                      tooltip: 'Wroc',
                       onTap: () => Navigator.of(context).pop(),
                     ),
                   ],
@@ -323,14 +416,18 @@ class _TopActionButton extends StatelessWidget {
   const _TopActionButton({
     required this.icon,
     required this.onTap,
+    this.tooltip,
+    this.foregroundColor = const Color(0xFFF8EEE7),
   });
 
   final IconData icon;
   final VoidCallback onTap;
+  final String? tooltip;
+  final Color foregroundColor;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    final button = InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(18),
       child: Ink(
@@ -341,8 +438,17 @@ class _TopActionButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: const Color(0x24FFFFFF)),
         ),
-        child: Icon(icon, color: const Color(0xFFF8EEE7)),
+        child: Icon(icon, color: foregroundColor),
       ),
+    );
+
+    if (tooltip == null) {
+      return button;
+    }
+
+    return Tooltip(
+      message: tooltip!,
+      child: button,
     );
   }
 }

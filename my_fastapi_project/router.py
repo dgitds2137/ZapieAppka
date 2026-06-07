@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from models import (
     AdminCatalogAddonOut,
     AdminCatalogDeliveryMinimumUpdateIn,
+    AdminCatalogKitchenEtaOverrideUpdateIn,
     AdminCatalogOpeningHoursUpdateIn,
     AdminCatalogDeliveryOriginAddressUpdateIn,
     AdminCatalogDeliveryRadiusUpdateIn,
@@ -25,6 +26,7 @@ from models import (
     CheckoutPickupLocationOut,
     CheckoutPickupSlotEstimateIn,
     CheckoutPickupSlotEstimateOut,
+    UdkaAvailabilityOut,
     CheckoutCancelIn,
     CheckoutReceiptConfirmationIn,
     CheckoutVerificationIn,
@@ -46,6 +48,33 @@ def routes(MenuService, UserService, CheckoutService, get_db):
     def login(email: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
         decoded_pwd = base64.b64decode(password.encode("utf-8")).decode("utf-8")
         return UserService(db).login(email, decoded_pwd)
+
+    @r.post("/register")
+    def register(
+        email: str = Form(...),
+        password: str = Form(...),
+        name: str | None = Form(None),
+        phone: str | None = Form(None),
+        db: Session = Depends(get_db),
+    ):
+        decoded_pwd = base64.b64decode(password.encode("utf-8")).decode("utf-8")
+        return UserService(db).register(
+            email=email,
+            password=decoded_pwd,
+            name=name,
+            phone=phone,
+        )
+
+    @r.delete("/account")
+    def delete_account(
+        session_token: str = Form(...),
+        email: str | None = Form(None),
+        db: Session = Depends(get_db),
+    ):
+        return UserService(db).delete_account(
+            session_token=session_token,
+            email=email,
+        )
 
     @r.get("/get_user/{email}", response_model=UserSchema)
     def get_user(email: str, db: Session = Depends(get_db)):
@@ -123,6 +152,10 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         db: Session = Depends(get_db),
     ):
         return CheckoutService(db).get_pickup_slot_estimate(payload)
+
+    @r.get("/checkout/udka-availability", response_model=UdkaAvailabilityOut)
+    def get_udka_availability(db: Session = Depends(get_db)):
+        return CheckoutService(db).get_udka_availability()
 
     @r.post("/checkout/confirm-receipt", response_model=CheckoutVerificationOut)
     def confirm_checkout_receipt(
@@ -307,6 +340,18 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         db: Session = Depends(get_db),
     ):
         return CheckoutService(db).update_delivery_origin_address(
+            payload=payload,
+        )
+
+    @r.patch(
+        "/admin/catalog/kitchen-eta",
+        response_model=AdminCatalogOut,
+    )
+    def update_admin_kitchen_eta_override(
+        payload: AdminCatalogKitchenEtaOverrideUpdateIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).update_kitchen_eta_override(
             payload=payload,
         )
 

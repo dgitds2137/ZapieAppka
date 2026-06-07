@@ -28,6 +28,15 @@ void main() {
     expect(find.text('Witaj z powrotem'), findsOneWidget);
     expect(find.text('Logowanie'), findsOneWidget);
     expect(find.text('Zaloguj sie'), findsOneWidget);
+    expect(find.text('Rejestracja'), findsOneWidget);
+    expect(find.text('Kontynuuj z Google'), findsOneWidget);
+    expect(find.text('Kontynuuj z Apple'), findsOneWidget);
+    expect(
+      find.text(
+        'Wpisz e-mail i przejdz do oficjalnego logowania Google lub Apple.',
+      ),
+      findsOneWidget,
+    );
   });
 }
 

@@ -21,7 +21,7 @@ class ZapieApp extends StatelessWidget {
       initialRoute: SessionPersistence.hasValidAuthSessionSync()
           ? AppRoutes.dashboard
           : AppRoutes.login,
-      routes: buildRoutes(),
+      onGenerateRoute: generateAppRoute,
     );
   }
 }
