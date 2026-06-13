@@ -123,7 +123,30 @@ jobs:
             REQUIRE_DATABASE_ON_STARTUP=false
             MSSQL_CONN_STR=secretref:mssql-conn-str
             JWT_SECRET_KEY=secretref:jwt-secret-key
+            GOOGLE_AUTH_CLIENT_ID=secretref:google-auth-client-id
+            GOOGLE_AUTH_CLIENT_SECRET=secretref:google-auth-client-secret
+            GOOGLE_AUTH_DEFAULT_REDIRECT_URI=secretref:google-auth-default-redirect-uri
+            GOOGLE_AUTH_ALLOWED_REDIRECT_URIS=secretref:google-auth-allowed-redirect-uris
+            GOOGLE_AUTH_STATE_TTL_SECONDS=600
           disableTelemetry: true
+
+      - name: Reapply runtime environment variables
+        shell: bash
+        run: |
+          az containerapp update \
+            --name "$AZURE_CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --set-env-vars \
+              APP_ENV=production \
+              PORT=8000 \
+              REQUIRE_DATABASE_ON_STARTUP=false \
+              MSSQL_CONN_STR=secretref:mssql-conn-str \
+              JWT_SECRET_KEY=secretref:jwt-secret-key \
+              GOOGLE_AUTH_CLIENT_ID=secretref:google-auth-client-id \
+              GOOGLE_AUTH_CLIENT_SECRET=secretref:google-auth-client-secret \
+              GOOGLE_AUTH_DEFAULT_REDIRECT_URI=secretref:google-auth-default-redirect-uri \
+              GOOGLE_AUTH_ALLOWED_REDIRECT_URIS=secretref:google-auth-allowed-redirect-uris \
+              GOOGLE_AUTH_STATE_TTL_SECONDS=600
 
       - name: Smoke test deployed API
         shell: bash
