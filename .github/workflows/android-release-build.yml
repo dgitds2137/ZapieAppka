@@ -89,7 +89,7 @@ jobs:
           storePassword=${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
           keyPassword=${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
           keyAlias=${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
-          storeFile=upload-keystore.jks
+          storeFile=../upload-keystore.jks
           EOF
 
       - name: Build signed prod app bundle
