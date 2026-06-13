@@ -10,3 +10,6 @@ pydantic[email]==2.11.4
 python-multipart==0.0.20
 python-dotenv==1.1.0
 google-auth==2.54.0
+cachetools==6.2.2
+requests==2.32.5
+rsa==4.9.1

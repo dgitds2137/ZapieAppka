@@ -236,7 +236,7 @@ class GoogleOAuthService:
         except ImportError as exc:
             raise HTTPException(
                 status_code=503,
-                detail="Brakuje zaleznosci google-auth do weryfikacji Google ID token.",
+                detail=f"Brakuje zaleznosci do weryfikacji Google ID token: {exc}",
             ) from exc
 
         try:
