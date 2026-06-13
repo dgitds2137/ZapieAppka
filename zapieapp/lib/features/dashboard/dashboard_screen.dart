@@ -1422,6 +1422,104 @@ class _CategoryProductRow extends StatelessWidget {
     final isFrozen = _isFrozenPosition(position);
     final isFries = _isFriesPosition(position);
     final isUdka = _categoryKeyForPosition(position) == 'udka';
+    final imageThumb = ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 82,
+        height: 82,
+        child: Padding(
+          padding: _positionImagePadding(position),
+          child: _PositionImage(
+            photoUrl: _photo(position),
+            title: _title(position, 0),
+            fit: _positionImageFit(position),
+            alignment: _positionImageAlignment(position),
+          ),
+        ),
+      ),
+    );
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _title(position, 0),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: const Color(0xFFF7EEE7),
+                fontWeight: FontWeight.w800,
+              ),
+        ),
+        if (isFrozen || isFries) ...[
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              if (isFrozen) ...const [
+                _ProductStateBadge(label: 'VAC'),
+                _ProductStateBadge(label: 'SOSY PLATNE'),
+              ],
+              if (isFries)
+                const _ProductStateBadge(label: 'KETCHUP GRATIS'),
+            ],
+          ),
+        ],
+        if (!isAvailable) ...[
+          const SizedBox(height: 6),
+          const _ProductStateBadge(
+            label: 'CHWILOWO NIEDOSTEPNE',
+            tone: _ProductStateBadgeTone.warning,
+          ),
+        ],
+        const SizedBox(height: 6),
+        Text(
+          _description(position),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: const Color(0xFFD1C0B5),
+                height: 1.3,
+              ),
+        ),
+        if (isUdka) ...[
+          const SizedBox(height: 8),
+          const _UdkaAvailabilityPanel(compact: true),
+        ],
+        const SizedBox(height: 8),
+        _PrepTimeBadge(
+          minutes: _prepMinutesOrFallback(position),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 10,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              _kcal(position),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: const Color(0xFFB59E90),
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+            Text(
+              _priceLabel(position),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: const Color(0xFFF4DDCE),
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+          ],
+        ),
+      ],
+    );
+    final stepper = _CategoryRowStepper(
+      quantity: quantity,
+      locked: locked,
+      onIncrement: onIncrement,
+      onDecrement: onDecrement,
+    );
 
     return Material(
       color: Colors.transparent,
@@ -1435,111 +1533,42 @@ class _CategoryProductRow extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: const Color(0x16FFFFFF)),
           ),
-          child: Row(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  width: 82,
-                  height: 82,
-                  child: Padding(
-                    padding: _positionImagePadding(position),
-                    child: _PositionImage(
-                      photoUrl: _photo(position),
-                      title: _title(position, 0),
-                      fit: _positionImageFit(position),
-                      alignment: _positionImageAlignment(position),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final useCompactLayout = constraints.maxWidth < 430;
+
+              if (useCompactLayout) {
+                return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      _title(position, 0),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: const Color(0xFFF7EEE7),
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    if (isFrozen || isFries) ...[
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          if (isFrozen) ...const [
-                            _ProductStateBadge(label: 'VAC'),
-                            _ProductStateBadge(label: 'SOSY PLATNE'),
-                          ],
-                          if (isFries)
-                            const _ProductStateBadge(label: 'KETCHUP GRATIS'),
-                        ],
-                      ),
-                    ],
-                    if (!isAvailable) ...[
-                      const SizedBox(height: 6),
-                      const _ProductStateBadge(
-                        label: 'CHWILOWO NIEDOSTEPNE',
-                        tone: _ProductStateBadgeTone.warning,
-                      ),
-                    ],
-                    const SizedBox(height: 6),
-                    Text(
-                      _description(position),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFFD1C0B5),
-                            height: 1.3,
-                          ),
-                    ),
-                    if (isUdka) ...[
-                      const SizedBox(height: 8),
-                      const _UdkaAvailabilityPanel(compact: true),
-                    ],
-                    const SizedBox(height: 8),
-                    _PrepTimeBadge(
-                      minutes: _prepMinutesOrFallback(position),
-                    ),
-                    const SizedBox(height: 8),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          _kcal(position),
-                          style:
-                              Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: const Color(0xFFB59E90),
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          _priceLabel(position),
-                          style:
-                              Theme.of(context).textTheme.labelMedium?.copyWith(
-                                    color: const Color(0xFFF4DDCE),
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                        ),
+                        imageThumb,
+                        const SizedBox(width: 12),
+                        Expanded(child: details),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: stepper,
+                    ),
                   ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              _CategoryRowStepper(
-                quantity: quantity,
-                locked: locked,
-                onIncrement: onIncrement,
-                onDecrement: onDecrement,
-              ),
-            ],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  imageThumb,
+                  const SizedBox(width: 12),
+                  Expanded(child: details),
+                  const SizedBox(width: 12),
+                  stepper,
+                ],
+              );
+            },
           ),
         ),
       ),

@@ -1,4 +1,4 @@
-storePassword=change-me
-keyPassword=change-me
+storePassword=CHANGE_ME
+keyPassword=CHANGE_ME
 keyAlias=upload
-storeFile=../keystores/zapieapp-upload.jks
+storeFile=upload-keystore.jks

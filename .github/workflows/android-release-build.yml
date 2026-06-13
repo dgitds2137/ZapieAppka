@@ -1,0 +1,110 @@
+name: Android release build
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "zapieapp/**"
+      - ".github/workflows/android-release-build.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: android-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-prod-aab:
+    name: Build signed prod AAB
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: zapieapp
+
+    env:
+      API_BASE_URL: ${{ vars.API_BASE_URL_PROD }}
+      GOOGLE_AUTH_CLIENT_ID: ${{ vars.GOOGLE_AUTH_CLIENT_ID }}
+      APPLE_AUTH_CLIENT_ID: ${{ vars.APPLE_AUTH_CLIENT_ID }}
+      AUTH_REDIRECT_URI: ${{ vars.AUTH_REDIRECT_URI_PROD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate Android release secrets
+        shell: bash
+        run: |
+          missing=0
+          if [ -z "${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}" ]; then
+            echo "::error::Set GitHub Actions secret ANDROID_UPLOAD_KEYSTORE_BASE64"
+            missing=1
+          fi
+          if [ -z "${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}" ]; then
+            echo "::error::Set GitHub Actions secret ANDROID_UPLOAD_KEYSTORE_PASSWORD"
+            missing=1
+          fi
+          if [ -z "${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}" ]; then
+            echo "::error::Set GitHub Actions secret ANDROID_UPLOAD_KEY_ALIAS"
+            missing=1
+          fi
+          if [ -z "${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}" ]; then
+            echo "::error::Set GitHub Actions secret ANDROID_UPLOAD_KEY_PASSWORD"
+            missing=1
+          fi
+          if [ -z "${{ vars.API_BASE_URL_PROD }}" ]; then
+            echo "::error::Set GitHub Actions variable API_BASE_URL_PROD"
+            missing=1
+          fi
+          if [ -z "${{ vars.GOOGLE_AUTH_CLIENT_ID }}" ]; then
+            echo "::error::Set GitHub Actions variable GOOGLE_AUTH_CLIENT_ID"
+            missing=1
+          fi
+          if [ -z "${{ vars.AUTH_REDIRECT_URI_PROD }}" ]; then
+            echo "::error::Set GitHub Actions variable AUTH_REDIRECT_URI_PROD"
+            missing=1
+          fi
+          exit "$missing"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restore Flutter dependencies
+        run: flutter pub get
+
+      - name: Materialize Android signing files
+        shell: bash
+        working-directory: zapieapp/android
+        run: |
+          echo "${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}" | base64 --decode > upload-keystore.jks
+          cat > key.properties <<EOF
+          storePassword=${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          keyPassword=${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          storeFile=upload-keystore.jks
+          EOF
+
+      - name: Build signed prod app bundle
+        run: >
+          flutter build appbundle
+          --flavor prod
+          --release
+          --dart-define API_BASE_URL="$API_BASE_URL"
+          --dart-define GOOGLE_AUTH_CLIENT_ID="$GOOGLE_AUTH_CLIENT_ID"
+          --dart-define APPLE_AUTH_CLIENT_ID="$APPLE_AUTH_CLIENT_ID"
+          --dart-define AUTH_REDIRECT_URI="$AUTH_REDIRECT_URI"
+
+      - name: Upload Android release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zapieapp-prod-aab
+          path: zapieapp/build/app/outputs/bundle/prodRelease/*.aab
+          if-no-files-found: error
