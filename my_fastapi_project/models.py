@@ -422,6 +422,11 @@ class OAuthCodeExchangeIn(BaseModel):
     email: EmailStr | None = None
 
 
+class GoogleIdTokenExchangeIn(BaseModel):
+    id_token: str
+    email: EmailStr | None = None
+
+
 class AddressCreate(BaseModel):
     user_id: int
     street: str

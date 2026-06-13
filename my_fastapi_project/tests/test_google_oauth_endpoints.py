@@ -10,7 +10,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from main import MenuService, UserService
-from models import OAuthCodeExchangeIn
+from models import GoogleIdTokenExchangeIn, OAuthCodeExchangeIn
 from oauth_router import oauth_routes
 
 
@@ -45,6 +45,17 @@ class _FakeGoogleOAuthServiceSuccess:
             "loyalty_points": 0,
         }
 
+    def exchange_id_token(self, payload: GoogleIdTokenExchangeIn):
+        self.callback_calls.append(payload)
+        return {
+            "jwt": "jwt-token",
+            "session_token": "session-token",
+            "role": "user",
+            "user_id": 15,
+            "email": "user@zapieapp.pl",
+            "loyalty_points": 0,
+        }
+
 
 class _FakeGoogleOAuthServiceFailure:
     def __init__(self, db):
@@ -60,6 +71,12 @@ class _FakeGoogleOAuthServiceFailure:
         raise HTTPException(
             status_code=400,
             detail="Stan logowania jest nieprawidlowy lub wygasl.",
+        )
+
+    def exchange_id_token(self, payload: GoogleIdTokenExchangeIn):
+        raise HTTPException(
+            status_code=400,
+            detail="Google ID token jest nieprawidlowy.",
         )
 
 
@@ -102,6 +119,29 @@ def test_google_auth_start_endpoint_success():
     ]
 
 
+def test_google_auth_start_endpoint_success_without_email():
+    service = _FakeGoogleOAuthServiceSuccess(None)
+    client = _build_test_client(lambda db: service)
+
+    response = client.get(
+        "/google-auth/start",
+        params={
+            "redirect_uri": "zapieapp://auth/callback",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["provider"] == "google"
+    assert data["redirect_uri"] == "zapieapp://auth/callback"
+    assert service.start_calls == [
+        {
+            "redirect_uri": "zapieapp://auth/callback",
+            "email": None,
+        }
+    ]
+
+
 def test_google_auth_start_endpoint_failure():
     client = _build_test_client(_FakeGoogleOAuthServiceFailure)
 
@@ -133,8 +173,12 @@ def test_google_auth_callback_endpoint_success():
 
     assert response.status_code == 200, response.text
     data = response.json()
+    assert data["jwt"] == "jwt-token"
     assert data["session_token"] == "session-token"
+    assert data["role"] == "user"
+    assert data["user_id"] == 15
     assert data["email"] == "user@zapieapp.pl"
+    assert data["loyalty_points"] == 0
     assert len(service.callback_calls) == 1
     assert service.callback_calls[0].code == "google-code"
     assert service.callback_calls[0].redirect_uri == "zapieapp://auth/callback"
@@ -157,9 +201,47 @@ def test_google_auth_callback_endpoint_failure():
     assert "Stan logowania" in response.text
 
 
+def test_google_auth_mobile_endpoint_success():
+    service = _FakeGoogleOAuthServiceSuccess(None)
+    client = _build_test_client(lambda db: service)
+
+    response = client.post(
+        "/google-auth/mobile",
+        json={
+            "id_token": "mobile-id-token",
+            "email": "user@zapieapp.pl",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["jwt"] == "jwt-token"
+    assert data["session_token"] == "session-token"
+    assert data["email"] == "user@zapieapp.pl"
+    assert len(service.callback_calls) == 1
+    assert service.callback_calls[0].id_token == "mobile-id-token"
+
+
+def test_google_auth_mobile_endpoint_failure():
+    client = _build_test_client(_FakeGoogleOAuthServiceFailure)
+
+    response = client.post(
+        "/google-auth/mobile",
+        json={
+            "id_token": "broken-mobile-id-token",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Google ID token" in response.text
+
+
 if __name__ == "__main__":
     test_google_auth_start_endpoint_success()
+    test_google_auth_start_endpoint_success_without_email()
     test_google_auth_start_endpoint_failure()
     test_google_auth_callback_endpoint_success()
     test_google_auth_callback_endpoint_failure()
+    test_google_auth_mobile_endpoint_success()
+    test_google_auth_mobile_endpoint_failure()
     print("OK: test_google_oauth_endpoints.py")

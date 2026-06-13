@@ -29,16 +29,40 @@ TEST_CASES = [
         foundation_tests.test_google_start_rejects_unknown_redirect_uri,
     ),
     (
+        "service:start_without_email_omits_hint",
+        foundation_tests.test_google_start_without_email_omits_login_hint_and_state_email,
+    ),
+    (
         "service:callback_verified_email",
         foundation_tests.test_google_callback_exchanges_code_and_uses_verified_email,
+    ),
+    (
+        "service:callback_without_email_hint_uses_profile",
+        foundation_tests.test_google_callback_accepts_missing_email_hint_and_uses_google_profile,
+    ),
+    (
+        "service:callback_rejects_email_mismatch",
+        foundation_tests.test_google_callback_rejects_email_mismatch_between_hint_and_google_profile,
     ),
     (
         "service:callback_rejects_unverified_email",
         foundation_tests.test_google_callback_rejects_unverified_email,
     ),
     (
+        "service:mobile_id_token_success",
+        foundation_tests.test_google_mobile_id_token_creates_standard_session,
+    ),
+    (
+        "service:mobile_id_token_rejects_email_mismatch",
+        foundation_tests.test_google_mobile_id_token_rejects_email_mismatch,
+    ),
+    (
         "endpoint:start_success",
         endpoint_tests.test_google_auth_start_endpoint_success,
+    ),
+    (
+        "endpoint:start_success_without_email",
+        endpoint_tests.test_google_auth_start_endpoint_success_without_email,
     ),
     (
         "endpoint:start_failure",
@@ -51,6 +75,14 @@ TEST_CASES = [
     (
         "endpoint:callback_failure",
         endpoint_tests.test_google_auth_callback_endpoint_failure,
+    ),
+    (
+        "endpoint:mobile_success",
+        endpoint_tests.test_google_auth_mobile_endpoint_success,
+    ),
+    (
+        "endpoint:mobile_failure",
+        endpoint_tests.test_google_auth_mobile_endpoint_failure,
     ),
 ]
 

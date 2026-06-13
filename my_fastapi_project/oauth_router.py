@@ -2,7 +2,12 @@ from fastapi import APIRouter, Depends
 from pydantic import EmailStr
 from sqlalchemy.orm import Session
 
-from models import AuthSessionOut, OAuthAuthorizationStartOut, OAuthCodeExchangeIn
+from models import (
+    AuthSessionOut,
+    GoogleIdTokenExchangeIn,
+    OAuthAuthorizationStartOut,
+    OAuthCodeExchangeIn,
+)
 
 
 def oauth_routes(GoogleOAuthService, get_db):
@@ -25,5 +30,12 @@ def oauth_routes(GoogleOAuthService, get_db):
         db: Session = Depends(get_db),
     ):
         return GoogleOAuthService(db).exchange_code(payload)
+
+    @r.post("/google-auth/mobile", response_model=AuthSessionOut)
+    def google_auth_mobile(
+        payload: GoogleIdTokenExchangeIn,
+        db: Session = Depends(get_db),
+    ):
+        return GoogleOAuthService(db).exchange_id_token(payload)
 
     return r

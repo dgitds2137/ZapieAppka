@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 from unittest.mock import Mock, patch
+from urllib.parse import parse_qs, urlparse
 
 from fastapi import HTTPException
 
@@ -9,7 +10,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from oauth_service import GoogleOAuthService
-from models import OAuthCodeExchangeIn
+from models import GoogleIdTokenExchangeIn, OAuthCodeExchangeIn
 
 
 class _FakeUserService:
@@ -92,6 +93,23 @@ def test_google_start_rejects_unknown_redirect_uri():
         assert "Redirect URI" in str(exc.detail)
 
 
+def test_google_start_without_email_omits_login_hint_and_state_email():
+    service = _make_service()
+
+    result = service.start_authorization(
+        redirect_uri="zapieapp://auth/callback",
+        email=None,
+    )
+
+    parsed_url = urlparse(result.authorization_url)
+    query = parse_qs(parsed_url.query)
+
+    assert query["redirect_uri"] == ["zapieapp://auth/callback"]
+    assert "login_hint" not in query
+    decoded_state = service._decode_state(result.state)
+    assert decoded_state["email"] is None
+
+
 def test_google_callback_exchanges_code_and_uses_verified_email():
     service = _make_service()
     state = service._encode_state(
@@ -127,6 +145,74 @@ def test_google_callback_exchanges_code_and_uses_verified_email():
     }
 
 
+def test_google_callback_accepts_missing_email_hint_and_uses_google_profile():
+    service = _make_service()
+    state = service._encode_state(
+        redirect_uri="zapieapp://auth/callback",
+        email=None,
+    )
+
+    with patch.object(service, "_exchange_code_for_tokens") as exchange_mock:
+        with patch.object(service, "_fetch_google_profile") as profile_mock:
+            exchange_mock.return_value = {
+                "access_token": "google-access-token",
+            }
+            profile_mock.return_value = {
+                "email": "user@zapieapp.pl",
+                "email_verified": True,
+                "name": "User ZapieApp",
+            }
+
+            result = service.exchange_code(
+                OAuthCodeExchangeIn(
+                    code="oauth-code",
+                    state=state,
+                    redirect_uri="zapieapp://auth/callback",
+                    email=None,
+                ),
+            )
+
+    assert result.email == "user@zapieapp.pl"
+    assert result.role == "user"
+    assert _FakeUserService.last_login == {
+        "email": "user@zapieapp.pl",
+        "name": "User ZapieApp",
+    }
+
+
+def test_google_callback_rejects_email_mismatch_between_hint_and_google_profile():
+    service = _make_service()
+    state = service._encode_state(
+        redirect_uri="zapieapp://auth/callback",
+        email="other@zapieapp.pl",
+    )
+
+    with patch.object(service, "_exchange_code_for_tokens") as exchange_mock:
+        with patch.object(service, "_fetch_google_profile") as profile_mock:
+            exchange_mock.return_value = {
+                "access_token": "google-access-token",
+            }
+            profile_mock.return_value = {
+                "email": "user@zapieapp.pl",
+                "email_verified": True,
+                "name": "User ZapieApp",
+            }
+
+            try:
+                service.exchange_code(
+                    OAuthCodeExchangeIn(
+                        code="oauth-code",
+                        state=state,
+                        redirect_uri="zapieapp://auth/callback",
+                        email=None,
+                    ),
+                )
+                raise AssertionError("Expected HTTPException for mismatched email")
+            except HTTPException as exc:
+                assert exc.status_code == 400
+                assert "nie zgadza" in str(exc.detail)
+
+
 def test_google_callback_rejects_unverified_email():
     service = _make_service()
     state = service._encode_state(
@@ -160,10 +246,63 @@ def test_google_callback_rejects_unverified_email():
                 assert "zweryfikowany" in str(exc.detail)
 
 
+def test_google_mobile_id_token_creates_standard_session():
+    service = _make_service()
+
+    with patch.object(service, "_verify_google_id_token") as verify_mock:
+        verify_mock.return_value = {
+            "email": "user@zapieapp.pl",
+            "email_verified": True,
+            "name": "User ZapieApp",
+        }
+
+        result = service.exchange_id_token(
+            GoogleIdTokenExchangeIn(
+                id_token="mobile-id-token",
+                email="user@zapieapp.pl",
+            ),
+        )
+
+    assert result.email == "user@zapieapp.pl"
+    assert result.session_token == "session-token"
+    assert _FakeUserService.last_login == {
+        "email": "user@zapieapp.pl",
+        "name": "User ZapieApp",
+    }
+
+
+def test_google_mobile_id_token_rejects_email_mismatch():
+    service = _make_service()
+
+    with patch.object(service, "_verify_google_id_token") as verify_mock:
+        verify_mock.return_value = {
+            "email": "user@zapieapp.pl",
+            "email_verified": True,
+            "name": "User ZapieApp",
+        }
+
+        try:
+            service.exchange_id_token(
+                GoogleIdTokenExchangeIn(
+                    id_token="mobile-id-token",
+                    email="other@zapieapp.pl",
+                ),
+            )
+            raise AssertionError("Expected HTTPException for mismatched mobile email")
+        except HTTPException as exc:
+            assert exc.status_code == 400
+            assert "nie zgadza" in str(exc.detail)
+
+
 if __name__ == "__main__":
     test_google_start_returns_signed_state_and_redirect()
     test_google_start_does_not_require_client_secret()
     test_google_start_rejects_unknown_redirect_uri()
+    test_google_start_without_email_omits_login_hint_and_state_email()
     test_google_callback_exchanges_code_and_uses_verified_email()
+    test_google_callback_accepts_missing_email_hint_and_uses_google_profile()
+    test_google_callback_rejects_email_mismatch_between_hint_and_google_profile()
     test_google_callback_rejects_unverified_email()
+    test_google_mobile_id_token_creates_standard_session()
+    test_google_mobile_id_token_rejects_email_mismatch()
     print("OK: test_google_oauth_foundations.py")

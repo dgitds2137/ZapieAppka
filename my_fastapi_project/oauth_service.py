@@ -11,7 +11,13 @@ import jwt
 from fastapi import HTTPException
 
 from config import get_settings
-from models import AuthSessionOut, OAuthAuthorizationStartOut, OAuthCodeExchangeIn, UserDB
+from models import (
+    AuthSessionOut,
+    GoogleIdTokenExchangeIn,
+    OAuthAuthorizationStartOut,
+    OAuthCodeExchangeIn,
+    UserDB,
+)
 
 
 class GoogleOAuthService:
@@ -82,6 +88,36 @@ class GoogleOAuthService:
             state_data.get("email"),
         )
         if hint_email and hint_email != profile_email:
+            raise HTTPException(
+                status_code=400,
+                detail="Adres e-mail z logowania nie zgadza sie z odpowiedzia Google.",
+            )
+
+        user_service = self.user_service_cls(self.db)
+        session_payload = user_service.login_or_register_google_user(
+            email=profile_email,
+            name=(profile.get("name") or "").strip() or None,
+        )
+        return AuthSessionOut(**session_payload)
+
+    def exchange_id_token(
+        self,
+        payload: GoogleIdTokenExchangeIn,
+    ) -> AuthSessionOut:
+        self._ensure_google_start_configured()
+        profile = self._verify_google_id_token(payload.id_token)
+
+        profile_email = self._normalize_email(profile.get("email"))
+        if not profile_email:
+            raise HTTPException(status_code=400, detail="Google nie zwrocil adresu e-mail.")
+        if profile.get("email_verified") is not True:
+            raise HTTPException(
+                status_code=403,
+                detail="Konto Google musi miec zweryfikowany adres e-mail.",
+            )
+
+        expected_email = self._normalize_email(payload.email)
+        if expected_email and expected_email != profile_email:
             raise HTTPException(
                 status_code=400,
                 detail="Adres e-mail z logowania nie zgadza sie z odpowiedzia Google.",
@@ -187,6 +223,38 @@ class GoogleOAuthService:
             raise HTTPException(
                 status_code=502,
                 detail="Google userinfo zwrocil nieprawidlowy payload.",
+            )
+        return payload
+
+    def _verify_google_id_token(self, id_token_value: str) -> dict[str, Any]:
+        token = str(id_token_value or "").strip()
+        if not token:
+            raise HTTPException(status_code=400, detail="Brakuje Google ID tokenu.")
+        try:
+            from google.auth.transport import requests as google_auth_requests
+            from google.oauth2 import id_token as google_id_token
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Brakuje zaleznosci google-auth do weryfikacji Google ID token.",
+            ) from exc
+
+        try:
+            payload = google_id_token.verify_oauth2_token(
+                token,
+                google_auth_requests.Request(),
+                self.settings.google_auth_client_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Google ID token jest nieprawidlowy: {exc}",
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise HTTPException(
+                status_code=502,
+                detail="Google ID token verifier zwrocil nieprawidlowy payload.",
             )
         return payload
 
