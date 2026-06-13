@@ -9,10 +9,13 @@ import '../../data/models/auth_session.dart';
 import '../../router/app_router.dart';
 
 class AuthCallbackScreen extends StatefulWidget {
-  const AuthCallbackScreen({
+  AuthCallbackScreen({
     super.key,
     required this.callbackUri,
-  });
+    http.Client? httpClient,
+  }) : httpClient = httpClient ?? _DefaultHttpClient();
+
+  final http.Client httpClient;
 
   final Uri callbackUri;
 
@@ -105,19 +108,7 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
     final uri = Uri.parse('${AppConfig.apiBaseUrl}/$provider-auth/callback');
 
     try {
-      final response = await http.post(
-        uri,
-        headers: const {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'code': code,
-          if (state != null) 'state': state,
-          if (email != null && email.isNotEmpty) 'email': email,
-          'redirect_uri': AppConfig.authRedirectUri,
-        }),
-      ).timeout(const Duration(seconds: 10));
+      final response = await _postCallbackExchange(uri, code, state, email);
 
       final body = response.body.isEmpty
           ? <String, dynamic>{}
@@ -144,6 +135,27 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
         'Nie mozna polaczyc sie z backendem, aby wymienic kod logowania na sesje.',
       );
     }
+  }
+
+  Future<http.Response> _postCallbackExchange(
+    Uri uri,
+    String code,
+    String? state,
+    String? email,
+  ) {
+    return widget.httpClient.post(
+      uri,
+      headers: const {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({
+        'code': code,
+        if (state != null) 'state': state,
+        if (email != null && email.isNotEmpty) 'email': email,
+        'redirect_uri': AppConfig.authRedirectUri,
+      }),
+    ).timeout(const Duration(seconds: 10));
   }
 
   void _showError(String errorMessage) {
@@ -209,6 +221,16 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
         ),
       ),
     );
+  }
+}
+
+class _DefaultHttpClient extends http.BaseClient {
+  _DefaultHttpClient();
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    final client = http.Client();
+    return client.send(request);
   }
 }
 

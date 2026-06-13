@@ -33,6 +33,56 @@ Szablon:
 
 ---
 
+## 2026-06-13 11:45:00 +02:00 - Frontend callback success-path testability
+
+- Zakres: domkniecie testowalnosci success path `Google OAuth callback -> save session -> dashboard` po stronie Flutter web/frontend.
+- Backend:
+  - bez zmian
+- Frontend:
+  - `AuthCallbackScreen` przyjmuje wstrzykiwany `http.Client`, bez zmiany flow produkcyjnego
+  - dopisano widget test sukcesu callbacku, ktory sprawdza:
+    - `POST /google-auth/callback`
+    - zapis `AuthSession`
+    - redirect na dashboard
+- Testy:
+  - `flutter test`
+  - wynik: `15 tests passed`
+- Pliki:
+  - `zapieapp/lib/features/auth/auth_callback_screen.dart`
+  - `zapieapp/test/widget_test.dart`
+- Uwagi do kolejnych watkow:
+  - Google auth frontend ma teraz pokrycie dla error path i success path callbacku bez potrzeby klikania w realny ekran Google
+
+## 2026-06-13 12:25:00 +02:00 - Android Google Sign-In foundation
+
+- Zakres: przygotowanie poprawnej sciezki Google login dla Androida bez browserowego custom-scheme OAuth callback.
+- Backend:
+  - dodano `POST /google-auth/mobile`
+  - endpoint przyjmuje Google ID token, weryfikuje go po stronie backendu i konczy standardowa sesja aplikacji
+  - dodano regresje backendowe dla mobile Google auth
+- Frontend:
+  - Android przestaje polegac na browserowym `zapieapp://auth/callback` dla Google
+  - dodano natywny `google_sign_in` dla Androida
+  - frontend wysyla Google ID token do backendu i zapisuje `AuthSession` bez callback screen
+  - dodano frontendowy contract test repo dla `POST /google-auth/mobile`
+- Testy:
+  - przygotowane do odpalenia `python my_fastapi_project/tests/run_google_oauth_foundation_suite.py`
+  - przygotowane do odpalenia `flutter test`
+- Pliki:
+  - `my_fastapi_project/models.py`
+  - `my_fastapi_project/oauth_router.py`
+  - `my_fastapi_project/oauth_service.py`
+  - `my_fastapi_project/requirements.txt`
+  - `my_fastapi_project/tests/test_google_oauth_foundations.py`
+  - `my_fastapi_project/tests/test_google_oauth_endpoints.py`
+  - `my_fastapi_project/tests/run_google_oauth_foundation_suite.py`
+  - `zapieapp/pubspec.yaml`
+  - `zapieapp/lib/data/repositories/social_auth_repository.dart`
+  - `zapieapp/lib/features/auth/login_screen.dart`
+  - `zapieapp/test/qa/qa_frontend_flow_contract_test.dart`
+- Uwagi do kolejnych watkow:
+  - do pelnego uruchomienia Androida w Google Cloud trzeba jeszcze utworzyc Android OAuth client dla `pl.zapieapp.mobile` / `pl.zapieapp.mobile.dev` z poprawnym SHA-1
+
 ## 2026-06-07 22:40:36 +02:00 - Google OAuth foundations
 
 - Zakres: postawienie technicznych fundamentow pod `Login with Google` bez pelnego prod rollout.
@@ -66,6 +116,30 @@ Szablon:
   - kolejny praktyczny krok to podpiecie realnych danych z Google Cloud Console
   - trzeba ustalic finalne redirect URI dla web/dev/mobile
   - Apple login nadal jest tylko frontendowym placeholderem, nie ma jeszcze backendowego flow
+
+## 2026-06-13 11:20:00 +02:00 - Google OAuth regression coverage for local web
+
+- Zakres: domkniecie brakujacych regresji testowych po realnym uruchomieniu Google auth na Azure + Flutter web.
+- Backend:
+  - dopisano test startu Google bez `email`
+  - dopisano test callbacku bez hintu e-mail
+  - dopisano test odrzucenia mismatchu miedzy hintem a profilem Google
+  - rozszerzono endpoint contract test o pelny payload sesji callbacku
+  - zaktualizowano `run_google_oauth_foundation_suite.py`, aby nowe przypadki byly uruchamiane z jednej komendy
+- Frontend:
+  - zaktualizowano widget smoke pod nowy copy Google loginu
+  - dopisano widget regresyjny dla route `/auth/callback?...` i ekranu bledu callbacku
+  - dopisano repo contract test dla `startGoogleAuth(email: null, ...)`
+- Testy:
+  - nieuruchomione w tym watku; zmiany przygotowane pod lokalne odpalenie `python my_fastapi_project/tests/run_google_oauth_foundation_suite.py` oraz `flutter test`
+- Pliki:
+  - `my_fastapi_project/tests/test_google_oauth_foundations.py`
+  - `my_fastapi_project/tests/test_google_oauth_endpoints.py`
+  - `my_fastapi_project/tests/run_google_oauth_foundation_suite.py`
+  - `zapieapp/test/widget_test.dart`
+  - `zapieapp/test/qa/qa_frontend_flow_contract_test.dart`
+- Uwagi do kolejnych watkow:
+  - jesli bedzie potrzebny pelny widget test sukcesu callbacku, warto najpierw wydzielic klient HTTP z `AuthCallbackScreen`, zamiast mockowac globalny `http.post`
 
 ## 2026-06-07 22:00:00 +02:00 - Kitchen ETA controls + admin catalog QA
 

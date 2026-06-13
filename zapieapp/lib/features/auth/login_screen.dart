@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -64,6 +66,7 @@ class _LoginScreenState extends State<LoginScreen> {
       HttpSocialAuthRepository(
     apiBaseUrl: _apiBaseUrl,
   );
+  static GoogleSignIn? _mobileGoogleSignIn;
 
   final _formKey = GlobalKey<FormState>();
   final emailController = TextEditingController();
@@ -239,23 +242,79 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<bool> openProviderAuthorization({
-    required String email,
+    String? email,
     required _LoginProvider provider,
   }) async {
     final Uri uri;
     if (provider == _LoginProvider.google) {
       final authStart = await _socialAuthRepository.startGoogleAuth(
-        email: email,
+        email: null,
         redirectUri: AppConfig.authRedirectUri,
       );
       uri = Uri.parse(authStart.authorizationUrl);
     } else {
       uri = buildProviderAuthorizationUri(
-        email: email,
+        email: email ?? '',
         provider: provider,
       );
     }
-    return launchUrl(uri, mode: LaunchMode.externalApplication);
+    return launchUrl(
+      uri,
+      mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication,
+      webOnlyWindowName: kIsWeb ? '_self' : null,
+    );
+  }
+
+  bool get _useNativeGoogleOnAndroid =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  GoogleSignIn _getMobileGoogleSignIn() {
+    final existing = _mobileGoogleSignIn;
+    if (existing != null) {
+      return existing;
+    }
+    final client = GoogleSignIn(
+      serverClientId:
+          AppConfig.googleAuthClientId.isEmpty ? null : AppConfig.googleAuthClientId,
+    );
+    _mobileGoogleSignIn = client;
+    return client;
+  }
+
+  Future<void> _finishSocialSession(AuthSession authSession) async {
+    await SessionPersistence.saveAuthSession(
+      authSession,
+      lifetime: Duration(days: AppConfig.persistedLoginDays),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    Navigator.pushReplacementNamed(
+      context,
+      AppRoutes.dashboard,
+      arguments: authSession.toRouteArgs(),
+    );
+  }
+
+  Future<AuthSession> _authenticateGoogleOnAndroid() async {
+    final account = await _getMobileGoogleSignIn().signIn();
+    if (account == null) {
+      throw Exception('Logowanie Google anulowane.');
+    }
+    final authentication = await account.authentication;
+    final idToken = authentication.idToken;
+    if (idToken == null || idToken.trim().isEmpty) {
+      throw Exception(
+        'Google nie zwrocilo ID tokenu dla backendu. Sprawdz konfiguracje Android OAuth.',
+      );
+    }
+
+    return _socialAuthRepository.completeGoogleMobileAuth(
+      idToken: idToken,
+      email: account.email,
+    );
   }
 
   Future<void> submit() async {
@@ -308,16 +367,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> submitProvider(_LoginProvider provider) async {
     final email = emailController.text.trim();
-    final emailError = _validateEmail(email);
-    if (emailError != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '$emailError Najpierw wpisz e-mail, potem wybierz provider.',
+    if (provider != _LoginProvider.google) {
+      final emailError = _validateEmail(email);
+      if (emailError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '$emailError Najpierw wpisz e-mail, potem wybierz provider.',
+            ),
           ),
-        ),
-      );
-      return;
+        );
+        return;
+      }
     }
 
     if (provider != _LoginProvider.google && _clientIdFor(provider).isEmpty) {
@@ -332,16 +393,34 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (provider == _LoginProvider.google &&
+        _useNativeGoogleOnAndroid &&
+        AppConfig.googleAuthClientId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Brakuje GOOGLE_AUTH_CLIENT_ID do natywnego logowania Google na Androidzie.',
+          ),
+        ),
+      );
+      return;
+    }
+
     FocusScope.of(context).unfocus();
     setState(() => socialLoadingProvider = provider);
 
-    bool opened = false;
     String? providerError;
+    AuthSession? nativeGoogleSession;
+    bool opened = false;
     try {
-      opened = await openProviderAuthorization(
-        email: email,
-        provider: provider,
-      );
+      if (provider == _LoginProvider.google && _useNativeGoogleOnAndroid) {
+        nativeGoogleSession = await _authenticateGoogleOnAndroid();
+      } else {
+        opened = await openProviderAuthorization(
+          email: provider == _LoginProvider.google ? null : email,
+          provider: provider,
+        );
+      }
     } catch (error) {
       providerError = error.toString();
     }
@@ -356,6 +435,11 @@ class _LoginScreenState extends State<LoginScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(providerError)),
       );
+      return;
+    }
+
+    if (nativeGoogleSession != null) {
+      await _finishSocialSession(nativeGoogleSession);
       return;
     }
 
@@ -782,7 +866,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                       const SizedBox(height: 14),
                                       Text(
-                                        'Wpisz e-mail i przejdz do oficjalnego logowania Google lub Apple.',
+                                        'Google otworzy konto zalogowane na urzadzeniu. Apple pozostaje logowaniem dodatkowym.',
                                         textAlign: TextAlign.center,
                                         style:
                                             theme.textTheme.bodySmall?.copyWith(

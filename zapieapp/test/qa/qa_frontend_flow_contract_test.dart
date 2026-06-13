@@ -281,6 +281,85 @@ void main() {
       expect(result.state, 'signed-state');
     });
 
+    test('google auth start endpoint works without e-mail hint', () async {
+      final mockClient = MockClient((http.Request request) async {
+        if (request.method == 'GET' && request.url.path == '/google-auth/start') {
+          expect(request.url.queryParameters.containsKey('email'), false);
+          expect(
+            request.url.queryParameters['redirect_uri'],
+            'zapieapp://auth/callback',
+          );
+
+          return _jsonResponse(
+            jsonEncode({
+              'provider': 'google',
+              'authorization_url':
+                  'https://accounts.google.com/o/oauth2/v2/auth?client_id=test',
+              'redirect_uri': 'zapieapp://auth/callback',
+              'state': 'signed-state-no-email',
+            }),
+          );
+        }
+
+        return _jsonResponse('not implemented', statusCode: 500);
+      });
+
+      final repo = HttpSocialAuthRepository(
+        client: mockClient,
+        apiBaseUrl: 'https://zapieapp-api.qa.local',
+      );
+
+      final result = await repo.startGoogleAuth(
+        email: null,
+        redirectUri: 'zapieapp://auth/callback',
+      );
+
+      expect(result.provider, 'google');
+      expect(result.state, 'signed-state-no-email');
+      expect(result.redirectUri, 'zapieapp://auth/callback');
+    });
+
+    test('google mobile auth endpoint returns standard app session', () async {
+      final mockClient = MockClient((http.Request request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/google-auth/mobile') {
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(payload['id_token'], 'mobile-id-token');
+          expect(payload['email'], 'daniel.gromak2137@gmail.com');
+
+          return _jsonResponse(
+            jsonEncode({
+              'jwt': 'jwt-token',
+              'session_token': 'session-token',
+              'role': 'user',
+              'user_id': 17,
+              'email': 'daniel.gromak2137@gmail.com',
+              'loyalty_points': 12,
+            }),
+          );
+        }
+
+        return _jsonResponse('not implemented', statusCode: 500);
+      });
+
+      final repo = HttpSocialAuthRepository(
+        client: mockClient,
+        apiBaseUrl: 'https://zapieapp-api.qa.local',
+      );
+
+      final result = await repo.completeGoogleMobileAuth(
+        idToken: 'mobile-id-token',
+        email: 'daniel.gromak2137@gmail.com',
+      );
+
+      expect(result.email, 'daniel.gromak2137@gmail.com');
+      expect(result.sessionToken, 'session-token');
+      expect(result.jwt, 'jwt-token');
+      expect(result.role, 'user');
+      expect(result.authProvider, 'google');
+      expect(result.loyaltyPoints, 12);
+    });
+
     test(
         'admin catalog endpoints accept price updates for positions and addons',
         () async {

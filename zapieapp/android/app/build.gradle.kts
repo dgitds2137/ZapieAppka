@@ -1,6 +1,6 @@
 import java.util.Properties
 
-val googlePlayTargetSdk = 35
+val googlePlayTargetSdk = 36
 
 plugins {
     id("com.android.application")
