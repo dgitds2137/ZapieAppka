@@ -105,6 +105,96 @@ jobs:
             fi
           done
 
+      - name: Prepare runtime environment variables
+        id: prepare-runtime-env
+        shell: bash
+        run: |
+          secret_count() {
+            az containerapp secret list \
+              --name "$AZURE_CONTAINER_APP_NAME" \
+              --resource-group "$AZURE_RESOURCE_GROUP" \
+              --query "[?name=='$1'] | length(@)" \
+              --output tsv
+          }
+
+          append_if_group_complete() {
+            local label="$1"
+            shift
+            local secret_names=("$@")
+            local existing=0
+            local missing=()
+
+            for secret_name in "${secret_names[@]}"; do
+              count="$(secret_count "$secret_name")"
+              if [ "$count" = "1" ]; then
+                existing=$((existing + 1))
+              else
+                missing+=("$secret_name")
+              fi
+            done
+
+            if [ "$existing" = "0" ]; then
+              return 0
+            fi
+
+            if [ "$existing" != "${#secret_names[@]}" ]; then
+              echo "::error::$label auth secrets are only partially configured. Missing: ${missing[*]}"
+              exit 1
+            fi
+
+            return 0
+          }
+
+          google_secret_names=(
+            google-auth-client-id
+            google-auth-client-secret
+            google-auth-default-redirect-uri
+            google-auth-allowed-redirect-uris
+          )
+
+          apple_secret_names=(
+            apple-auth-client-id
+            apple-auth-team-id
+            apple-auth-key-id
+            apple-auth-private-key
+            apple-auth-callback-bridge-uri
+            apple-auth-default-redirect-uri
+            apple-auth-allowed-redirect-uris
+          )
+
+          append_if_group_complete "Google" "${google_secret_names[@]}"
+          append_if_group_complete "Apple" "${apple_secret_names[@]}"
+
+          {
+            echo "environment_variables<<EOF"
+            echo "APP_ENV=production"
+            echo "PORT=8000"
+            echo "REQUIRE_DATABASE_ON_STARTUP=false"
+            echo "MSSQL_CONN_STR=secretref:mssql-conn-str"
+            echo "JWT_SECRET_KEY=secretref:jwt-secret-key"
+
+            if [ "$(secret_count google-auth-client-id)" = "1" ]; then
+              echo "GOOGLE_AUTH_CLIENT_ID=secretref:google-auth-client-id"
+              echo "GOOGLE_AUTH_CLIENT_SECRET=secretref:google-auth-client-secret"
+              echo "GOOGLE_AUTH_DEFAULT_REDIRECT_URI=secretref:google-auth-default-redirect-uri"
+              echo "GOOGLE_AUTH_ALLOWED_REDIRECT_URIS=secretref:google-auth-allowed-redirect-uris"
+              echo "GOOGLE_AUTH_STATE_TTL_SECONDS=600"
+            fi
+
+            if [ "$(secret_count apple-auth-client-id)" = "1" ]; then
+              echo "APPLE_AUTH_CLIENT_ID=secretref:apple-auth-client-id"
+              echo "APPLE_AUTH_TEAM_ID=secretref:apple-auth-team-id"
+              echo "APPLE_AUTH_KEY_ID=secretref:apple-auth-key-id"
+              echo "APPLE_AUTH_PRIVATE_KEY=secretref:apple-auth-private-key"
+              echo "APPLE_AUTH_CALLBACK_BRIDGE_URI=secretref:apple-auth-callback-bridge-uri"
+              echo "APPLE_AUTH_DEFAULT_REDIRECT_URI=secretref:apple-auth-default-redirect-uri"
+              echo "APPLE_AUTH_ALLOWED_REDIRECT_URIS=secretref:apple-auth-allowed-redirect-uris"
+              echo "APPLE_AUTH_STATE_TTL_SECONDS=600"
+            fi
+
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and deploy container app
         uses: azure/container-apps-deploy-action@v1
         with:
@@ -117,36 +207,17 @@ jobs:
           containerAppEnvironment: ${{ vars.AZURE_CONTAINER_APP_ENVIRONMENT }}
           targetPort: 8000
           ingress: external
-          environmentVariables: |
-            APP_ENV=production
-            PORT=8000
-            REQUIRE_DATABASE_ON_STARTUP=false
-            MSSQL_CONN_STR=secretref:mssql-conn-str
-            JWT_SECRET_KEY=secretref:jwt-secret-key
-            GOOGLE_AUTH_CLIENT_ID=secretref:google-auth-client-id
-            GOOGLE_AUTH_CLIENT_SECRET=secretref:google-auth-client-secret
-            GOOGLE_AUTH_DEFAULT_REDIRECT_URI=secretref:google-auth-default-redirect-uri
-            GOOGLE_AUTH_ALLOWED_REDIRECT_URIS=secretref:google-auth-allowed-redirect-uris
-            GOOGLE_AUTH_STATE_TTL_SECONDS=600
+          environmentVariables: ${{ steps.prepare-runtime-env.outputs.environment_variables }}
           disableTelemetry: true
 
       - name: Reapply runtime environment variables
         shell: bash
         run: |
+          ENV_VARS="$(printf '%s\n' "${{ steps.prepare-runtime-env.outputs.environment_variables }}")"
           az containerapp update \
             --name "$AZURE_CONTAINER_APP_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
-            --set-env-vars \
-              APP_ENV=production \
-              PORT=8000 \
-              REQUIRE_DATABASE_ON_STARTUP=false \
-              MSSQL_CONN_STR=secretref:mssql-conn-str \
-              JWT_SECRET_KEY=secretref:jwt-secret-key \
-              GOOGLE_AUTH_CLIENT_ID=secretref:google-auth-client-id \
-              GOOGLE_AUTH_CLIENT_SECRET=secretref:google-auth-client-secret \
-              GOOGLE_AUTH_DEFAULT_REDIRECT_URI=secretref:google-auth-default-redirect-uri \
-              GOOGLE_AUTH_ALLOWED_REDIRECT_URIS=secretref:google-auth-allowed-redirect-uris \
-              GOOGLE_AUTH_STATE_TTL_SECONDS=600
+            --set-env-vars $(printf '%s\n' "$ENV_VARS" | xargs)
 
       - name: Smoke test deployed API
         shell: bash

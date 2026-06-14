@@ -67,7 +67,7 @@ void main() {
       final payload = jsonDecode(request.body) as Map<String, dynamic>;
       expect(payload['code'], 'google-code');
       expect(payload['state'], 'signed-state');
-      expect(payload['redirect_uri'], 'zapieapp://auth/callback');
+      expect(payload['redirect_uri'], 'http://127.0.0.1:3001/auth/callback');
 
       return http.Response(
         jsonEncode({
@@ -102,6 +102,7 @@ void main() {
             'http://127.0.0.1:3001/auth/callback?code=google-code&state=signed-state&provider=google',
           ),
           httpClient: mockClient,
+          googleRedirectUri: 'http://127.0.0.1:3001/auth/callback',
         ),
       ),
     );

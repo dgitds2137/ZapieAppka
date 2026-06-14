@@ -681,6 +681,14 @@ class CheckoutVerificationOut(BaseModel):
     created_at: datetime
     active_until: datetime | None = None
     remaining_eta_minutes: int | None = None
+    kitchen_eta_minutes: int | None = None
+    kitchen_batch_index: int | None = None
+    kitchen_batch_count: int = 0
+    kitchen_capacity: int = 0
+    kitchen_current_oven_load: int = 0
+    kitchen_queue_pieces_before_order: int = 0
+    kitchen_slots_before_order: int = 0
+    kitchen_slots_used_by_order: int = 0
     requires_receipt_confirmation: bool = False
     receipt_confirmation_requested_at: datetime | None = None
     support_alert_sent_at: datetime | None = None
@@ -690,6 +698,20 @@ class CheckoutVerificationOut(BaseModel):
     scheduled_pickup_at: datetime | None = None
     available_from: datetime | None = None
     received_order: CheckoutVerificationIn
+
+
+class CheckoutEtaPreviewOut(BaseModel):
+    eta_minutes: int
+    available_from: datetime | None = None
+    scheduled_pickup_at: datetime | None = None
+    kitchen_eta_minutes: int | None = None
+    kitchen_batch_index: int | None = None
+    kitchen_batch_count: int = 0
+    kitchen_capacity: int = 0
+    kitchen_current_oven_load: int = 0
+    kitchen_queue_pieces_before_order: int = 0
+    kitchen_slots_before_order: int = 0
+    kitchen_slots_used_by_order: int = 0
 
 
 class CheckoutHistoryPageOut(BaseModel):
@@ -806,6 +828,14 @@ class AdminDashboardOrderOut(BaseModel):
     oven_slot_count: int = 0
     oven_load: int = 0
     oven_capacity: int = 6
+    kitchen_eta_minutes: int | None = None
+    kitchen_batch_index: int | None = None
+    kitchen_batch_count: int = 0
+    kitchen_capacity: int = 0
+    kitchen_current_oven_load: int = 0
+    kitchen_queue_pieces_before_order: int = 0
+    kitchen_slots_before_order: int = 0
+    kitchen_slots_used_by_order: int = 0
     unread_customer_message_count: int = 0
     assigned_to_me: bool = False
     assigned_operator_email: str | None = None

@@ -1045,17 +1045,7 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
   }
 
   int _estimatedPrepMinutesForEntries() {
-    final prepMinutes = _entries
-        .map((entry) => _prepMinutes(entry.position))
-        .whereType<int>()
-        .where((minutes) => minutes > 0)
-        .toList(growable: false);
-
-    if (prepMinutes.isEmpty) {
-      return 15;
-    }
-
-    return prepMinutes.reduce(math.max);
+    return _estimatedPrepMinutesForCartEntries(_entries);
   }
 
   String _liveCartEtaLabelForEntries() {
@@ -1743,8 +1733,8 @@ class _CategoryRowStepper extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           _CategoryStepperButton(
-            icon: Icons.remove_rounded,
-            onTap: quantity <= 0 || locked ? null : onDecrement,
+            icon: Icons.add_rounded,
+            onTap: locked ? null : onIncrement,
           ),
           const SizedBox(height: 6),
           SizedBox(
@@ -1760,8 +1750,8 @@ class _CategoryRowStepper extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           _CategoryStepperButton(
-            icon: Icons.add_rounded,
-            onTap: locked ? null : onIncrement,
+            icon: Icons.remove_rounded,
+            onTap: quantity <= 0 || locked ? null : onDecrement,
           ),
         ],
       ),
@@ -2066,10 +2056,8 @@ class _ActiveOrderBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalEta = checkout.receivedOrder.etaMinutes <= 0
-        ? 1
-        : checkout.receivedOrder.etaMinutes;
-    final remainingEta = checkout.remainingEtaMinutes ?? totalEta;
+    final totalEta = checkout.effectiveBaseEtaMinutes;
+    final remainingEta = checkout.effectiveRemainingEtaMinutes;
     final progress = (1 - (remainingEta / totalEta)).clamp(0.0, 1.0).toDouble();
     final itemCount = checkout.receivedOrder.items.length;
     final leadItem = itemCount == 0
@@ -2242,6 +2230,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   final Set<int> _sauceValidationEntryIds = <int>{};
   final Set<int> _expandedAdditionalSauceEntryIds = <int>{};
   _UdkaPickupEstimate? _udkaPickupEstimate;
+  CheckoutEtaPreviewResponse? _checkoutEtaPreview;
   _UdkaAvailability? _udkaAvailability;
   String _pickupLocationAddress = '';
   bool _udkaTakeoutSelected = false;
@@ -2272,6 +2261,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     _loadDeliveryEstimate();
     _refreshUdkaPickupEstimate();
     _refreshUdkaAvailability();
+    _refreshCheckoutEtaPreview();
     _loadPickupLocationAddress();
     _ensureCartEntryOptionsLoaded();
   }
@@ -2502,6 +2492,30 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     }
   }
 
+  Future<void> _refreshCheckoutEtaPreview() async {
+    if (_entries.isEmpty || _cartContainsUdka()) {
+      if (mounted && _checkoutEtaPreview != null) {
+        setState(() => _checkoutEtaPreview = null);
+      }
+      return;
+    }
+
+    try {
+      final preview =
+          await _DashboardScreenState._checkoutRepository.previewCheckoutEta(
+        _buildOrderPayload(_selectedPaymentMethod ?? 'preview'),
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() => _checkoutEtaPreview = preview);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _checkoutEtaPreview = null);
+      }
+    }
+  }
+
   bool _cartContainsUdka() => _containsUdkaCartEntries(_entries);
 
   bool _cartContainsIceCream() => _containsIceCreamCartEntries(_entries);
@@ -2550,6 +2564,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     }
 
     setState(() => _fulfillmentIndex = index);
+    _refreshCheckoutEtaPreview();
   }
 
   Future<void> _loadDeliveryEstimate() async {
@@ -2620,6 +2635,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     _syncEntries();
     _refreshUdkaPickupEstimate();
     _refreshUdkaAvailability();
+    _refreshCheckoutEtaPreview();
   }
 
   Future<void> _openPersonalization(_CartEntry entry) async {
@@ -2644,6 +2660,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
     _syncEntries();
     _refreshUdkaPickupEstimate();
     _refreshUdkaAvailability();
+    _refreshCheckoutEtaPreview();
   }
 
   void _setUdkaTakeoutSelected(bool value) {
@@ -2651,6 +2668,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
       _udkaTakeoutSelected = value;
       _redeemedPoints = _effectiveRedeemedPoints();
     });
+    _refreshCheckoutEtaPreview();
   }
 
   Future<void> _showAddAddressDialog() async {
@@ -2669,6 +2687,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
       _addressIndex = _addresses.length - 1;
       _fulfillmentIndex = _defaultFulfillmentIndexForCurrentCart();
     });
+    _refreshCheckoutEtaPreview();
   }
 
   Future<void> _showPaymentMethodsDialog() async {
@@ -2713,17 +2732,7 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   }
 
   int _estimatedPrepMinutes() {
-    final prepMinutes = _entries
-        .map((entry) => _prepMinutes(entry.position))
-        .whereType<int>()
-        .where((minutes) => minutes > 0)
-        .toList(growable: false);
-
-    if (prepMinutes.isEmpty) {
-      return 15;
-    }
-
-    return prepMinutes.reduce(math.max);
+    return _estimatedPrepMinutesForCartEntries(_entries);
   }
 
   bool _usesDeliveryBuffer() => _fulfillmentIndex == 0;
@@ -2738,6 +2747,10 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
   int _summaryEtaMinutes(int prepMinutes) {
     if (_cartContainsUdka()) {
       return _udkaPickupEstimate?.etaMinutes ?? _udkaPickupEtaMinutes();
+    }
+    final previewEta = _checkoutEtaPreview?.etaMinutes;
+    if (previewEta != null && previewEta > 0) {
+      return previewEta;
     }
     final baseMinutes =
         _usesDeliveryBuffer() ? _deliveryEtaMinutes : prepMinutes;
@@ -2756,11 +2769,18 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
       }
       return _udkaPickupCompactLabel();
     }
+    final preview = _checkoutEtaPreview;
+    if (preview?.availableFrom != null) {
+      return _formatOpeningDelayCompact(preview!.availableFrom!);
+    }
+    if (preview != null && preview.etaMinutes > 0) {
+      return 'ok. ${preview.etaMinutes} min.';
+    }
     final openingDelay = _currentOpeningDelay();
     if (openingDelay != null) {
       return _formatOpeningDelayCompact(openingDelay);
     }
-    return '${_summaryEtaMinutes(prepMinutes)} min.';
+    return 'ok. ${_summaryEtaMinutes(prepMinutes)} min.';
   }
 
   String _addressEtaLabel(int prepMinutes) {
@@ -2775,13 +2795,20 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
       }
       return _udkaPickupEtaLabel();
     }
+    final preview = _checkoutEtaPreview;
+    if (preview?.availableFrom != null) {
+      return _formatOpeningDelayDetailed(preview!.availableFrom!);
+    }
+    if (preview != null && preview.etaMinutes > 0) {
+      return 'Szacunek: ok. ${preview.etaMinutes} min.';
+    }
     final openingDelay = _currentOpeningDelay();
     if (openingDelay != null) {
       return _formatOpeningDelayDetailed(openingDelay);
     }
     final totalMinutes =
         _usesDeliveryBuffer() ? _deliveryEtaMinutes : prepMinutes;
-    return '~$totalMinutes min.';
+    return 'Szacunek: ok. $totalMinutes min.';
   }
 
   int _availableLoyaltyPoints() => widget.authSession.loyaltyPoints;
@@ -3278,8 +3305,10 @@ class _CartSummaryScreenState extends State<_CartSummaryScreen> {
                                         index,
                                       ),
                                       isSelected: _addressIndex == index,
-                                      onTap: () =>
-                                          setState(() => _addressIndex = index),
+                                      onTap: () {
+                                        setState(() => _addressIndex = index);
+                                        _refreshCheckoutEtaPreview();
+                                      },
                                     ),
                                   );
                                 },
@@ -9122,11 +9151,7 @@ String _activeCheckoutEtaDisplay(CheckoutVerificationResponse checkout) {
     }
   }
 
-  final totalEta = checkout.receivedOrder.etaMinutes <= 0
-      ? 1
-      : checkout.receivedOrder.etaMinutes;
-  final remainingEta = checkout.remainingEtaMinutes ?? totalEta;
-  return '${remainingEta.clamp(0, 999)} min';
+  return '${checkout.effectiveRemainingEtaMinutes} min';
 }
 
 bool _checkoutContainsUdka(CheckoutVerificationResponse checkout) {
@@ -9307,6 +9332,48 @@ int _prepMinutesOrFallback(Map<String, dynamic> item, {int fallback = 15}) {
     return fallback;
   }
   return minutes;
+}
+
+int _estimatedPrepMinutesForCartEntries(Iterable<_CartEntry> entries) {
+  final prepMinutes = entries
+      .map((entry) => _prepMinutes(entry.position))
+      .whereType<int>()
+      .where((minutes) => minutes > 0)
+      .toList(growable: false);
+
+  final fallbackMinutes = prepMinutes.isEmpty ? 15 : prepMinutes.reduce(math.max);
+  final largeHotZapiekankiCount =
+      entries.where((entry) => _isLargeHotZapiekankaPosition(entry.position)).length;
+  final zapiekankiMinutes =
+      _prepMinutesForLargeHotZapiekankiCount(largeHotZapiekankiCount);
+
+  return math.max(fallbackMinutes, zapiekankiMinutes);
+}
+
+int _prepMinutesForLargeHotZapiekankiCount(int count) {
+  if (count <= 0) {
+    return 0;
+  }
+  if (count == 1) {
+    return 6;
+  }
+  if (count <= 3) {
+    return 7;
+  }
+  if (count <= 6) {
+    return 10;
+  }
+  if (count <= 13) {
+    return 15;
+  }
+  return 20;
+}
+
+bool _isLargeHotZapiekankaPosition(Map<String, dynamic> position) {
+  if (_isFrozenPosition(position)) {
+    return false;
+  }
+  return _supportsComplimentarySauceSelection(position);
 }
 
 int? _positionId(Map<String, dynamic> item) {

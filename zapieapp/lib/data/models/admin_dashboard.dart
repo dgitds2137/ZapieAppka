@@ -221,6 +221,14 @@ class AdminDashboardOrder {
     this.ovenSlotCount = 0,
     this.ovenLoad = 0,
     this.ovenCapacity = 6,
+    this.kitchenEtaMinutes,
+    this.kitchenBatchIndex,
+    this.kitchenBatchCount = 0,
+    this.kitchenCapacity = 0,
+    this.kitchenCurrentOvenLoad = 0,
+    this.kitchenQueuePiecesBeforeOrder = 0,
+    this.kitchenSlotsBeforeOrder = 0,
+    this.kitchenSlotsUsedByOrder = 0,
     this.unreadCustomerMessageCount = 0,
     this.assignedToMe = false,
     this.assignedOperatorEmail,
@@ -251,6 +259,14 @@ class AdminDashboardOrder {
   final int ovenSlotCount;
   final int ovenLoad;
   final int ovenCapacity;
+  final int? kitchenEtaMinutes;
+  final int? kitchenBatchIndex;
+  final int kitchenBatchCount;
+  final int kitchenCapacity;
+  final int kitchenCurrentOvenLoad;
+  final int kitchenQueuePiecesBeforeOrder;
+  final int kitchenSlotsBeforeOrder;
+  final int kitchenSlotsUsedByOrder;
   final int unreadCustomerMessageCount;
   final bool assignedToMe;
   final String? assignedOperatorEmail;
@@ -301,6 +317,15 @@ class AdminDashboardOrder {
       ovenSlotCount: _asInt(json['oven_slot_count']) ?? 0,
       ovenLoad: _asInt(json['oven_load']) ?? 0,
       ovenCapacity: _asInt(json['oven_capacity']) ?? 6,
+      kitchenEtaMinutes: _asInt(json['kitchen_eta_minutes']),
+      kitchenBatchIndex: _asInt(json['kitchen_batch_index']),
+      kitchenBatchCount: _asInt(json['kitchen_batch_count']) ?? 0,
+      kitchenCapacity: _asInt(json['kitchen_capacity']) ?? 0,
+      kitchenCurrentOvenLoad: _asInt(json['kitchen_current_oven_load']) ?? 0,
+      kitchenQueuePiecesBeforeOrder:
+          _asInt(json['kitchen_queue_pieces_before_order']) ?? 0,
+      kitchenSlotsBeforeOrder: _asInt(json['kitchen_slots_before_order']) ?? 0,
+      kitchenSlotsUsedByOrder: _asInt(json['kitchen_slots_used_by_order']) ?? 0,
       unreadCustomerMessageCount:
           _asInt(json['unread_customer_message_count']) ?? 0,
       assignedToMe: json['assigned_to_me'] == true,

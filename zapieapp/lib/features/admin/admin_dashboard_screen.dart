@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/cupertino.dart';
@@ -1632,6 +1632,11 @@ class _AdminOrderCard extends StatelessWidget {
                     ? 'ETA przekroczone'
                     : 'ETA ${order.remainingEtaMinutes} min',
               ),
+              if (_shouldShowKitchenDiagnostics(order))
+                _MetaChip(
+                  icon: Icons.local_fire_department_outlined,
+                  label: _kitchenBatchLabel(order),
+                ),
               _MetaChip(
                 icon: Icons.receipt_long_outlined,
                 label: '${order.itemCount} poz.',
@@ -2722,7 +2727,10 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       backgroundColor: Colors.transparent,
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 560),
+        constraints: BoxConstraints(
+          maxWidth: 560,
+          maxHeight: MediaQuery.sizeOf(context).height - 48,
+        ),
         padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
         decoration: BoxDecoration(
           color: const Color(0xF0141414),
@@ -2730,7 +2738,7 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
           border: Border.all(color: const Color(0x24FFFFFF)),
         ),
         child: Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: MainAxisSize.max,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
@@ -2751,197 +2759,281 @@ class _TakenOrderDetailsDialog extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _MetaChip(
-                  icon: Icons.receipt_long_outlined,
-                  label: '${order.itemCount} poz.',
-                ),
-                _MetaChip(
-                  icon: Icons.add_circle_outline_rounded,
-                  label: '+${deltaSummary.addedCount}',
-                ),
-                _MetaChip(
-                  icon: Icons.remove_circle_outline_rounded,
-                  label: '-${deltaSummary.removedCount}',
-                ),
-                if (stageLabel.isNotEmpty)
-                  _MetaChip(
-                    icon: Icons.route_outlined,
-                    label: stageLabel,
-                  ),
-                _MetaChip(
-                  icon: Icons.location_on_outlined,
-                  label: _compactVenueAddress(order.addressTitle),
-                ),
-              ],
-            ),
-            if (hasWorkflowActions) ...[
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1B1B1B),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0x24FFFFFF)),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Postep realizacji',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: const Color(0xFFF7EEE6),
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      hasIntermediateWorkflow
-                          ? isDriverView
-                              ? 'Aktualny etap dostawy: $stageLabel. Zmiany trafiaja od razu do trackera klienta.'
-                              : onMarkReadyForDispatch != null
-                                  ? 'Aktualny etap: $stageLabel. Po oznaczeniu gotowosci zlecenie trafi do kolejki kierowcy.'
-                                  : 'Aktualny etap: $stageLabel. Te akcje od razu aktualizuja tracker klienta.'
-                          : 'To zamowienie nie korzysta z etapow posrednich. Mozesz je tylko podjac i zakonczyc.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: const Color(0xFFD6C6BA),
-                            height: 1.35,
-                          ),
-                    ),
-                    if (showOvenCapacityNotice) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        '${order.ovenKind == 'udka' ? 'Piec udek' : 'Piec zapiekanek'} jest aktualnie zajety (${order.ovenLoad}/${order.ovenCapacity}). To zamowienie potrzebuje ${order.ovenSlotCount} ${order.ovenSlotCount == 1 ? 'miejsca' : 'miejsc'}, wiec poczeka na wolny wsad.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFFFFC891),
-                              fontWeight: FontWeight.w700,
-                              height: 1.35,
-                            ),
-                      ),
-                    ],
-                    if (showDriverDeliveryReminder) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        'Przekroczono ETA tej dostawy. Potwierdz z klientem, czy zamowienie #${order.checkoutOrderId} zostalo dostarczone.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: const Color(0xFFFFC891),
-                              fontWeight: FontWeight.w800,
-                              height: 1.35,
-                            ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children: [
-                        if (onMarkInOven != null)
-                          FilledButton.icon(
-                            onPressed: () => onMarkInOven!.call(),
-                            icon: const Icon(Icons.local_fire_department),
-                            label: const Text('Wstawiono do pieca'),
-                            style: FilledButton.styleFrom(
-                              backgroundColor: const Color(0xFFE98B38),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                            ),
-                          ),
-                        if (onMarkReadyForDispatch != null)
-                          OutlinedButton.icon(
-                            onPressed: () => onMarkReadyForDispatch!.call(),
-                            icon: const Icon(Icons.inventory_2_outlined),
-                            label: const Text('Gotowe do wysylki'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFFFD8B4),
-                              side: const BorderSide(
-                                color: Color(0x40FFB061),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                            ),
-                          ),
-                        if (onMarkOnTheWay != null)
-                          OutlinedButton.icon(
-                            onPressed: () => onMarkOnTheWay!.call(),
-                            icon: const Icon(Icons.delivery_dining_outlined),
-                            label: Text(
-                              isDriverView ? 'Rozpocznij dostawe' : 'W drodze',
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFF6EEE7),
-                              side: const BorderSide(
-                                color: Color(0x30FFFFFF),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                            ),
-                          ),
-                        if (onComplete != null)
-                          OutlinedButton.icon(
-                            onPressed: () => onComplete!.call(),
-                            icon: const Icon(Icons.done_all_rounded),
-                            label: Text(
-                              isDriverView ? 'Dostarczono' : 'Zakoncz',
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF79F5B8),
-                              side: const BorderSide(
-                                color: Color(0x4479F5B8),
-                              ),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ] else if (order.isInProgress &&
-                assignedOperatorEmail != null &&
-                assignedOperatorEmail.isNotEmpty) ...[
-              const SizedBox(height: 14),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1B1B1B),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Text(
-                  order.assignedToMe
-                      ? 'To zamowienie jest przypisane do Ciebie.'
-                      : isAdminView
-                          ? 'To zamowienie prowadzi $assignedOperatorEmail. Jako administrator mozesz mimo to zaktualizowac jego status.'
-                          : 'To zamowienie prowadzi $assignedOperatorEmail. Szczegoly sa dostepne tylko do podgladu.',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: const Color(0xFFD6C6BA),
-                        height: 1.35,
-                      ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 14),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 420),
+            const SizedBox(height: 4),
+            Expanded(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _MetaChip(
+                          icon: Icons.receipt_long_outlined,
+                          label: '${order.itemCount} poz.',
+                        ),
+                        _MetaChip(
+                          icon: Icons.add_circle_outline_rounded,
+                          label: '+${deltaSummary.addedCount}',
+                        ),
+                        _MetaChip(
+                          icon: Icons.remove_circle_outline_rounded,
+                          label: '-${deltaSummary.removedCount}',
+                        ),
+                        if (stageLabel.isNotEmpty)
+                          _MetaChip(
+                            icon: Icons.route_outlined,
+                            label: stageLabel,
+                          ),
+                        _MetaChip(
+                          icon: Icons.location_on_outlined,
+                          label: _compactVenueAddress(order.addressTitle),
+                        ),
+                      ],
+                    ),
+                    if (_shouldShowKitchenDiagnostics(order)) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1B1B1B),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0x24FFFFFF)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Diagnostyka pieca',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFFF7EEE6),
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _kitchenDiagnosticsSummary(order),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFFD6C6BA),
+                                    height: 1.35,
+                                  ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                _MetaChip(
+                                  icon: Icons.local_fire_department_outlined,
+                                  label:
+                                      'Piec ${order.kitchenCurrentOvenLoad}/${_resolvedKitchenCapacity(order)}',
+                                ),
+                                _MetaChip(
+                                  icon: Icons.queue_outlined,
+                                  label:
+                                      'Przed nim ${order.kitchenQueuePiecesBeforeOrder} szt.',
+                                ),
+                                _MetaChip(
+                                  icon: Icons.grid_view_rounded,
+                                  label: _kitchenBatchLabel(order),
+                                ),
+                                _MetaChip(
+                                  icon: Icons.stacked_bar_chart_rounded,
+                                  label:
+                                      'Zajmuje ${order.kitchenSlotsUsedByOrder} ${order.kitchenSlotsUsedByOrder == 1 ? 'slot' : 'sloty'}',
+                                ),
+                                if (order.kitchenEtaMinutes != null)
+                                  _MetaChip(
+                                    icon: Icons.timelapse_outlined,
+                                    label:
+                                        'Auto ETA ${order.kitchenEtaMinutes} min',
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    if (hasWorkflowActions) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1B1B1B),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0x24FFFFFF)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Postep realizacji',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFFF7EEE6),
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              hasIntermediateWorkflow
+                                  ? isDriverView
+                                      ? 'Aktualny etap dostawy: $stageLabel. Zmiany trafiaja od razu do trackera klienta.'
+                                      : onMarkReadyForDispatch != null
+                                          ? 'Aktualny etap: $stageLabel. Po oznaczeniu gotowosci zlecenie trafi do kolejki kierowcy.'
+                                          : 'Aktualny etap: $stageLabel. Te akcje od razu aktualizuja tracker klienta.'
+                                  : 'To zamowienie nie korzysta z etapow posrednich. Mozesz je tylko podjac i zakonczyc.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: const Color(0xFFD6C6BA),
+                                    height: 1.35,
+                                  ),
+                            ),
+                            if (showOvenCapacityNotice) ...[
+                              const SizedBox(height: 10),
+                              Text(
+                                _kitchenCapacityNotice(order),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: const Color(0xFFFFC891),
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.35,
+                                    ),
+                              ),
+                            ],
+                            if (showDriverDeliveryReminder) ...[
+                              const SizedBox(height: 10),
+                              Text(
+                                'Przekroczono ETA tej dostawy. Potwierdz z klientem, czy zamowienie #${order.checkoutOrderId} zostalo dostarczone.',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(
+                                      color: const Color(0xFFFFC891),
+                                      fontWeight: FontWeight.w800,
+                                      height: 1.35,
+                                    ),
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [
+                                if (onMarkInOven != null)
+                                  FilledButton.icon(
+                                    onPressed: () => onMarkInOven!.call(),
+                                    icon: const Icon(Icons.local_fire_department),
+                                    label: const Text('Wstawiono do pieca'),
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFFE98B38),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 14,
+                                      ),
+                                    ),
+                                  ),
+                                if (onMarkReadyForDispatch != null)
+                                  OutlinedButton.icon(
+                                    onPressed: () => onMarkReadyForDispatch!.call(),
+                                    icon: const Icon(Icons.inventory_2_outlined),
+                                    label: const Text('Gotowe do wysylki'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFFFD8B4),
+                                      side: const BorderSide(
+                                        color: Color(0x40FFB061),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 14,
+                                      ),
+                                    ),
+                                  ),
+                                if (onMarkOnTheWay != null)
+                                  OutlinedButton.icon(
+                                    onPressed: () => onMarkOnTheWay!.call(),
+                                    icon: const Icon(Icons.delivery_dining_outlined),
+                                    label: Text(
+                                      isDriverView
+                                          ? 'Rozpocznij dostawe'
+                                          : 'W drodze',
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFFF6EEE7),
+                                      side: const BorderSide(
+                                        color: Color(0x30FFFFFF),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 14,
+                                      ),
+                                    ),
+                                  ),
+                                if (onComplete != null)
+                                  OutlinedButton.icon(
+                                    onPressed: () => onComplete!.call(),
+                                    icon: const Icon(Icons.done_all_rounded),
+                                    label: Text(
+                                      isDriverView ? 'Dostarczono' : 'Zakoncz',
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: const Color(0xFF79F5B8),
+                                      side: const BorderSide(
+                                        color: Color(0x4479F5B8),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 14,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else if (order.isInProgress &&
+                        assignedOperatorEmail != null &&
+                        assignedOperatorEmail.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1B1B1B),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Text(
+                          order.assignedToMe
+                              ? 'To zamowienie jest przypisane do Ciebie.'
+                              : isAdminView
+                                  ? 'To zamowienie prowadzi $assignedOperatorEmail. Jako administrator mozesz mimo to zaktualizowac jego status.'
+                                  : 'To zamowienie prowadzi $assignedOperatorEmail. Szczegoly sa dostepne tylko do podgladu.',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFFD6C6BA),
+                                height: 1.35,
+                              ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
                     for (final item in order.items) ...[
                       _TakenOrderItemTile(item: item),
                       const SizedBox(height: 10),
@@ -3748,7 +3840,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
 
   String _formatKitchenEtaOverrideLabel(int minutes) {
     if (minutes <= 0) {
-      return 'Bez ręcznego narzutu';
+      return 'Bez rÄ™cznego narzutu';
     }
     return '+$minutes min';
   }
@@ -3774,7 +3866,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
           borderRadius: BorderRadius.circular(22),
         ),
         title: Text(
-          'Ręczna korekta czasu kuchni',
+          'Reczna korekta czasu kuchni',
           style: Theme.of(dialogContext).textTheme.titleLarge?.copyWith(
                 color: const Color(0xFFF8EEE7),
                 fontWeight: FontWeight.w900,
@@ -3785,7 +3877,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Wybierz, o ile minut wydłużyć ETA (dla nowych zamówień):',
+              'Wybierz, o ile minut wydluzyc ETA dla nowych zamowien z duzymi zapiekankami:',
               style: TextStyle(
                 color: Color(0xFFD8C4B4),
                 height: 1.3,
@@ -3854,7 +3946,7 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            'Zaktualizowano ręczny narzut kuchni: ${_formatKitchenEtaOverrideLabel(nextMinutes)}',
+            'Zaktualizowano reczny narzut kuchni: ${_formatKitchenEtaOverrideLabel(nextMinutes)}',
           ),
         ),
       );
@@ -4207,12 +4299,12 @@ class _CatalogRepositoryDialogState extends State<_CatalogRepositoryDialog> {
           ),
           const SizedBox(height: 10),
           _CatalogSettingTile(
-            title: 'Ręczna korekta czasu kuchni',
+            title: 'Reczna korekta czasu kuchni',
             valueLabel: _formatKitchenEtaOverrideLabel(
               catalog?.kitchenEtaOverrideMinutes ?? 0,
             ),
             subtitle:
-                'Wpływa na ETA nowych zamówień: 0, +10, +20, +30, +40 minut.',
+                'Wplywa na ETA nowych zamowien z duzymi zapiekankami: 0, +10, +20, +30, +40 minut.',
             busy: _busyItems.contains('kitchen-eta-override'),
             onEdit: _editKitchenEtaOverride,
           ),
@@ -5584,6 +5676,71 @@ String _orderAddressLabel(AdminDashboardOrder order) {
   return '$compact | $subtitle';
 }
 
+bool _shouldShowKitchenDiagnostics(AdminDashboardOrder order) {
+  return order.ovenKind == 'zapiekanki' && order.kitchenSlotsUsedByOrder > 0;
+}
+
+int _resolvedKitchenCapacity(AdminDashboardOrder order) {
+  if (order.kitchenCapacity > 0) {
+    return order.kitchenCapacity;
+  }
+  if (order.ovenCapacity > 0) {
+    return order.ovenCapacity;
+  }
+  return 6;
+}
+
+String _kitchenBatchLabel(AdminDashboardOrder order) {
+  final batchIndex = order.kitchenBatchIndex;
+  final batchCount = order.kitchenBatchCount;
+  if (batchIndex == null || batchIndex <= 0) {
+    return 'Batch -';
+  }
+  if (batchCount <= 1) {
+    return 'Batch $batchIndex';
+  }
+  final endBatch = batchIndex + batchCount - 1;
+  return 'Batch $batchIndex-$endBatch';
+}
+
+String _kitchenDiagnosticsSummary(AdminDashboardOrder order) {
+  final capacity = _resolvedKitchenCapacity(order);
+  final batchIndex = order.kitchenBatchIndex;
+  final batchCount = order.kitchenBatchCount;
+  final endBatch = batchIndex == null || batchIndex <= 0 || batchCount <= 1
+      ? batchIndex
+      : batchIndex + batchCount - 1;
+  final batchLabel = batchIndex == null || batchIndex <= 0
+      ? 'brak danych batchu'
+      : batchCount <= 1
+          ? 'wchodzi w batch $batchIndex'
+          : 'rozpina sie od batchu $batchIndex do $endBatch';
+  final autoEta = order.kitchenEtaMinutes == null
+      ? ''
+      : ' Automatyczne ETA kuchni: ${order.kitchenEtaMinutes} min.';
+  return 'Piec ma teraz ${order.kitchenCurrentOvenLoad}/$capacity zajetych miejsc. '
+      'Przed tym zamowieniem czeka ${order.kitchenQueuePiecesBeforeOrder} duzych sztuk, '
+      'a samo zamowienie zajmuje ${order.kitchenSlotsUsedByOrder} '
+      '${order.kitchenSlotsUsedByOrder == 1 ? 'slot' : 'sloty'} i $batchLabel.$autoEta';
+}
+
+String _kitchenCapacityNotice(AdminDashboardOrder order) {
+  final capacityLabel = order.ovenKind == 'udka'
+      ? 'Piec udek'
+      : 'Piec zapiekanek';
+  if (_shouldShowKitchenDiagnostics(order)) {
+    return '$capacityLabel jest aktualnie zajety '
+        '(${order.kitchenCurrentOvenLoad}/${_resolvedKitchenCapacity(order)}), '
+        'przed tym zamowieniem czeka ${order.kitchenQueuePiecesBeforeOrder} szt., '
+        'a ono samo potrzebuje ${order.kitchenSlotsUsedByOrder} '
+        '${order.kitchenSlotsUsedByOrder == 1 ? 'slotu' : 'slotow'}, '
+        'wiec wpada w ${_kitchenBatchLabel(order).toLowerCase()} i poczeka na wolny wsad.';
+  }
+  return '$capacityLabel jest aktualnie zajety (${order.ovenLoad}/${order.ovenCapacity}). '
+      'To zamowienie potrzebuje ${order.ovenSlotCount} '
+      '${order.ovenSlotCount == 1 ? 'miejsca' : 'miejsc'}, wiec poczeka na wolny wsad.';
+}
+
 String _compactVenueAddress(String raw) {
   final normalized = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
   if (normalized.isEmpty) {
@@ -5607,7 +5764,7 @@ String _compactVenueAddress(String raw) {
       continue;
     }
     final hasNumber = houseNumberPattern.hasMatch(segment);
-    final hasLetters = RegExp(r'[A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż]').hasMatch(segment);
+    final hasLetters = RegExp(r'[A-Za-zÄ„Ä…Ä†Ä‡ÄÄ™ĹĹ‚ĹĹ„Ă“ĂłĹšĹ›ĹąĹşĹ»ĹĽ]').hasMatch(segment);
 
     if (hasLetters && hasNumber) {
       streetWithNumber = segment;
@@ -5625,7 +5782,7 @@ String _compactVenueAddress(String raw) {
             candidate.isNotEmpty &&
             !houseNumberPattern.hasMatch(candidate) &&
             !RegExp(r'\bpolska\b', caseSensitive: false).hasMatch(candidate) &&
-            RegExp(r'[A-Za-zĄąĆćĘęŁłŃńÓóŚśŹźŻż]').hasMatch(candidate),
+            RegExp(r'[A-Za-zÄ„Ä…Ä†Ä‡ÄÄ™ĹĹ‚ĹĹ„Ă“ĂłĹšĹ›ĹąĹşĹ»ĹĽ]').hasMatch(candidate),
         orElse: () => '',
       );
       if (candidateStreet.isNotEmpty) {

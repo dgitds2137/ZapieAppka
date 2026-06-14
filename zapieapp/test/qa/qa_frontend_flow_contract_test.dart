@@ -236,6 +236,191 @@ void main() {
       );
       expect(calls, contains('POST /checkout/confirm-receipt'));
     });
+
+    test('checkout eta preview endpoint returns backend kitchen diagnostics',
+        () async {
+      final mockClient = MockClient((http.Request request) async {
+        if (request.method == 'POST' &&
+            request.url.path == '/checkout/eta-preview') {
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(payload['session_token'], 'session-customer');
+          expect(payload['user_email'], 'customer@zapieapp.pl');
+          expect(payload['payment_method'], 'preview');
+          expect(payload['fulfillment_method'], 'odbior');
+          expect(payload['fulfillment_option_index'], 1);
+          expect(payload['address_option_index'], 0);
+          expect(payload['eta_minutes'], 15);
+          expect(payload['items'], hasLength(2));
+
+          return _jsonResponse(
+            jsonEncode({
+              'eta_minutes': 15,
+              'available_from': '2026-06-14T12:15:00Z',
+              'scheduled_pickup_at': '2026-06-14T12:15:00Z',
+              'kitchen_eta_minutes': 15,
+              'kitchen_batch_index': 2,
+              'kitchen_batch_count': 3,
+              'kitchen_capacity': 6,
+              'kitchen_current_oven_load': 4,
+              'kitchen_queue_pieces_before_order': 6,
+              'kitchen_slots_before_order': 1,
+              'kitchen_slots_used_by_order': 2,
+            }),
+          );
+        }
+
+        return _jsonResponse('{"detail":"unexpected endpoint"}',
+            statusCode: 404);
+      });
+
+      final checkoutRepo = HttpCheckoutRepository(
+        client: mockClient,
+        apiBaseUrl: apiBaseUrl,
+      );
+
+      final preview = await checkoutRepo.previewCheckoutEta(
+        CheckoutVerificationRequest(
+          createdAt: DateTime.parse('2026-06-14T12:00:00Z'),
+          currency: 'PLN',
+          subtotalAmount: 80,
+          totalAmount: 80,
+          redeemedPoints: 0,
+          redeemedAmount: 0,
+          etaMinutes: 15,
+          paymentMethod: 'preview',
+          fulfillmentMethod: 'odbior',
+          fulfillmentOptionIndex: 1,
+          addressOptionIndex: 0,
+          address: const CheckoutVerificationAddress(
+            title: 'Sklotowa 6/9',
+            subtitle: 'Punkt odbioru',
+            etaLabel: 'ok. 15 min',
+          ),
+          items: const [
+            CheckoutVerificationItem(
+              cartEntryId: 11,
+              positionId: 201,
+              name: 'Pieczarka 50cm',
+              price: 40,
+            ),
+            CheckoutVerificationItem(
+              cartEntryId: 12,
+              positionId: 201,
+              name: 'Pieczarka 50cm',
+              price: 40,
+            ),
+          ],
+          sessionToken: 'session-customer',
+          userEmail: 'customer@zapieapp.pl',
+          notes: 'preview qa',
+        ),
+      );
+
+      expect(preview.etaMinutes, 15);
+      expect(
+        preview.availableFrom,
+        DateTime.parse('2026-06-14T12:15:00Z'),
+      );
+      expect(
+        preview.scheduledPickupAt,
+        DateTime.parse('2026-06-14T12:15:00Z'),
+      );
+      expect(preview.kitchenEtaMinutes, 15);
+      expect(preview.kitchenBatchIndex, 2);
+      expect(preview.kitchenBatchCount, 3);
+      expect(preview.kitchenCapacity, 6);
+      expect(preview.kitchenCurrentOvenLoad, 4);
+      expect(preview.kitchenQueuePiecesBeforeOrder, 6);
+      expect(preview.kitchenSlotsBeforeOrder, 1);
+      expect(preview.kitchenSlotsUsedByOrder, 2);
+      expect(checkoutRepo.cachedActiveCheckout, isNull);
+    });
+
+    test('active checkout endpoint maps kitchen diagnostics and caches response',
+        () async {
+      final mockClient = MockClient((http.Request request) async {
+        if (request.method == 'GET' && request.url.path == '/checkout/active') {
+          expect(request.url.queryParameters['session_token'], 'session-customer');
+          expect(request.url.queryParameters['email'], 'customer@zapieapp.pl');
+
+          return _jsonResponse(
+            jsonEncode({
+              'verification_id': 'ord-phase2-active',
+              'saved_order_id': 913,
+              'status': 'active',
+              'processing_status': 'assigned',
+              'payment_method': 'BLIK',
+              'verification_stage': 'accepted',
+              'message': 'ok',
+              'created_at': '2026-06-14T12:00:00Z',
+              'remaining_eta_minutes': 11,
+              'kitchen_eta_minutes': 15,
+              'kitchen_batch_index': 2,
+              'kitchen_batch_count': 2,
+              'kitchen_capacity': 6,
+              'kitchen_current_oven_load': 4,
+              'kitchen_queue_pieces_before_order': 6,
+              'kitchen_slots_before_order': 1,
+              'kitchen_slots_used_by_order': 2,
+              'received_order': {
+                'created_at': '2026-06-14T12:00:00Z',
+                'currency': 'PLN',
+                'subtotal_amount': 80,
+                'total_amount': 80,
+                'redeemed_points': 0,
+                'redeemed_amount': 0,
+                'eta_minutes': 10,
+                'payment_method': 'BLIK',
+                'fulfillment_method': 'odbior',
+                'fulfillment_option_index': 0,
+                'address_option_index': 0,
+                'address': {
+                  'title': 'Sklotowa 6/9',
+                  'subtitle': 'Punkt odbioru',
+                  'eta_label': 'ok. 15 min',
+                },
+                'items': [
+                  {
+                    'cart_entry_id': 1,
+                    'position_id': 101,
+                    'name': 'Pieczarka 50cm',
+                    'price': 40,
+                  },
+                  {
+                    'cart_entry_id': 2,
+                    'position_id': 101,
+                    'name': 'Pieczarka 50cm',
+                    'price': 40,
+                  },
+                ],
+              },
+            }),
+          );
+        }
+
+        return _jsonResponse('{"detail":"unexpected endpoint"}',
+            statusCode: 404);
+      });
+
+      final checkoutRepo = HttpCheckoutRepository(
+        client: mockClient,
+        apiBaseUrl: apiBaseUrl,
+      );
+
+      final active = await checkoutRepo.fetchActiveCheckout(
+        sessionToken: 'session-customer',
+        email: 'customer@zapieapp.pl',
+      );
+
+      expect(active, isNotNull);
+      expect(active!.effectiveBaseEtaMinutes, 15);
+      expect(active.effectiveRemainingEtaMinutes, 11);
+      expect(active.kitchenBatchIndex, 2);
+      expect(active.kitchenBatchCount, 2);
+      expect(active.kitchenSlotsUsedByOrder, 2);
+      expect(active.hasKitchenDiagnostics, true);
+      expect(checkoutRepo.cachedActiveCheckout?.verificationId, 'ord-phase2-active');
+    });
   });
 
   group('Frontend QA: admin catalog and auth session', () {
@@ -515,6 +700,118 @@ void main() {
       expect(catalog.kitchenEtaOverrideMinutes, 30);
       expect(catalog.deliveryRadiusKm, 10);
       expect(catalog.deliveryOriginAddress, 'test base');
+    });
+
+    test('admin dashboard endpoint maps kitchen diagnostics for in-progress orders',
+        () async {
+      final mockClient = MockClient((http.Request request) async {
+        if (request.method == 'GET' && request.url.path == '/admin/dashboard') {
+          expect(request.url.queryParameters['session_token'], 'admin-session');
+          expect(request.url.queryParameters['email'], 'admin@zapieapp.pl');
+
+          return _jsonResponse(
+            jsonEncode({
+              'logged_in_employee_count': 1,
+              'active_employees': [],
+              'prep_time_settings': [],
+              'opening_hours': {
+                'open_time': '12:00',
+                'close_time': '21:00',
+                'formatted_range': '12:00-21:00',
+                'is_open_now': true,
+              },
+              'oven_load': 6,
+              'oven_capacity': 6,
+              'udka_oven_load': 0,
+              'udka_oven_capacity': 16,
+              'udka_slot_label': '12:00, 15:00, 18:00',
+              'pending_order_count': 0,
+              'in_progress_order_count': 1,
+              'new_users_this_month': 3,
+              'completed_orders_today': 12,
+              'order_history_count': 40,
+              'turnover_last_days': [],
+              'pending_orders': [],
+              'in_progress_orders': [
+                {
+                  'checkout_order_id': 700,
+                  'verification_id': 'phase2-admin-1',
+                  'processing_status': 'assigned',
+                  'lifecycle_status': 'active',
+                  'verification_stage': 'accepted',
+                  'created_at': '2026-06-14T12:00:00Z',
+                  'payment_method': 'BLIK',
+                  'fulfillment_method': 'odbior',
+                  'total_amount': 120.0,
+                  'item_count': 3,
+                  'item_names': [
+                    'Pieczarka 50cm',
+                    'Szynka 50cm',
+                    'Salame 50cm'
+                  ],
+                  'items': [
+                    {'name': 'Pieczarka 50cm', 'quantity': 1, 'price': 40.0},
+                    {'name': 'Szynka 50cm', 'quantity': 1, 'price': 40.0},
+                    {'name': 'Salame 50cm', 'quantity': 1, 'price': 40.0}
+                  ],
+                  'address_title': 'Sklotowa 6/9',
+                  'address_subtitle': 'Punkt odbioru',
+                  'remaining_eta_minutes': 15,
+                  'supports_progress_updates': true,
+                  'oven_kind': 'zapiekanki',
+                  'can_mark_in_oven': false,
+                  'oven_slot_count': 3,
+                  'oven_load': 6,
+                  'oven_capacity': 6,
+                  'kitchen_eta_minutes': 15,
+                  'kitchen_batch_index': 2,
+                  'kitchen_batch_count': 1,
+                  'kitchen_capacity': 6,
+                  'kitchen_current_oven_load': 6,
+                  'kitchen_queue_pieces_before_order': 4,
+                  'kitchen_slots_before_order': 1,
+                  'kitchen_slots_used_by_order': 3,
+                  'unread_customer_message_count': 2,
+                  'assigned_to_me': true,
+                  'assigned_operator_email': 'admin@zapieapp.pl',
+                }
+              ],
+              'closed_orders': [],
+              'closed_orders_has_more': false,
+              'my_taken_orders': [],
+            }),
+          );
+        }
+
+        return _jsonResponse('not implemented', statusCode: 500);
+      });
+
+      final repo = HttpAdminDashboardRepository(
+        client: mockClient,
+        apiBaseUrl: 'https://zapieapp-api.qa.local',
+      );
+
+      final session = AuthSession(
+        email: 'admin@zapieapp.pl',
+        sessionToken: 'admin-session',
+        role: 'admin',
+      );
+
+      final dashboard = await repo.fetchDashboard(authSession: session);
+      expect(dashboard.ovenLoad, 6);
+      expect(dashboard.ovenCapacity, 6);
+      expect(dashboard.inProgressOrders, hasLength(1));
+
+      final order = dashboard.inProgressOrders.single;
+      expect(order.canMarkInOven, false);
+      expect(order.kitchenEtaMinutes, 15);
+      expect(order.kitchenBatchIndex, 2);
+      expect(order.kitchenBatchCount, 1);
+      expect(order.kitchenCurrentOvenLoad, 6);
+      expect(order.kitchenQueuePiecesBeforeOrder, 4);
+      expect(order.kitchenSlotsBeforeOrder, 1);
+      expect(order.kitchenSlotsUsedByOrder, 3);
+      expect(order.assignedToMe, true);
     });
 
     test('AuthSession role helpers are consistent', () {

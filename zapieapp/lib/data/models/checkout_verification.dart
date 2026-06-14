@@ -168,6 +168,14 @@ class CheckoutVerificationResponse {
     required this.createdAt,
     this.activeUntil,
     this.remainingEtaMinutes,
+    this.kitchenEtaMinutes,
+    this.kitchenBatchIndex,
+    this.kitchenBatchCount = 0,
+    this.kitchenCapacity = 0,
+    this.kitchenCurrentOvenLoad = 0,
+    this.kitchenQueuePiecesBeforeOrder = 0,
+    this.kitchenSlotsBeforeOrder = 0,
+    this.kitchenSlotsUsedByOrder = 0,
     this.requiresReceiptConfirmation = false,
     this.receiptConfirmationRequestedAt,
     this.supportAlertSentAt,
@@ -189,6 +197,14 @@ class CheckoutVerificationResponse {
   final DateTime createdAt;
   final DateTime? activeUntil;
   final int? remainingEtaMinutes;
+  final int? kitchenEtaMinutes;
+  final int? kitchenBatchIndex;
+  final int kitchenBatchCount;
+  final int kitchenCapacity;
+  final int kitchenCurrentOvenLoad;
+  final int kitchenQueuePiecesBeforeOrder;
+  final int kitchenSlotsBeforeOrder;
+  final int kitchenSlotsUsedByOrder;
   final bool requiresReceiptConfirmation;
   final DateTime? receiptConfirmationRequestedAt;
   final DateTime? supportAlertSentAt;
@@ -198,6 +214,24 @@ class CheckoutVerificationResponse {
   final DateTime? scheduledPickupAt;
   final DateTime? availableFrom;
   final CheckoutVerificationRequest receivedOrder;
+
+  int get effectiveBaseEtaMinutes {
+    final kitchenEta = kitchenEtaMinutes;
+    if (kitchenEta != null && kitchenEta > 0) {
+      return kitchenEta;
+    }
+    return receivedOrder.etaMinutes <= 0 ? 1 : receivedOrder.etaMinutes;
+  }
+
+  int get effectiveRemainingEtaMinutes {
+    final remaining = remainingEtaMinutes;
+    if (remaining != null) {
+      return remaining.clamp(0, 999);
+    }
+    return effectiveBaseEtaMinutes.clamp(0, 999);
+  }
+
+  bool get hasKitchenDiagnostics => kitchenSlotsUsedByOrder > 0;
 
   Map<String, dynamic> toJson() => {
         'verification_id': verificationId,
@@ -210,6 +244,14 @@ class CheckoutVerificationResponse {
         'created_at': createdAt.toUtc().toIso8601String(),
         'active_until': activeUntil?.toUtc().toIso8601String(),
         'remaining_eta_minutes': remainingEtaMinutes,
+        'kitchen_eta_minutes': kitchenEtaMinutes,
+        'kitchen_batch_index': kitchenBatchIndex,
+        'kitchen_batch_count': kitchenBatchCount,
+        'kitchen_capacity': kitchenCapacity,
+        'kitchen_current_oven_load': kitchenCurrentOvenLoad,
+        'kitchen_queue_pieces_before_order': kitchenQueuePiecesBeforeOrder,
+        'kitchen_slots_before_order': kitchenSlotsBeforeOrder,
+        'kitchen_slots_used_by_order': kitchenSlotsUsedByOrder,
         'requires_receipt_confirmation': requiresReceiptConfirmation,
         'receipt_confirmation_requested_at':
             receiptConfirmationRequestedAt?.toUtc().toIso8601String(),
@@ -237,6 +279,15 @@ class CheckoutVerificationResponse {
           DateTime.now().toUtc(),
       activeUntil: DateTime.tryParse(json['active_until']?.toString() ?? ''),
       remainingEtaMinutes: _asInt(json['remaining_eta_minutes']),
+      kitchenEtaMinutes: _asInt(json['kitchen_eta_minutes']),
+      kitchenBatchIndex: _asInt(json['kitchen_batch_index']),
+      kitchenBatchCount: _asInt(json['kitchen_batch_count']) ?? 0,
+      kitchenCapacity: _asInt(json['kitchen_capacity']) ?? 0,
+      kitchenCurrentOvenLoad: _asInt(json['kitchen_current_oven_load']) ?? 0,
+      kitchenQueuePiecesBeforeOrder:
+          _asInt(json['kitchen_queue_pieces_before_order']) ?? 0,
+      kitchenSlotsBeforeOrder: _asInt(json['kitchen_slots_before_order']) ?? 0,
+      kitchenSlotsUsedByOrder: _asInt(json['kitchen_slots_used_by_order']) ?? 0,
       requiresReceiptConfirmation:
           json['requires_receipt_confirmation'] == true,
       receiptConfirmationRequestedAt: DateTime.tryParse(
@@ -272,6 +323,52 @@ class CheckoutVerificationResponse {
               sessionToken: null,
               userEmail: null,
             ),
+    );
+  }
+}
+
+class CheckoutEtaPreviewResponse {
+  const CheckoutEtaPreviewResponse({
+    required this.etaMinutes,
+    this.availableFrom,
+    this.scheduledPickupAt,
+    this.kitchenEtaMinutes,
+    this.kitchenBatchIndex,
+    this.kitchenBatchCount = 0,
+    this.kitchenCapacity = 0,
+    this.kitchenCurrentOvenLoad = 0,
+    this.kitchenQueuePiecesBeforeOrder = 0,
+    this.kitchenSlotsBeforeOrder = 0,
+    this.kitchenSlotsUsedByOrder = 0,
+  });
+
+  final int etaMinutes;
+  final DateTime? availableFrom;
+  final DateTime? scheduledPickupAt;
+  final int? kitchenEtaMinutes;
+  final int? kitchenBatchIndex;
+  final int kitchenBatchCount;
+  final int kitchenCapacity;
+  final int kitchenCurrentOvenLoad;
+  final int kitchenQueuePiecesBeforeOrder;
+  final int kitchenSlotsBeforeOrder;
+  final int kitchenSlotsUsedByOrder;
+
+  factory CheckoutEtaPreviewResponse.fromJson(Map<String, dynamic> json) {
+    return CheckoutEtaPreviewResponse(
+      etaMinutes: _asInt(json['eta_minutes']) ?? 0,
+      availableFrom: DateTime.tryParse(json['available_from']?.toString() ?? ''),
+      scheduledPickupAt:
+          DateTime.tryParse(json['scheduled_pickup_at']?.toString() ?? ''),
+      kitchenEtaMinutes: _asInt(json['kitchen_eta_minutes']),
+      kitchenBatchIndex: _asInt(json['kitchen_batch_index']),
+      kitchenBatchCount: _asInt(json['kitchen_batch_count']) ?? 0,
+      kitchenCapacity: _asInt(json['kitchen_capacity']) ?? 0,
+      kitchenCurrentOvenLoad: _asInt(json['kitchen_current_oven_load']) ?? 0,
+      kitchenQueuePiecesBeforeOrder:
+          _asInt(json['kitchen_queue_pieces_before_order']) ?? 0,
+      kitchenSlotsBeforeOrder: _asInt(json['kitchen_slots_before_order']) ?? 0,
+      kitchenSlotsUsedByOrder: _asInt(json['kitchen_slots_used_by_order']) ?? 0,
     );
   }
 }

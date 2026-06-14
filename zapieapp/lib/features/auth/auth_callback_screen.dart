@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
@@ -122,6 +123,7 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
       provider,
       googleRedirectUri: widget.googleRedirectUri,
       appleRedirectUri: widget.appleRedirectUri,
+      callbackUri: widget.callbackUri,
     );
 
     try {
@@ -381,14 +383,37 @@ String _redirectUriForProvider(
   String provider, {
   required String googleRedirectUri,
   required String appleRedirectUri,
+  Uri? callbackUri,
 }) {
-  switch (provider.trim().toLowerCase()) {
-    case 'apple':
-      return appleRedirectUri;
-    case 'google':
-    default:
-      return googleRedirectUri;
+  final configured = switch (provider.trim().toLowerCase()) {
+    'apple' => appleRedirectUri,
+    'google' => googleRedirectUri,
+    _ => googleRedirectUri,
+  };
+  return _resolveCallbackRedirectUri(
+    configured,
+    callbackUri: callbackUri,
+  );
+}
+
+String _resolveCallbackRedirectUri(
+  String configuredRedirectUri, {
+  Uri? callbackUri,
+}) {
+  if (!kIsWeb) {
+    return configuredRedirectUri;
   }
+
+  final parsed = Uri.tryParse(configuredRedirectUri);
+  if (parsed != null &&
+      (parsed.scheme == 'http' || parsed.scheme == 'https')) {
+    return configuredRedirectUri;
+  }
+
+  final runtimeBase = (callbackUri != null && callbackUri.hasScheme)
+      ? callbackUri
+      : Uri.base;
+  return '${runtimeBase.origin}/auth/callback';
 }
 
 int? _asInt(Object? value) {

@@ -464,7 +464,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen>
     final scheduledPickupAt =
         checkout.scheduledPickupAt ?? checkout.activeUntil;
     if (!_isUdkaCheckout(checkout) || scheduledPickupAt == null) {
-      return '${checkout.receivedOrder.etaMinutes} min';
+      return '${checkout.effectiveRemainingEtaMinutes} min';
     }
 
     final localSlot = scheduledPickupAt.toLocal();

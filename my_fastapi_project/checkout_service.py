@@ -54,6 +54,7 @@ from models import (
     CheckoutVerificationIn,
     CheckoutHistoryPageOut,
     CheckoutVerificationOut,
+    CheckoutEtaPreviewOut,
     CheckoutPickupSlotEstimateIn,
     CheckoutPickupLocationOut,
     CheckoutPickupSlotEstimateOut,
@@ -340,6 +341,9 @@ class CheckoutService:
                 "address": effective_address,
             },
         )
+        kitchen_batch_metrics = self._zapiekanki_batch_metrics_for_checkout_order(
+            checkout_order
+        )
 
         return CheckoutVerificationOut(
             verification_id=verification_id,
@@ -355,11 +359,106 @@ class CheckoutService:
             created_at=self._as_utc(checkout_order.created_at),
             active_until=self._as_utc(checkout_order.active_until),
             remaining_eta_minutes=effective_eta_minutes,
+            kitchen_eta_minutes=kitchen_batch_metrics["kitchen_eta_minutes"],
+            kitchen_batch_index=kitchen_batch_metrics["kitchen_batch_index"],
+            kitchen_batch_count=int(kitchen_batch_metrics["kitchen_batch_count"] or 0),
+            kitchen_capacity=int(kitchen_batch_metrics["kitchen_capacity"] or 0),
+            kitchen_current_oven_load=int(
+                kitchen_batch_metrics["kitchen_current_oven_load"] or 0
+            ),
+            kitchen_queue_pieces_before_order=int(
+                kitchen_batch_metrics["kitchen_queue_pieces_before_order"] or 0
+            ),
+            kitchen_slots_before_order=int(
+                kitchen_batch_metrics["kitchen_slots_before_order"] or 0
+            ),
+            kitchen_slots_used_by_order=int(
+                kitchen_batch_metrics["kitchen_slots_used_by_order"] or 0
+            ),
             awarded_points=awarded_points,
             user_points_balance=int(user.loyalty_points or 0) if user is not None else 0,
             scheduled_pickup_at=self._as_utc(pickup_slot_datetime),
             available_from=self._as_utc(available_from),
             received_order=response_payload,
+        )
+
+    def preview_checkout_eta(
+        self,
+        payload: CheckoutVerificationIn,
+    ) -> CheckoutEtaPreviewOut:
+        created_at = datetime.utcnow()
+        self._ensure_checkout_items_are_available(payload.items)
+        checkout_positions = self._resolve_checkout_positions(payload.items)
+        if self._contains_udka_positions(checkout_positions) and not self._is_planned_pickup_fulfillment(
+            payload.fulfillment_method,
+            payload.fulfillment_option_index,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Udka mozna zamawiac tylko w trybie zaplanowanego odbioru."
+                ),
+            )
+
+        pickup_slot_datetime = None
+        if self._contains_udka_positions(checkout_positions) and self._is_planned_pickup_fulfillment(
+            payload.fulfillment_method,
+            payload.fulfillment_option_index,
+        ):
+            pickup_slot_datetime = self._resolve_pickup_slot_datetime(
+                now=created_at,
+                positions=checkout_positions,
+            )
+
+        available_from = self._resolve_checkout_available_from(
+            now=created_at,
+            positions=checkout_positions,
+            fulfillment_method=payload.fulfillment_method,
+            fulfillment_option_index=payload.fulfillment_option_index,
+        )
+        effective_eta_minutes = self._calculate_checkout_eta_minutes(
+            items=payload.items,
+            fallback_minutes=payload.eta_minutes,
+            fulfillment_method=payload.fulfillment_method,
+            fulfillment_option_index=payload.fulfillment_option_index,
+            now=created_at,
+            positions=checkout_positions,
+            pickup_slot_datetime=pickup_slot_datetime,
+            available_from=available_from,
+        )
+
+        requested_queue_pieces = self._count_zapiekanki_queue_pieces_for_positions(
+            checkout_positions
+        )
+        if requested_queue_pieces > 0:
+            kitchen_batch_metrics = self._build_zapiekanki_batch_metrics(
+                current_oven_load=self._get_current_oven_load(),
+                waiting_queue_pieces_before_order=self._count_waiting_zapiekanki_queue_pieces(),
+                slots_used_by_order=requested_queue_pieces,
+            )
+        else:
+            kitchen_batch_metrics = self._empty_zapiekanki_batch_metrics()
+
+        return CheckoutEtaPreviewOut(
+            eta_minutes=effective_eta_minutes,
+            available_from=self._as_utc(available_from),
+            scheduled_pickup_at=self._as_utc(pickup_slot_datetime),
+            kitchen_eta_minutes=kitchen_batch_metrics["kitchen_eta_minutes"],
+            kitchen_batch_index=kitchen_batch_metrics["kitchen_batch_index"],
+            kitchen_batch_count=int(kitchen_batch_metrics["kitchen_batch_count"] or 0),
+            kitchen_capacity=int(kitchen_batch_metrics["kitchen_capacity"] or 0),
+            kitchen_current_oven_load=int(
+                kitchen_batch_metrics["kitchen_current_oven_load"] or 0
+            ),
+            kitchen_queue_pieces_before_order=int(
+                kitchen_batch_metrics["kitchen_queue_pieces_before_order"] or 0
+            ),
+            kitchen_slots_before_order=int(
+                kitchen_batch_metrics["kitchen_slots_before_order"] or 0
+            ),
+            kitchen_slots_used_by_order=int(
+                kitchen_batch_metrics["kitchen_slots_used_by_order"] or 0
+            ),
         )
 
     def get_delivery_estimate(self) -> dict[str, int | bool]:
@@ -1187,6 +1286,26 @@ class CheckoutService:
                 )
             order_oven_slot_count = self._order_oven_slot_count(checkout_order)
             oven_capacity = self._oven_capacity_for_kind(oven_kind)
+            if oven_kind == "zapiekanki":
+                kitchen_batch_metrics = self._zapiekanki_batch_metrics_for_checkout_order(
+                    checkout_order,
+                    current_oven_load=oven_load_without_current,
+                )
+                if (
+                    int(kitchen_batch_metrics["kitchen_batch_index"] or 0) != 1
+                    or int(kitchen_batch_metrics["kitchen_batch_count"] or 0) > 1
+                    or (
+                        int(kitchen_batch_metrics["kitchen_slots_before_order"] or 0)
+                        + order_oven_slot_count
+                    )
+                    > oven_capacity
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "To zamowienie nie miesci sie jeszcze w aktualnym wsadzie pieca."
+                        ),
+                    )
             if (
                 order_oven_slot_count <= 0
                 or oven_load_without_current + order_oven_slot_count > oven_capacity
@@ -1792,6 +1911,9 @@ class CheckoutService:
             now=reference_time,
             include_oven_queue=not requires_receipt_confirmation,
         )
+        kitchen_batch_metrics = self._zapiekanki_batch_metrics_for_checkout_order(
+            checkout_order
+        )
 
         payload = CheckoutVerificationIn(
             created_at=self._as_utc(checkout_order.client_created_at),
@@ -1842,6 +1964,22 @@ class CheckoutService:
             created_at=self._as_utc(checkout_order.created_at),
             active_until=self._as_utc(checkout_order.active_until),
             remaining_eta_minutes=remaining_eta_minutes,
+            kitchen_eta_minutes=kitchen_batch_metrics["kitchen_eta_minutes"],
+            kitchen_batch_index=kitchen_batch_metrics["kitchen_batch_index"],
+            kitchen_batch_count=int(kitchen_batch_metrics["kitchen_batch_count"] or 0),
+            kitchen_capacity=int(kitchen_batch_metrics["kitchen_capacity"] or 0),
+            kitchen_current_oven_load=int(
+                kitchen_batch_metrics["kitchen_current_oven_load"] or 0
+            ),
+            kitchen_queue_pieces_before_order=int(
+                kitchen_batch_metrics["kitchen_queue_pieces_before_order"] or 0
+            ),
+            kitchen_slots_before_order=int(
+                kitchen_batch_metrics["kitchen_slots_before_order"] or 0
+            ),
+            kitchen_slots_used_by_order=int(
+                kitchen_batch_metrics["kitchen_slots_used_by_order"] or 0
+            ),
             requires_receipt_confirmation=requires_receipt_confirmation,
             receipt_confirmation_requested_at=self._as_utc(
                 checkout_order.receipt_confirmation_requested_at,
@@ -2314,13 +2452,12 @@ class CheckoutService:
             resolved_positions
         )
         if requested_queue_pieces > 0:
-            current_queue_pieces = self._count_active_zapiekanki_queue()
-            if current_queue_pieces <= 0 and requested_queue_pieces == 1:
-                base_eta = 6
-            else:
-                base_eta = self._kitchen_eta_bucket_minutes_by_queue(
-                    current_queue_pieces + requested_queue_pieces
-                )
+            kitchen_batch_metrics = self._build_zapiekanki_batch_metrics(
+                current_oven_load=self._get_current_oven_load(),
+                waiting_queue_pieces_before_order=self._count_waiting_zapiekanki_queue_pieces(),
+                slots_used_by_order=requested_queue_pieces,
+            )
+            base_eta = int(kitchen_batch_metrics["kitchen_eta_minutes"] or 0)
             base_eta = self._cap_kitchen_eta_total_minutes(base_eta)
             if available_from is None:
                 return base_eta
@@ -2494,6 +2631,168 @@ class CheckoutService:
             )
             for order in orders
             if self._order_oven_kind(order) == "zapiekanki"
+        )
+
+    def _list_waiting_zapiekanki_orders(
+        self,
+        *,
+        exclude_checkout_order_id: int | None = None,
+    ) -> list[CheckoutOrderDB]:
+        query = (
+            self.db.query(CheckoutOrderDB)
+            .options(joinedload(CheckoutOrderDB.items))
+            .filter(
+                CheckoutOrderDB.status != "completed",
+                CheckoutOrderDB.status != CHECKOUT_ORDER_STATUS_CANCELLED,
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_COMPLETED,
+                CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_CANCELLED,
+            )
+        )
+        if exclude_checkout_order_id is not None:
+            query = query.filter(
+                CheckoutOrderDB.checkout_order_id != exclude_checkout_order_id,
+            )
+
+        waiting_orders = [
+            order
+            for order in query.all()
+            if self._order_oven_kind(order) == "zapiekanki"
+            and order.processing_status
+            not in {
+                CHECKOUT_ORDER_STATUS_OUT_FOR_DELIVERY,
+                CHECKOUT_ORDER_STATUS_READY_FOR_PICKUP,
+            }
+            and not self._is_in_oven_stage(order)
+            and not self._is_ready_for_delivery_stage(order)
+        ]
+        waiting_orders.sort(
+            key=lambda order: (
+                order.created_at or datetime.min,
+                order.checkout_order_id or 0,
+            )
+        )
+        return waiting_orders
+
+    def _count_waiting_zapiekanki_queue_pieces(
+        self,
+        *,
+        exclude_checkout_order_id: int | None = None,
+    ) -> int:
+        return sum(
+            self._order_oven_slot_count(order)
+            for order in self._list_waiting_zapiekanki_orders(
+                exclude_checkout_order_id=exclude_checkout_order_id,
+            )
+        )
+
+    def _count_waiting_zapiekanki_queue_pieces_before_order(
+        self,
+        checkout_order: CheckoutOrderDB,
+    ) -> int:
+        checkout_created_at = checkout_order.created_at or datetime.min
+        total_pieces = 0
+        for waiting_order in self._list_waiting_zapiekanki_orders(
+            exclude_checkout_order_id=checkout_order.checkout_order_id,
+        ):
+            waiting_created_at = waiting_order.created_at or datetime.min
+            if waiting_created_at > checkout_created_at:
+                continue
+            if (
+                waiting_created_at == checkout_created_at
+                and (waiting_order.checkout_order_id or 0)
+                > (checkout_order.checkout_order_id or 0)
+            ):
+                continue
+            total_pieces += self._order_oven_slot_count(waiting_order)
+        return total_pieces
+
+    def _empty_zapiekanki_batch_metrics(self) -> dict[str, int | None]:
+        return {
+            "kitchen_eta_minutes": None,
+            "kitchen_batch_index": None,
+            "kitchen_batch_count": 0,
+            "kitchen_capacity": self._OVEN_CAPACITY,
+            "kitchen_current_oven_load": 0,
+            "kitchen_queue_pieces_before_order": 0,
+            "kitchen_slots_before_order": 0,
+            "kitchen_slots_used_by_order": 0,
+        }
+
+    def _build_zapiekanki_batch_metrics(
+        self,
+        *,
+        current_oven_load: int,
+        waiting_queue_pieces_before_order: int,
+        slots_used_by_order: int,
+    ) -> dict[str, int | None]:
+        metrics = self._empty_zapiekanki_batch_metrics()
+        metrics["kitchen_current_oven_load"] = max(0, int(current_oven_load))
+        metrics["kitchen_queue_pieces_before_order"] = max(
+            0, int(waiting_queue_pieces_before_order)
+        )
+        metrics["kitchen_slots_used_by_order"] = max(0, int(slots_used_by_order))
+        metrics["kitchen_slots_before_order"] = (
+            int(metrics["kitchen_current_oven_load"])
+            + int(metrics["kitchen_queue_pieces_before_order"])
+        )
+
+        if int(metrics["kitchen_slots_used_by_order"]) <= 0:
+            return metrics
+
+        slots_before_order = int(metrics["kitchen_slots_before_order"])
+        resolved_slots_used_by_order = int(metrics["kitchen_slots_used_by_order"])
+        batch_index = (slots_before_order // self._OVEN_CAPACITY) + 1
+        end_batch_index = (
+            (slots_before_order + resolved_slots_used_by_order - 1)
+            // self._OVEN_CAPACITY
+        ) + 1
+
+        metrics["kitchen_batch_index"] = batch_index
+        metrics["kitchen_batch_count"] = end_batch_index - batch_index + 1
+
+        if slots_before_order == 0 and resolved_slots_used_by_order == 1:
+            metrics["kitchen_eta_minutes"] = 6
+            return metrics
+
+        metrics["kitchen_eta_minutes"] = self._kitchen_eta_bucket_minutes_by_queue(
+            slots_before_order + resolved_slots_used_by_order
+        )
+        return metrics
+
+    def _zapiekanki_batch_metrics_for_checkout_order(
+        self,
+        checkout_order: CheckoutOrderDB,
+        *,
+        current_oven_load: int | None = None,
+    ) -> dict[str, int | None]:
+        if self._order_oven_kind(checkout_order) != "zapiekanki":
+            return self._empty_zapiekanki_batch_metrics()
+
+        slots_used_by_order = self._order_oven_slot_count(checkout_order)
+        resolved_current_oven_load = (
+            self._get_current_oven_load()
+            if current_oven_load is None
+            else max(0, int(current_oven_load))
+        )
+
+        if self._is_in_oven_stage(checkout_order):
+            current_oven_load_before_order = max(
+                0,
+                resolved_current_oven_load - slots_used_by_order,
+            )
+            waiting_queue_pieces_before_order = 0
+        else:
+            current_oven_load_before_order = resolved_current_oven_load
+            waiting_queue_pieces_before_order = (
+                self._count_waiting_zapiekanki_queue_pieces_before_order(
+                    checkout_order,
+                )
+            )
+
+        return self._build_zapiekanki_batch_metrics(
+            current_oven_load=current_oven_load_before_order,
+            waiting_queue_pieces_before_order=waiting_queue_pieces_before_order,
+            slots_used_by_order=slots_used_by_order,
         )
 
     def _kitchen_eta_bucket_minutes_by_queue(
@@ -3380,6 +3679,10 @@ class CheckoutService:
             current_udka_oven_load=current_udka_oven_load,
         )
         oven_capacity = self._oven_capacity_for_kind(oven_kind)
+        kitchen_batch_metrics = self._zapiekanki_batch_metrics_for_checkout_order(
+            checkout_order,
+            current_oven_load=current_oven_load,
+        )
 
         return AdminDashboardOrderOut(
             checkout_order_id=checkout_order.checkout_order_id,
@@ -3414,11 +3717,33 @@ class CheckoutService:
             can_mark_in_oven=(
                 supports_progress_updates
                 and oven_slot_count > 0
-                and oven_load + oven_slot_count <= oven_capacity
+                and int(kitchen_batch_metrics["kitchen_batch_index"] or 0) == 1
+                and int(kitchen_batch_metrics["kitchen_batch_count"] or 0) <= 1
+                and (
+                    int(kitchen_batch_metrics["kitchen_slots_before_order"] or 0)
+                    + oven_slot_count
+                )
+                <= oven_capacity
             ),
             oven_slot_count=oven_slot_count,
             oven_load=oven_load,
             oven_capacity=oven_capacity,
+            kitchen_eta_minutes=kitchen_batch_metrics["kitchen_eta_minutes"],
+            kitchen_batch_index=kitchen_batch_metrics["kitchen_batch_index"],
+            kitchen_batch_count=int(kitchen_batch_metrics["kitchen_batch_count"] or 0),
+            kitchen_capacity=int(kitchen_batch_metrics["kitchen_capacity"] or 0),
+            kitchen_current_oven_load=int(
+                kitchen_batch_metrics["kitchen_current_oven_load"] or 0
+            ),
+            kitchen_queue_pieces_before_order=int(
+                kitchen_batch_metrics["kitchen_queue_pieces_before_order"] or 0
+            ),
+            kitchen_slots_before_order=int(
+                kitchen_batch_metrics["kitchen_slots_before_order"] or 0
+            ),
+            kitchen_slots_used_by_order=int(
+                kitchen_batch_metrics["kitchen_slots_used_by_order"] or 0
+            ),
             unread_customer_message_count=unread_customer_message_count,
             assigned_to_me=(
                 current_user_id is not None
@@ -3666,23 +3991,23 @@ class CheckoutService:
         }:
             return 0
 
-        order_oven_slot_count = self._order_oven_slot_count(checkout_order)
-        if order_oven_slot_count <= 0:
-            return 0
-
         oven_load = self._get_effective_oven_load(
             checkout_order=checkout_order,
             current_oven_load=current_oven_load,
             current_udka_oven_load=current_udka_oven_load,
         )
-        overflow_slots = (oven_load + order_oven_slot_count) - self._OVEN_CAPACITY
-        if overflow_slots <= 0:
+        kitchen_batch_metrics = self._zapiekanki_batch_metrics_for_checkout_order(
+            checkout_order,
+            current_oven_load=oven_load,
+        )
+        batch_index = int(kitchen_batch_metrics["kitchen_batch_index"] or 0)
+        batch_count = int(kitchen_batch_metrics["kitchen_batch_count"] or 0)
+        if batch_index <= 0 or batch_count <= 0:
             return 0
 
-        delayed_batches = max(
-            1,
-            (overflow_slots + self._OVEN_CAPACITY - 1) // self._OVEN_CAPACITY,
-        )
+        delayed_batches = max(0, batch_index + batch_count - 2)
+        if delayed_batches <= 0:
+            return 0
         return delayed_batches * self._OVEN_QUEUE_DELAY_MINUTES
 
     def _serialize_checkout_message(

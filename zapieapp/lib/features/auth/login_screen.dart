@@ -959,10 +959,25 @@ class _LoginScreenState extends State<LoginScreen> {
 }
 
 String _redirectUriFor(_LoginProvider provider) {
-  return switch (provider) {
+  final configured = switch (provider) {
     _LoginProvider.google => AppConfig.authRedirectUri,
     _LoginProvider.apple => AppConfig.appleAuthRedirectUri,
   };
+  return _resolveRuntimeRedirectUri(configured);
+}
+
+String _resolveRuntimeRedirectUri(String configuredRedirectUri) {
+  if (!kIsWeb) {
+    return configuredRedirectUri;
+  }
+
+  final parsed = Uri.tryParse(configuredRedirectUri);
+  if (parsed != null &&
+      (parsed.scheme == 'http' || parsed.scheme == 'https')) {
+    return configuredRedirectUri;
+  }
+
+  return '${Uri.base.origin}/auth/callback';
 }
 
 class _LoginResult {

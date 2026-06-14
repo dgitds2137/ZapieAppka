@@ -14,6 +14,10 @@ abstract class CheckoutRepository {
     CheckoutVerificationRequest request,
   );
 
+  Future<CheckoutEtaPreviewResponse> previewCheckoutEta(
+    CheckoutVerificationRequest request,
+  );
+
   Future<CheckoutVerificationResponse?> fetchActiveCheckout({
     String? sessionToken,
     String? email,
@@ -100,6 +104,35 @@ class HttpCheckoutRepository implements CheckoutRepository {
     final checkout = CheckoutVerificationResponse.fromJson(decoded);
     rememberActiveCheckout(checkout);
     return checkout;
+  }
+
+  @override
+  Future<CheckoutEtaPreviewResponse> previewCheckoutEta(
+    CheckoutVerificationRequest request,
+  ) async {
+    final response = await _client
+        .post(
+          Uri.parse('$_apiBaseUrl/checkout/eta-preview'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(request.toJson()),
+        )
+        .timeout(const Duration(seconds: 10));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+          'Backend zwrocil ${response.statusCode}: ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception(
+          'Nieoczekiwany format odpowiedzi z /checkout/eta-preview.');
+    }
+
+    return CheckoutEtaPreviewResponse.fromJson(decoded);
   }
 
   @override

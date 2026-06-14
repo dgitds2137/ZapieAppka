@@ -30,6 +30,7 @@ from models import (
     CheckoutCancelIn,
     CheckoutReceiptConfirmationIn,
     CheckoutVerificationIn,
+    CheckoutEtaPreviewOut,
     CheckoutVerificationOut,
     DeliveryAddressValidationIn,
     DeliveryAddressValidationOut,
@@ -123,6 +124,13 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         db: Session = Depends(get_db),
     ):
         return CheckoutService(db).create_checkout_verification(payload)
+
+    @r.post("/checkout/eta-preview", response_model=CheckoutEtaPreviewOut)
+    def preview_checkout_eta(
+        payload: CheckoutVerificationIn,
+        db: Session = Depends(get_db),
+    ):
+        return CheckoutService(db).preview_checkout_eta(payload)
 
     @r.get("/checkout/active", response_model=CheckoutVerificationOut | None)
     def get_active_checkout(
