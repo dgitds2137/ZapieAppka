@@ -2461,9 +2461,26 @@ class CheckoutService:
                 ),
             )
 
-        requested_queue_pieces = self._count_zapiekanki_queue_pieces_for_positions(
-            resolved_positions
-        )
+        if items:
+            positions_by_id = {
+                position.position_id: position
+                for position in resolved_positions
+                if getattr(position, "position_id", None) is not None
+            }
+            if not positions_by_id and len(resolved_positions) == len(items):
+                positions_by_id = {
+                    item.position_id: position
+                    for item, position in zip(items, resolved_positions)
+                    if getattr(item, "position_id", None) is not None
+                }
+            requested_queue_pieces = self._count_zapiekanki_queue_pieces_for_items(
+                items,
+                positions_by_id=positions_by_id or None,
+            )
+        else:
+            requested_queue_pieces = self._count_zapiekanki_queue_pieces_for_positions(
+                resolved_positions
+            )
         if requested_queue_pieces > 0:
             kitchen_batch_metrics = self._build_zapiekanki_batch_metrics(
                 current_oven_load=self._get_current_oven_load(),
