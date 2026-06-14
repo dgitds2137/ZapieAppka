@@ -28,7 +28,7 @@ Wpisujemy tylko:
 
 ## Metadane sesji proof
 
-- Data: 2026-06-14 18:05:22 +02:00
+- Data: 2026-06-14 18:35:43 +02:00
 - Operator:
 - Srodowisko backend: https://zapieapp-api-dev-alpha.ambitiousstone-9e7294a6.polandcentral.azurecontainerapps.io
 - Srodowisko frontend: Flutter web / Chrome
@@ -49,12 +49,12 @@ python tests\run_time_zapiekanki_phase2_suite.py
 ### Wynik
 
 - Status: `PASS`
-- Start: 2026-06-14 18:05:22
-- Koniec: 2026-06-14 18:05:24
+- Start: 2026-06-14 18:35:43
+- Koniec: 2026-06-14 18:35:46
 
 ### Notatki
 
-- Runner przeszedl. Log: C:\FFApi\artifacts\time_zapiekanki_phase2\20260614-180522\backend-tests.log
+- Runner przeszedl. Log: C:\FFApi\artifacts\time_zapiekanki_phase2\20260614-183543\backend-tests.log
 
 ### Failures
 
@@ -73,12 +73,12 @@ flutter test
 ### Wynik
 
 - Status: `PASS`
-- Start: 2026-06-14 18:05:24
-- Koniec: 2026-06-14 18:05:32
+- Start: 2026-06-14 18:35:46
+- Koniec: 2026-06-14 18:35:54
 
 ### Notatki
 
-- Flutter test przeszedl. Log: C:\FFApi\artifacts\time_zapiekanki_phase2\20260614-180522\flutter-tests.log
+- Flutter test przeszedl. Log: C:\FFApi\artifacts\time_zapiekanki_phase2\20260614-183543\flutter-tests.log
 
 ### Failures
 
@@ -108,51 +108,51 @@ curl https://zapieapp-api-dev-alpha.ambitiousstone-9e7294a6.polandcentral.azurec
 
 ### Scenario 4.1 - 1 duza przy pustej kolejce
 
-- Input:
-- Expected:
-- Actual:
-- Status: `NOT RUN`
-- Notes:
+- Input: 
+- Expected: eta=16; kitchen_eta=6; batch=1; slots=1
+- Actual: eta=16; kitchen_eta=6; batch=1; slots=1
+- Status: `PASS`
+- Notes: strict clean queue comparison passed; env_kitchen_eta_offset=10
 
 ### Scenario 4.2 - 4 duze
 
-- Input:
-- Expected:
-- Actual:
-- Status: `NOT RUN`
-- Notes:
+- Input: 
+- Expected: eta=20; kitchen_eta=10; batch=1; slots=4
+- Actual: eta=20; kitchen_eta=10; batch=1; slots=4
+- Status: `PASS`
+- Notes: strict clean queue comparison passed; env_kitchen_eta_offset=10
 
 ### Scenario 4.3 - 7 duzych
 
-- Input:
-- Expected:
-- Actual:
-- Status: `NOT RUN`
-- Notes:
+- Input: 
+- Expected: eta=25; kitchen_eta=15; batch=1; slots=7
+- Actual: eta=25; kitchen_eta=15; batch=1; slots=7
+- Status: `PASS`
+- Notes: strict clean queue comparison passed; env_kitchen_eta_offset=10
 
 ### Scenario 4.4 - 10 duzych
 
-- Input:
-- Expected:
-- Actual:
-- Status: `NOT RUN`
-- Notes:
+- Input: 
+- Expected: eta=25; kitchen_eta=15; batch=1; slots=10
+- Actual: eta=25; kitchen_eta=15; batch=1; slots=10
+- Status: `PASS`
+- Notes: strict clean queue comparison passed; env_kitchen_eta_offset=10
 
 ### Scenario 4.5 - 14+ duzych
 
-- Input:
-- Expected:
-- Actual:
-- Status: `NOT RUN`
-- Notes:
+- Input: 
+- Expected: eta=30; kitchen_eta=20; batch=1; slots=14
+- Actual: eta=30; kitchen_eta=20; batch=1; slots=14
+- Status: `PASS`
+- Notes: strict clean queue comparison passed; env_kitchen_eta_offset=10
 
 ### Scenario 4.6 - tylko `VAC` lub `25cm`
 
-- Input:
-- Expected:
-- Actual:
-- Status: `NOT RUN`
-- Notes:
+- Input: 
+- Expected: eta=10; kitchen_eta=; batch=; slots=0
+- Actual: eta=10; kitchen_eta=; batch=; slots=0
+- Status: `PASS`
+- Notes: strict clean queue comparison passed
 
 ### Scenario 4.7 - override `+10`
 
@@ -240,8 +240,7 @@ Wpisuj tylko swiadomie zaakceptowane luki, ktore nie blokuja zamkniecia Phase 2.
 
 ### Kolejny ruch
 
-- 
-
+- Uruchom smoke na Chrome, a potem uzupelnij sekcje 4-9 na podstawie logow z C:\FFApi\artifacts\time_zapiekanki_phase2\20260614-183543
 ---
 
 ## 10. Szybkie podsumowanie dla finalnego audytu
@@ -279,6 +278,58 @@ Open gaps:
 Decision:
 - complete / continue fixing
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
