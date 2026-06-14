@@ -8,6 +8,7 @@ import 'storage_backend.dart';
 class SessionPersistence {
   static const _authSessionKey = 'auth_session';
   static const _activeCheckoutKey = 'active_checkout';
+  static const _likedProductsKey = 'liked_products';
   static bool _initialized = false;
 
   static Future<void> initialize() async {
@@ -107,6 +108,35 @@ class SessionPersistence {
   static Future<CheckoutVerificationResponse?> loadActiveCheckout() async {
     await initialize();
     return loadActiveCheckoutSync();
+  }
+
+  static Set<String> loadLikedProductKeysSync() {
+    final raw = readStorageValueSync(_likedProductsKey);
+    if (raw == null || raw.isEmpty) {
+      return <String>{};
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return decoded
+            .map((item) => item?.toString().trim() ?? '')
+            .where((item) => item.isNotEmpty)
+            .toSet();
+      }
+    } catch (_) {
+      // Ignore malformed cached data and treat likes as empty.
+    }
+    return <String>{};
+  }
+
+  static Future<void> saveLikedProductKeys(Set<String> keys) async {
+    final sanitized = keys
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList()
+      ..sort();
+    await writeStorageValue(_likedProductsKey, jsonEncode(sanitized));
   }
 
   static Future<void> clearAll() async {

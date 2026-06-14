@@ -58,12 +58,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final storedCheckout = SessionPersistence.loadActiveCheckoutSync();
     final cachedCheckout = _checkoutRepository.cachedActiveCheckout;
 
-    if (storedAuthSession?.hasIdentity == true) {
-      _authSession = storedAuthSession!;
-      _authSessionKey = _authSessionStorageKey(_authSession);
-      _loyaltyPoints = _authSession.loyaltyPoints;
-    }
-
+      if (storedAuthSession?.hasIdentity == true) {
+        _authSession = storedAuthSession!;
+        _authSessionKey = _authSessionStorageKey(_authSession);
+        _loyaltyPoints = _authSession.loyaltyPoints;
+      }
     final initialCheckout = storedCheckout ?? cachedCheckout;
     if (_isCheckoutStillActive(initialCheckout)) {
       _activeCheckout = initialCheckout;
@@ -83,10 +82,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _fetchPositions() async {
-    final response = await http.get(Uri.parse('$_apiBaseUrl/positions'),
-        headers: const {
-          'Accept': 'application/json'
-        }).timeout(const Duration(seconds: 10));
+    final response = await http.get(
+      Uri.parse('$_apiBaseUrl/positions').replace(
+        queryParameters: {
+          if ((_authSession.sessionToken ?? '').trim().isNotEmpty)
+            'session_token': _authSession.sessionToken!.trim(),
+          if ((_authSession.email ?? '').trim().isNotEmpty)
+            'email': _authSession.email!.trim(),
+        },
+      ),
+      headers: const {'Accept': 'application/json'},
+    ).timeout(const Duration(seconds: 10));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(
@@ -912,13 +918,13 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
     super.initState();
     _selectedCategoryKey = widget.initialCategoryKey;
     _entries = List<_CartEntry>.from(widget.initialCartEntries);
-    _nextCartEntryId = _entries.fold<int>(
-          0,
-          (maxId, entry) => entry.id > maxId ? entry.id : maxId,
-        ) +
-        1;
-    _refreshUdkaPickupEstimate();
-  }
+      _nextCartEntryId = _entries.fold<int>(
+            0,
+            (maxId, entry) => entry.id > maxId ? entry.id : maxId,
+          ) +
+          1;
+      _refreshUdkaPickupEstimate();
+    }
 
   _DashboardCategory get _selectedCategory {
     for (final category in widget.categories) {
@@ -1250,7 +1256,9 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
                           _CategoryProductRow(
                             position: items[index],
                             quantity: _quantityFor(items[index]),
+                            isLiked: _isPositionLiked(items[index]),
                             onTap: () => _openProductPreview(items[index]),
+                            onToggleLike: () => _togglePositionLike(items[index]),
                             onIncrement: () => _addToCart(items[index]),
                             onDecrement: () => _removeFromCart(items[index]),
                             locked: widget.hasActiveCheckout ||
@@ -1302,6 +1310,68 @@ class _CategoryProductsScreenState extends State<_CategoryProductsScreen> {
         ),
       ),
     );
+  }
+
+  bool _isPositionLiked(Map<String, dynamic> position) {
+    return position['liked_by_me'] == true;
+  }
+
+  Future<void> _togglePositionLike(Map<String, dynamic> position) async {
+    if (!widget.authSession.hasIdentity) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Musisz byc zalogowany, aby lajkowac produkty.'),
+        ),
+      );
+      return;
+    }
+
+    final positionId = _positionId(position);
+    if (positionId == null) {
+      return;
+    }
+
+    final nextLiked = !_isPositionLiked(position);
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('${AppConfig.apiBaseUrl}/positions/$positionId/like'),
+            headers: const {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({
+              'liked': nextLiked,
+              'session_token': widget.authSession.sessionToken,
+              'user_email': widget.authSession.email,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Backend zwrocil ${response.statusCode}.');
+      }
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) {
+        throw Exception('Nieoczekiwany format odpowiedzi z /positions/{id}/like.');
+      }
+
+      setState(() {
+        position['liked_by_me'] = decoded['liked_by_me'] == true;
+        position['likes_count'] = _asInt(decoded['likes_count']) ?? 0;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nie udalo sie zapisac lajka produktu.'),
+        ),
+      );
+    }
   }
 }
 
@@ -1403,7 +1473,9 @@ class _CategoryProductRow extends StatelessWidget {
   const _CategoryProductRow({
     required this.position,
     required this.quantity,
+    required this.isLiked,
     required this.onTap,
+    required this.onToggleLike,
     required this.onIncrement,
     required this.onDecrement,
     required this.locked,
@@ -1411,7 +1483,9 @@ class _CategoryProductRow extends StatelessWidget {
 
   final Map<String, dynamic> position;
   final int quantity;
+  final bool isLiked;
   final VoidCallback onTap;
+  final VoidCallback onToggleLike;
   final VoidCallback onIncrement;
   final VoidCallback onDecrement;
   final bool locked;
@@ -1438,20 +1512,33 @@ class _CategoryProductRow extends StatelessWidget {
         ),
       ),
     );
-    final details = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          _title(position, 0),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: const Color(0xFFF7EEE7),
-                fontWeight: FontWeight.w800,
+      final details = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  _title(position, 0),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: const Color(0xFFF7EEE7),
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
               ),
-        ),
-        if (isFrozen || isFries) ...[
-          const SizedBox(height: 6),
+              const SizedBox(width: 8),
+              _LikeButton(
+                liked: isLiked,
+                count: _asInt(position['likes_count']) ?? 0,
+                onTap: onToggleLike,
+              ),
+            ],
+          ),
+          if (isFrozen || isFries) ...[
+            const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
@@ -1576,6 +1663,60 @@ class _CategoryProductRow extends StatelessWidget {
   }
 }
 
+class _LikeButton extends StatelessWidget {
+  const _LikeButton({
+    required this.liked,
+    required this.count,
+    required this.onTap,
+  });
+
+  final bool liked;
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: 42,
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        decoration: BoxDecoration(
+          color: liked ? const Color(0x33FF7B7B) : const Color(0xFF282220),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: liked ? const Color(0x66FF8F8F) : const Color(0x1AFFFFFF),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              liked ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+              size: 18,
+              color: liked ? const Color(0xFFFF8585) : const Color(0xFFD8C7BB),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              '$count',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: liked
+                        ? const Color(0xFFFFC2C2)
+                        : const Color(0xFFD8C7BB),
+                    fontWeight: FontWeight.w800,
+                    fontSize: 10,
+                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CategoryRowStepper extends StatelessWidget {
   const _CategoryRowStepper({
     required this.quantity,
@@ -1592,19 +1733,20 @@ class _CategoryRowStepper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF282220),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: const Color(0x1AFFFFFF)),
       ),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           _CategoryStepperButton(
             icon: Icons.remove_rounded,
             onTap: quantity <= 0 || locked ? null : onDecrement,
           ),
+          const SizedBox(height: 6),
           SizedBox(
             width: 34,
             child: Text(
@@ -1616,6 +1758,7 @@ class _CategoryRowStepper extends StatelessWidget {
                   ),
             ),
           ),
+          const SizedBox(height: 6),
           _CategoryStepperButton(
             icon: Icons.add_rounded,
             onTap: locked ? null : onIncrement,

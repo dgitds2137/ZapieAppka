@@ -13,11 +13,17 @@ class AuthCallbackScreen extends StatefulWidget {
     super.key,
     required this.callbackUri,
     http.Client? httpClient,
-  }) : httpClient = httpClient ?? _DefaultHttpClient();
+    String? googleRedirectUri,
+    String? appleRedirectUri,
+  })  : httpClient = httpClient ?? _DefaultHttpClient(),
+        googleRedirectUri = googleRedirectUri ?? AppConfig.authRedirectUri,
+        appleRedirectUri = appleRedirectUri ?? AppConfig.appleAuthRedirectUri;
 
   final http.Client httpClient;
 
   final Uri callbackUri;
+  final String googleRedirectUri;
+  final String appleRedirectUri;
 
   @override
   State<AuthCallbackScreen> createState() => _AuthCallbackScreenState();
@@ -47,9 +53,13 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
     final code = widget.callbackUri.queryParameters['code'];
     final state = widget.callbackUri.queryParameters['state'];
     final stateData = _decodeState(state);
+    final providerProfile = _decodeProviderProfile(
+      widget.callbackUri.queryParameters['user'],
+    );
     final provider = widget.callbackUri.queryParameters['provider'] ??
         stateData['provider']?.toString();
-    final email = stateData['email']?.toString();
+    final email = stateData['email']?.toString() ?? providerProfile.email;
+    final name = providerProfile.displayName;
 
     if (code == null || code.isEmpty || provider == null || provider.isEmpty) {
       _showError(
@@ -63,6 +73,7 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
       code: code,
       state: state,
       email: email,
+      name: name,
     );
 
     if (!mounted) {
@@ -104,11 +115,24 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
     required String code,
     required String? state,
     required String? email,
+    required String? name,
   }) async {
     final uri = Uri.parse('${AppConfig.apiBaseUrl}/$provider-auth/callback');
+    final redirectUri = _redirectUriForProvider(
+      provider,
+      googleRedirectUri: widget.googleRedirectUri,
+      appleRedirectUri: widget.appleRedirectUri,
+    );
 
     try {
-      final response = await _postCallbackExchange(uri, code, state, email);
+      final response = await _postCallbackExchange(
+        uri,
+        code,
+        state,
+        email,
+        name,
+        redirectUri,
+      );
 
       final body = response.body.isEmpty
           ? <String, dynamic>{}
@@ -142,6 +166,8 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
     String code,
     String? state,
     String? email,
+    String? name,
+    String redirectUri,
   ) {
     return widget.httpClient.post(
       uri,
@@ -153,7 +179,8 @@ class _AuthCallbackScreenState extends State<AuthCallbackScreen> {
         'code': code,
         if (state != null) 'state': state,
         if (email != null && email.isNotEmpty) 'email': email,
-        'redirect_uri': AppConfig.authRedirectUri,
+        if (name != null && name.isNotEmpty) 'name': name,
+        'redirect_uri': redirectUri,
       }),
     ).timeout(const Duration(seconds: 10));
   }
@@ -261,6 +288,16 @@ class _CallbackExchangeResult {
   final int? loyaltyPoints;
 }
 
+class _ProviderProfile {
+  const _ProviderProfile({
+    this.email,
+    this.displayName,
+  });
+
+  final String? email;
+  final String? displayName;
+}
+
 Map<String, Object?> _decodeState(String? value) {
   if (value == null || value.isEmpty) {
     return const {};
@@ -307,6 +344,51 @@ Map<String, Object?> _decodeState(String? value) {
     // The backend still receives the raw state and can reject it if needed.
   }
   return const {};
+}
+
+_ProviderProfile _decodeProviderProfile(String? value) {
+  if (value == null || value.isEmpty) {
+    return const _ProviderProfile();
+  }
+
+  try {
+    final decoded = jsonDecode(value);
+    if (decoded is! Map) {
+      return const _ProviderProfile();
+    }
+
+    final map = Map<String, Object?>.from(decoded);
+    final email = map['email']?.toString().trim();
+    final nameMap =
+        map['name'] is Map ? Map<String, Object?>.from(map['name'] as Map) : null;
+    final firstName = nameMap?['firstName']?.toString().trim();
+    final lastName = nameMap?['lastName']?.toString().trim();
+    final displayName = [
+      if (firstName != null && firstName.isNotEmpty) firstName,
+      if (lastName != null && lastName.isNotEmpty) lastName,
+    ].join(' ').trim();
+
+    return _ProviderProfile(
+      email: email != null && email.isNotEmpty ? email : null,
+      displayName: displayName.isNotEmpty ? displayName : null,
+    );
+  } catch (_) {
+    return const _ProviderProfile();
+  }
+}
+
+String _redirectUriForProvider(
+  String provider, {
+  required String googleRedirectUri,
+  required String appleRedirectUri,
+}) {
+  switch (provider.trim().toLowerCase()) {
+    case 'apple':
+      return appleRedirectUri;
+    case 'google':
+    default:
+      return googleRedirectUri;
+  }
 }
 
 int? _asInt(Object? value) {

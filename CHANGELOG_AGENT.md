@@ -33,6 +33,53 @@ Szablon:
 
 ---
 
+## 2026-06-13 19:10:00 +02:00 - Apple Sign In foundation preparation
+
+- Zakres: przygotowanie po naszej stronie fundamentu `Sign in with Apple` bez finalnej konfiguracji w Apple Developer.
+- Backend:
+  - dodano `GET /apple-auth/start`
+  - dodano `POST /apple-auth/callback`
+  - dodano backendowy bridge callback `GET|POST /apple-auth/return`, zeby Apple moglo wrocic przez server-side redirect do frontendu
+  - dodano konfiguracje `APPLE_AUTH_*` w `config.py`
+  - dodano serwis `AppleOAuthService` z podpisanym `state`, `nonce`, wymiana `code -> token`, budowa Apple `client_secret` JWT i walidacja Apple `id_token`
+  - flow po sukcesie konczy sie standardowa sesja aplikacji, tak samo jak przy Google
+  - workflow deployu API w Azure Container Apps umie teraz opcjonalnie utrzymac `APPLE_AUTH_*` przy kolejnych deployach, bez wywalania srodowiska gdy Apple jeszcze nie jest skonfigurowany
+  - helper tworzenia/uzycia kont social auth zostal uogolniony z nazewnictwa `google_*` do provider-neutral `oauth/social auth`
+- Frontend:
+  - przycisk Apple przestaje skladac URL lokalnie i korzysta z backendowego `apple-auth/start`
+  - Apple nie wymaga juz wpisania e-maila przed uruchomieniem flow
+  - callback frontendowy wykorzystuje istniejacy generic flow `/${provider}-auth/callback`
+  - frontend dostaje osobny `APPLE_AUTH_REDIRECT_URI`, zeby Apple moglo miec dedykowany redirect niezalezny od Google
+  - callback screen wysyla teraz poprawny provider-specific `redirect_uri`, wiec Apple nie polega juz przypadkiem na bazowym redirect URI Google
+  - callback screen umie tez przejac `user` z pierwszego logowania Apple i przekazac `name` do backendu przy finalizacji sesji
+- Testy:
+  - dopisano backendowe foundation/endpoint tests dla Apple start + callback
+  - dopisano backendowy test bridge callbacku `apple-auth/return`
+  - dopisano tez test POST/form dla `apple-auth/return`, zeby nie polegac tylko na query-string variant
+  - dopisano frontendowy contract test dla `startAppleAuth(...)`
+  - dopisano widget test sukcesu callbacku Apple
+  - dopisano widget regression pod provider-specific Apple redirect URI w callback exchange
+  - nieuruchomione w tym watku; przygotowane pod `python my_fastapi_project/tests/run_google_oauth_foundation_suite.py` oraz `flutter test`
+- Pliki:
+  - `my_fastapi_project/config.py`
+  - `my_fastapi_project/models.py`
+  - `my_fastapi_project/oauth_router.py`
+  - `my_fastapi_project/oauth_service.py`
+  - `my_fastapi_project/.env.example`
+  - `my_fastapi_project/tests/test_google_oauth_foundations.py`
+  - `my_fastapi_project/tests/test_google_oauth_endpoints.py`
+  - `my_fastapi_project/tests/run_google_oauth_foundation_suite.py`
+  - `zapieapp/lib/data/repositories/social_auth_repository.dart`
+  - `zapieapp/lib/features/auth/auth_callback_screen.dart`
+  - `zapieapp/lib/data/models/social_auth.dart`
+  - `zapieapp/lib/features/auth/login_screen.dart`
+  - `zapieapp/test/widget_test.dart`
+  - `zapieapp/test/qa/qa_frontend_flow_contract_test.dart`
+  - `APPLE_AUTH_PREP.md`
+- Uwagi do kolejnych watkow:
+  - z naszej strony zostaje glownie konfiguracja danych z Apple Developer: `Services ID`, `Team ID`, `Key ID`, `.p8 private key`, redirect URIs
+  - po uzyskaniu konta Apple Developer trzeba wpisac env na Azure i wykonac pierwszy realny smoke test Apple loginu
+
 ## 2026-06-13 11:45:00 +02:00 - Frontend callback success-path testability
 
 - Zakres: domkniecie testowalnosci success path `Google OAuth callback -> save session -> dashboard` po stronie Flutter web/frontend.

@@ -66,6 +66,7 @@ def ensure_database_schema() -> None:
                 ("demo_user.sql", True),
                 ("customer_users.sql", True),
                 ("menu_addons.sql", True),
+                ("menu_position_likes.sql", True),
                 ("reference_seed_v2026_06_03.sql", True),
                 ("checkout_orders.sql", True),
                 ("reference_seed_v2026_06_03_payments.sql", True),

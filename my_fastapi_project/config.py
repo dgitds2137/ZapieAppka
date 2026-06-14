@@ -67,6 +67,25 @@ class Settings:
             os.getenv("GOOGLE_AUTH_STATE_TTL_SECONDS"),
             600,
         )
+        self.apple_auth_client_id = os.getenv("APPLE_AUTH_CLIENT_ID", "").strip()
+        self.apple_auth_team_id = os.getenv("APPLE_AUTH_TEAM_ID", "").strip()
+        self.apple_auth_key_id = os.getenv("APPLE_AUTH_KEY_ID", "").strip()
+        self.apple_auth_private_key = os.getenv("APPLE_AUTH_PRIVATE_KEY", "").strip()
+        self.apple_auth_callback_bridge_uri = os.getenv(
+            "APPLE_AUTH_CALLBACK_BRIDGE_URI",
+            "",
+        ).strip()
+        self.apple_auth_default_redirect_uri = os.getenv(
+            "APPLE_AUTH_DEFAULT_REDIRECT_URI",
+            "",
+        ).strip()
+        self.apple_auth_allowed_redirect_uris = _csv(
+            os.getenv("APPLE_AUTH_ALLOWED_REDIRECT_URIS"),
+        )
+        self.apple_auth_state_ttl_seconds = _int(
+            os.getenv("APPLE_AUTH_STATE_TTL_SECONDS"),
+            600,
+        )
 
 
 @lru_cache(maxsize=1)

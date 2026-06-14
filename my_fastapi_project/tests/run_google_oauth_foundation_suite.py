@@ -57,6 +57,30 @@ TEST_CASES = [
         foundation_tests.test_google_mobile_id_token_rejects_email_mismatch,
     ),
     (
+        "service:apple_start_signed_state_and_nonce",
+        foundation_tests.test_apple_start_returns_signed_state_and_nonce,
+    ),
+    (
+        "service:apple_start_no_private_key_required",
+        foundation_tests.test_apple_start_does_not_require_private_key,
+    ),
+    (
+        "service:apple_bridge_redirect_with_user_payload",
+        foundation_tests.test_apple_builds_frontend_callback_redirect_with_user_payload,
+    ),
+    (
+        "service:apple_start_rejects_bad_redirect",
+        foundation_tests.test_apple_start_rejects_unknown_redirect_uri,
+    ),
+    (
+        "service:apple_callback_verified_email",
+        foundation_tests.test_apple_callback_exchanges_code_and_uses_verified_email,
+    ),
+    (
+        "service:apple_callback_rejects_email_mismatch",
+        foundation_tests.test_apple_callback_rejects_email_mismatch,
+    ),
+    (
         "endpoint:start_success",
         endpoint_tests.test_google_auth_start_endpoint_success,
     ),
@@ -84,6 +108,30 @@ TEST_CASES = [
         "endpoint:mobile_failure",
         endpoint_tests.test_google_auth_mobile_endpoint_failure,
     ),
+    (
+        "endpoint:apple_start_success",
+        endpoint_tests.test_apple_auth_start_endpoint_success,
+    ),
+    (
+        "endpoint:apple_start_failure",
+        endpoint_tests.test_apple_auth_start_endpoint_failure,
+    ),
+    (
+        "endpoint:apple_callback_success",
+        endpoint_tests.test_apple_auth_callback_endpoint_success,
+    ),
+    (
+        "endpoint:apple_callback_failure",
+        endpoint_tests.test_apple_auth_callback_endpoint_failure,
+    ),
+    (
+        "endpoint:apple_return_redirect",
+        endpoint_tests.test_apple_auth_return_endpoint_redirects_to_frontend_callback,
+    ),
+    (
+        "endpoint:apple_return_post_redirect",
+        endpoint_tests.test_apple_auth_return_post_endpoint_redirects_to_frontend_callback,
+    ),
 ]
 
 
@@ -91,7 +139,7 @@ def main() -> int:
     total = len(TEST_CASES)
     passed = 0
 
-    print("Google OAuth foundation suite")
+    print("Social auth foundation suite")
     print(f"Cases: {total}")
 
     for label, fn in TEST_CASES:

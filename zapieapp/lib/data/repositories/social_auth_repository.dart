@@ -12,6 +12,11 @@ abstract class SocialAuthRepository {
     required String redirectUri,
   });
 
+  Future<SocialAuthStart> startAppleAuth({
+    String? email,
+    required String redirectUri,
+  });
+
   Future<AuthSession> completeGoogleMobileAuth({
     required String idToken,
     String? email,
@@ -32,10 +37,34 @@ class HttpSocialAuthRepository implements SocialAuthRepository {
   Future<SocialAuthStart> startGoogleAuth({
     String? email,
     required String redirectUri,
+  }) {
+    return _startAuth(
+      endpointPath: '/google-auth/start',
+      redirectUri: redirectUri,
+      email: email,
+    );
+  }
+
+  @override
+  Future<SocialAuthStart> startAppleAuth({
+    String? email,
+    required String redirectUri,
+  }) {
+    return _startAuth(
+      endpointPath: '/apple-auth/start',
+      redirectUri: redirectUri,
+      email: email,
+    );
+  }
+
+  Future<SocialAuthStart> _startAuth({
+    required String endpointPath,
+    required String redirectUri,
+    String? email,
   }) async {
     final response = await _client
         .get(
-          Uri.parse('$_apiBaseUrl/google-auth/start').replace(
+          Uri.parse('$_apiBaseUrl$endpointPath').replace(
             queryParameters: {
               if (email != null && email.trim().isNotEmpty) 'email': email,
               'redirect_uri': redirectUri,
@@ -53,7 +82,9 @@ class HttpSocialAuthRepository implements SocialAuthRepository {
 
     final decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {
-      throw Exception('Nieoczekiwany format odpowiedzi z /google-auth/start.');
+      throw Exception(
+        'Nieoczekiwany format odpowiedzi z $endpointPath.',
+      );
     }
 
     return SocialAuthStart.fromJson(decoded);

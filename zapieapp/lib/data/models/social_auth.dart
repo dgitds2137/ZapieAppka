@@ -4,12 +4,14 @@ class SocialAuthStart {
     required this.authorizationUrl,
     required this.redirectUri,
     required this.state,
+    this.nonce,
   });
 
   final String provider;
   final String authorizationUrl;
   final String redirectUri;
   final String state;
+  final String? nonce;
 
   factory SocialAuthStart.fromJson(Map<String, dynamic> json) {
     return SocialAuthStart(
@@ -17,6 +19,7 @@ class SocialAuthStart {
       authorizationUrl: json['authorization_url']?.toString() ?? '',
       redirectUri: json['redirect_uri']?.toString() ?? '',
       state: json['state']?.toString() ?? '',
+      nonce: json['nonce']?.toString(),
     );
   }
 }

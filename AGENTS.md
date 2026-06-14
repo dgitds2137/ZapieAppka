@@ -10,6 +10,8 @@ Backend i frontend sa juz polaczone i uzywane na Azure Container Apps (`zapieapp
 Pliki kontekstowe dla kolejnych watkow:
 - `AGENTS.md` - stan projektu, architektura, endpointy, onboarding.
 - `CHANGELOG_AGENT.md` - ostatnie zmiany z timestampami, zeby szybko dojsc co bylo robione i co zostalo po drodze ustalone.
+- `APPLE_AUTH_PREP.md` - techniczne przygotowanie Apple Sign In po naszej stronie + smoke plan na moment, gdy pojawi sie konto Apple Developer i sekret-y.
+  - zawiera tez gotowy Azure CLI skeleton do ustawienia `apple-auth-*` secretow i rolloutu env
 
 ## 2) Backend szybki przeglad
 - Glowne wejscie: `my_fastapi_project/main.py` (`FastAPI(...)`, `/health`, `/health/db`, `app.include_router(routes(...))`).
@@ -27,6 +29,9 @@ Pliki kontekstowe dla kolejnych watkow:
 - `GET /health`, `GET /health/db`
 - `GET /google-auth/start`
 - `POST /google-auth/callback`
+- `GET /apple-auth/start`
+- `POST /apple-auth/callback`
+- `GET|POST /apple-auth/return`
 - `GET /positions`
 - `GET /position/{position_id}/addons`
 - `GET /opening-hours`
@@ -65,15 +70,35 @@ Role w app backendu to: `user`, `employee`, `driver`, `admin`.
   - callback wraca na `zapieapp://auth/callback` albo webowy `/auth/callback`
   - backend finalizuje logowanie przez `POST /google-auth/callback`
   - po sukcesie koncowym artefaktem nadal jest standardowa sesja aplikacji (`jwt` + `session_token`)
+- Fundament Apple Sign In jest w przygotowaniu po tej samej architekturze backend-first:
+  - backend startuje flow przez `GET /apple-auth/start`
+  - frontend otwiera URL autoryzacji dostarczony przez backend
+  - Apple wraca najpierw na backendowy bridge callback `GET|POST /apple-auth/return`
+  - backend przekierowuje dalej na frontendowy callback `zapieapp://auth/callback` albo webowy `/auth/callback`
+  - backend finalizuje logowanie przez `POST /apple-auth/callback`
+  - frontend umie przejac dodatkowy `user` payload z pierwszego logowania Apple i przekazac nazwe uzytkownika do backendu
+  - po sukcesie koncowym artefaktem nadal jest standardowa sesja aplikacji (`jwt` + `session_token`)
 - Konfiguracja Google OAuth siedzi w `.env` backendu:
   - `GOOGLE_AUTH_CLIENT_ID`
   - `GOOGLE_AUTH_CLIENT_SECRET`
   - `GOOGLE_AUTH_DEFAULT_REDIRECT_URI`
   - `GOOGLE_AUTH_ALLOWED_REDIRECT_URIS`
   - `GOOGLE_AUTH_STATE_TTL_SECONDS`
+- Konfiguracja Apple Sign In siedzi w `.env` backendu:
+  - `APPLE_AUTH_CLIENT_ID`
+  - `APPLE_AUTH_TEAM_ID`
+  - `APPLE_AUTH_KEY_ID`
+  - `APPLE_AUTH_PRIVATE_KEY`
+  - `APPLE_AUTH_CALLBACK_BRIDGE_URI`
+  - `APPLE_AUTH_DEFAULT_REDIRECT_URI`
+  - `APPLE_AUTH_ALLOWED_REDIRECT_URIS`
+  - `APPLE_AUTH_STATE_TTL_SECONDS`
 
 ## 5) Frontend skrot (Flutter)
 - Punkt wejscia API: `zapieapp/lib/core/config/app_config.dart` -> `API_BASE_URL` (domyslnie `http://127.0.0.1:8000`).
+- Redirecty auth po stronie Fluttera:
+  - `AUTH_REDIRECT_URI` - bazowy redirect, obecnie uzywany przez Google
+  - `APPLE_AUTH_REDIRECT_URI` - dedykowany redirect dla Apple; jesli nieustawiony, fallbackuje do `AUTH_REDIRECT_URI`
 - Router UI: `zapieapp/lib/router/app_router.dart`.
 - Ekran logowania/rejestracji: `zapieapp/lib/features/auth/login_screen.dart`.
 - Callback auth: `zapieapp/lib/features/auth/auth_callback_screen.dart`.
@@ -81,10 +106,14 @@ Role w app backendu to: `user`, `employee`, `driver`, `admin`.
 - Dashboard admin/staff/driver: `zapieapp/lib/features/admin/admin_dashboard_screen.dart`.
 - Repozytorium HTTP checkout/admin: `zapieapp/lib/data/repositories/checkout_repository.dart`, `admin_dashboard_repository.dart`.
 - Repozytorium social auth: `zapieapp/lib/data/repositories/social_auth_repository.dart`.
+- Praktyczna uwaga dla Apple:
+  - Google i Apple nie musza docelowo dzielic tego samego redirect URI
+  - frontend ma juz osobny `APPLE_AUTH_REDIRECT_URI`, zeby mozna bylo pozniej ustawic Apple pod dedykowany callback bez ruszania Google flow
 
 ## 6) QA / testy
 - Testy funkcjonalne backendu: `my_fastapi_project/qa/tests/*.py`.
 - Testy lokalne fundamentu Google OAuth:
+- Testy lokalne fundamentu social auth:
   - `my_fastapi_project/tests/test_google_oauth_foundations.py`
   - `my_fastapi_project/tests/test_google_oauth_endpoints.py`
   - `my_fastapi_project/tests/run_google_oauth_foundation_suite.py`
@@ -94,7 +123,7 @@ Role w app backendu to: `user`, `employee`, `driver`, `admin`.
   - `my_fastapi_project/qa/run_e2e_smoke.sh`
   - `my_fastapi_project/qa/run_smoke_order_flow.py`
 - Aktualnie pokrywane scenariusze skupiaja sie na glownej sciezce: user -> employee -> driver.
-- Jedna komenda do czytelnego sprawdzenia Google OAuth foundation:
+- Jedna komenda do czytelnego sprawdzenia Google + Apple auth foundation:
   - `python my_fastapi_project/tests/run_google_oauth_foundation_suite.py`
 
 ## 7) Lokalny rozwoj (backend)
@@ -116,6 +145,23 @@ Role w app backendu to: `user`, `employee`, `driver`, `admin`.
 - Azure Container App secrets:
   - `mssql-conn-str`
   - `jwt-secret-key`
+- Dla Google auth workflow oczekuje kompletnego zestawu secretow:
+  - `google-auth-client-id`
+  - `google-auth-client-secret`
+  - `google-auth-default-redirect-uri`
+  - `google-auth-allowed-redirect-uris`
+- Dla Apple auth workflow jest przygotowany na opcjonalny, ale kompletny zestaw secretow:
+  - `apple-auth-client-id`
+  - `apple-auth-team-id`
+  - `apple-auth-key-id`
+  - `apple-auth-private-key`
+  - `apple-auth-callback-bridge-uri`
+  - `apple-auth-default-redirect-uri`
+  - `apple-auth-allowed-redirect-uris`
+- Workflow deployu API umie teraz:
+  - nie wywalac deployu, jesli Apple auth nie jest jeszcze skonfigurowany
+  - automatycznie podchwycic Apple env po dodaniu kompletu secretow
+  - zatrzymac deploy, jesli social auth ma tylko czesc secretow i grozi polowiczna konfiguracja
 - Healthcheck po deployu: `https://<container-app-fqdn>/health` oraz `https://<container-app-fqdn>/health/db`.
 
 ## 9) Przydatne uwagi operacyjne

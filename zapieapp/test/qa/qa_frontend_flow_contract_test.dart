@@ -319,6 +319,50 @@ void main() {
       expect(result.redirectUri, 'zapieapp://auth/callback');
     });
 
+    test('apple auth start endpoint returns external authorization URL', () async {
+      final mockClient = MockClient((http.Request request) async {
+        if (request.method == 'GET' && request.url.path == '/apple-auth/start') {
+          expect(request.url.queryParameters.containsKey('email'), false);
+          expect(
+            request.url.queryParameters['redirect_uri'],
+            'zapieapp://auth/callback',
+          );
+
+          return _jsonResponse(
+            jsonEncode({
+              'provider': 'apple',
+              'authorization_url':
+                  'https://appleid.apple.com/auth/authorize?client_id=test',
+              'redirect_uri': 'zapieapp://auth/callback',
+              'state': 'apple-signed-state',
+              'nonce': 'apple-nonce',
+            }),
+          );
+        }
+
+        return _jsonResponse('not implemented', statusCode: 500);
+      });
+
+      final repo = HttpSocialAuthRepository(
+        client: mockClient,
+        apiBaseUrl: 'https://zapieapp-api.qa.local',
+      );
+
+      final result = await repo.startAppleAuth(
+        email: null,
+        redirectUri: 'zapieapp://auth/callback',
+      );
+
+      expect(result.provider, 'apple');
+      expect(
+        result.authorizationUrl,
+        'https://appleid.apple.com/auth/authorize?client_id=test',
+      );
+      expect(result.redirectUri, 'zapieapp://auth/callback');
+      expect(result.state, 'apple-signed-state');
+      expect(result.nonce, 'apple-nonce');
+    });
+
     test('google mobile auth endpoint returns standard app session', () async {
       final mockClient = MockClient((http.Request request) async {
         if (request.method == 'POST' &&

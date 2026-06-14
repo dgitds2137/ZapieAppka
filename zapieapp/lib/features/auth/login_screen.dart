@@ -16,30 +16,22 @@ enum _LoginProvider {
   google(
     id: 'google',
     label: 'Google',
-    authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-    scope: 'openid email profile',
     icon: _ProviderIcon.google,
   ),
   apple(
     id: 'apple',
     label: 'Apple',
-    authorizationEndpoint: 'https://appleid.apple.com/auth/authorize',
-    scope: 'name email',
     icon: _ProviderIcon.apple,
   );
 
   const _LoginProvider({
     required this.id,
     required this.label,
-    required this.authorizationEndpoint,
-    required this.scope,
     required this.icon,
   });
 
   final String id;
   final String label;
-  final String authorizationEndpoint;
-  final String scope;
   final _ProviderIcon icon;
 }
 
@@ -200,64 +192,20 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Uri buildProviderAuthorizationUri({
-    required String email,
-    required _LoginProvider provider,
-  }) {
-    final state = base64Url
-        .encode(
-          utf8.encode(
-            jsonEncode({
-              'provider': provider.id,
-              'email': email,
-              'nonce': DateTime.now().millisecondsSinceEpoch.toString(),
-            }),
-          ),
-        )
-        .replaceAll('=', '');
-
-    final queryParameters = <String, String>{
-      'client_id': _clientIdFor(provider),
-      'redirect_uri': AppConfig.authRedirectUri,
-      'response_type': 'code',
-      'scope': provider.scope,
-      'state': state,
-    };
-
-    if (provider == _LoginProvider.google) {
-      queryParameters.addAll({
-        'access_type': 'offline',
-        'prompt': 'select_account',
-        'login_hint': email,
-      });
-    }
-
-    if (provider == _LoginProvider.apple) {
-      queryParameters['response_mode'] = 'query';
-    }
-
-    return Uri.parse(provider.authorizationEndpoint).replace(
-      queryParameters: queryParameters,
-    );
-  }
-
   Future<bool> openProviderAuthorization({
-    String? email,
     required _LoginProvider provider,
   }) async {
-    final Uri uri;
-    if (provider == _LoginProvider.google) {
-      final authStart = await _socialAuthRepository.startGoogleAuth(
-        email: null,
-        redirectUri: AppConfig.authRedirectUri,
-      );
-      uri = Uri.parse(authStart.authorizationUrl);
-    } else {
-      uri = buildProviderAuthorizationUri(
-        email: email ?? '',
-        provider: provider,
-      );
-    }
+    final authStart = switch (provider) {
+      _LoginProvider.google => await _socialAuthRepository.startGoogleAuth(
+          email: null,
+          redirectUri: _redirectUriFor(provider),
+        ),
+      _LoginProvider.apple => await _socialAuthRepository.startAppleAuth(
+          email: null,
+          redirectUri: _redirectUriFor(provider),
+        ),
+    };
+    final uri = Uri.parse(authStart.authorizationUrl);
     return launchUrl(
       uri,
       mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication,
@@ -366,33 +314,6 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> submitProvider(_LoginProvider provider) async {
-    final email = emailController.text.trim();
-    if (provider != _LoginProvider.google) {
-      final emailError = _validateEmail(email);
-      if (emailError != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '$emailError Najpierw wpisz e-mail, potem wybierz provider.',
-            ),
-          ),
-        );
-        return;
-      }
-    }
-
-    if (provider != _LoginProvider.google && _clientIdFor(provider).isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Brakuje konfiguracji ${provider.label}. '
-            'Ustaw ${_clientIdKeyFor(provider)}.',
-          ),
-        ),
-      );
-      return;
-    }
-
     if (provider == _LoginProvider.google &&
         _useNativeGoogleOnAndroid &&
         AppConfig.googleAuthClientId.isEmpty) {
@@ -417,7 +338,6 @@ class _LoginScreenState extends State<LoginScreen> {
         nativeGoogleSession = await _authenticateGoogleOnAndroid();
       } else {
         opened = await openProviderAuthorization(
-          email: provider == _LoginProvider.google ? null : email,
           provider: provider,
         );
       }
@@ -1038,6 +958,13 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 }
 
+String _redirectUriFor(_LoginProvider provider) {
+  return switch (provider) {
+    _LoginProvider.google => AppConfig.authRedirectUri,
+    _LoginProvider.apple => AppConfig.appleAuthRedirectUri,
+  };
+}
+
 class _LoginResult {
   const _LoginResult.success({
     this.jwt,
@@ -1164,20 +1091,6 @@ class _CredentialHint extends StatelessWidget {
           ),
     );
   }
-}
-
-String _clientIdFor(_LoginProvider provider) {
-  return switch (provider) {
-    _LoginProvider.google => AppConfig.googleAuthClientId,
-    _LoginProvider.apple => AppConfig.appleAuthClientId,
-  };
-}
-
-String _clientIdKeyFor(_LoginProvider provider) {
-  return switch (provider) {
-    _LoginProvider.google => 'GOOGLE_AUTH_CLIENT_ID',
-    _LoginProvider.apple => 'APPLE_AUTH_CLIENT_ID',
-  };
 }
 
 String? _validateEmail(String email) {

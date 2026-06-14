@@ -56,6 +56,9 @@ class _FakeGoogleOAuthServiceSuccess:
             "loyalty_points": 0,
         }
 
+    def build_apple_service(self):
+        return _FakeAppleOAuthServiceSuccess(self.db)
+
 
 class _FakeGoogleOAuthServiceFailure:
     def __init__(self, db):
@@ -77,6 +80,83 @@ class _FakeGoogleOAuthServiceFailure:
         raise HTTPException(
             status_code=400,
             detail="Google ID token jest nieprawidlowy.",
+        )
+
+    def build_apple_service(self):
+        return _FakeAppleOAuthServiceFailure(self.db)
+
+
+class _FakeAppleOAuthServiceSuccess:
+    def __init__(self, db):
+        self.db = db
+        self.start_calls = []
+        self.callback_calls = []
+
+    def start_authorization(self, redirect_uri: str, email: str | None = None):
+        self.start_calls.append({"redirect_uri": redirect_uri, "email": email})
+        return {
+            "provider": "apple",
+            "authorization_url": "https://appleid.apple.com/auth/authorize?client_id=test",
+            "redirect_uri": redirect_uri,
+            "state": "signed-apple-state-token",
+            "nonce": "signed-apple-nonce",
+        }
+
+    def exchange_code(self, payload: OAuthCodeExchangeIn):
+        self.callback_calls.append(payload)
+        return {
+            "jwt": "jwt-token",
+            "session_token": "session-token",
+            "role": "user",
+            "user_id": 16,
+            "email": "apple-user@zapieapp.pl",
+            "loyalty_points": 0,
+        }
+
+    def build_frontend_callback_redirect(
+        self,
+        *,
+        state: str,
+        code: str | None = None,
+        user: str | None = None,
+        error: str | None = None,
+        error_description: str | None = None,
+    ):
+        return (
+            "zapieapp://auth/callback"
+            f"?provider=apple&state={state}"
+            f"{'&code=' + code if code else ''}"
+        )
+
+
+class _FakeAppleOAuthServiceFailure:
+    def __init__(self, db):
+        self.db = db
+
+    def start_authorization(self, redirect_uri: str, email: str | None = None):
+        raise HTTPException(
+            status_code=400,
+            detail="Redirect URI nie jest dozwolony dla logowania Apple.",
+        )
+
+    def exchange_code(self, payload: OAuthCodeExchangeIn):
+        raise HTTPException(
+            status_code=400,
+            detail="Stan logowania Apple jest nieprawidlowy lub wygasl.",
+        )
+
+    def build_frontend_callback_redirect(
+        self,
+        *,
+        state: str,
+        code: str | None = None,
+        user: str | None = None,
+        error: str | None = None,
+        error_description: str | None = None,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Stan logowania Apple jest nieprawidlowy lub wygasl.",
         )
 
 
@@ -236,6 +316,117 @@ def test_google_auth_mobile_endpoint_failure():
     assert "Google ID token" in response.text
 
 
+def test_apple_auth_start_endpoint_success():
+    service = _FakeGoogleOAuthServiceSuccess(None)
+    client = _build_test_client(lambda db: service)
+
+    response = client.get(
+        "/apple-auth/start",
+        params={
+            "redirect_uri": "zapieapp://auth/callback",
+            "email": "user@zapieapp.pl",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["provider"] == "apple"
+    assert data["redirect_uri"] == "zapieapp://auth/callback"
+    assert data["state"] == "signed-apple-state-token"
+    assert data["nonce"] == "signed-apple-nonce"
+
+
+def test_apple_auth_start_endpoint_failure():
+    client = _build_test_client(_FakeGoogleOAuthServiceFailure)
+
+    response = client.get(
+        "/apple-auth/start",
+        params={
+            "redirect_uri": "https://evil.example.com/callback",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Apple" in response.text
+
+
+def test_apple_auth_callback_endpoint_success():
+    service = _FakeGoogleOAuthServiceSuccess(None)
+    client = _build_test_client(lambda db: service)
+
+    response = client.post(
+        "/apple-auth/callback",
+        json={
+            "code": "apple-code",
+            "state": "signed-apple-state-token",
+            "redirect_uri": "zapieapp://auth/callback",
+            "email": "apple-user@zapieapp.pl",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["email"] == "apple-user@zapieapp.pl"
+    assert data["session_token"] == "session-token"
+
+
+def test_apple_auth_callback_endpoint_failure():
+    client = _build_test_client(_FakeGoogleOAuthServiceFailure)
+
+    response = client.post(
+        "/apple-auth/callback",
+        json={
+            "code": "apple-code",
+            "state": "broken-apple-state",
+            "redirect_uri": "zapieapp://auth/callback",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Apple" in response.text
+
+
+def test_apple_auth_return_endpoint_redirects_to_frontend_callback():
+    service = _FakeGoogleOAuthServiceSuccess(None)
+    client = _build_test_client(lambda db: service)
+
+    response = client.get(
+        "/apple-auth/return",
+        params={
+            "code": "apple-code",
+            "state": "signed-apple-state-token",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        response.headers["location"]
+        == "zapieapp://auth/callback?provider=apple&state=signed-apple-state-token&code=apple-code"
+    )
+
+
+def test_apple_auth_return_post_endpoint_redirects_to_frontend_callback():
+    service = _FakeGoogleOAuthServiceSuccess(None)
+    client = _build_test_client(lambda db: service)
+
+    response = client.post(
+        "/apple-auth/return",
+        data={
+            "code": "apple-code-post",
+            "state": "signed-apple-state-token",
+            "user": '{"email":"apple-user@zapieapp.pl"}',
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert (
+        response.headers["location"]
+        == "zapieapp://auth/callback?provider=apple&state=signed-apple-state-token&code=apple-code-post"
+    )
+
+
 if __name__ == "__main__":
     test_google_auth_start_endpoint_success()
     test_google_auth_start_endpoint_success_without_email()
@@ -244,4 +435,10 @@ if __name__ == "__main__":
     test_google_auth_callback_endpoint_failure()
     test_google_auth_mobile_endpoint_success()
     test_google_auth_mobile_endpoint_failure()
+    test_apple_auth_start_endpoint_success()
+    test_apple_auth_start_endpoint_failure()
+    test_apple_auth_callback_endpoint_success()
+    test_apple_auth_callback_endpoint_failure()
+    test_apple_auth_return_endpoint_redirects_to_frontend_callback()
+    test_apple_auth_return_post_endpoint_redirects_to_frontend_callback()
     print("OK: test_google_oauth_endpoints.py")

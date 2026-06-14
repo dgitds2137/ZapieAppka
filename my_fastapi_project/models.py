@@ -105,6 +105,39 @@ class MenuPositionDB(Base):
         back_populates="position",
         cascade="all, delete-orphan",
     )
+    like_links = relationship(
+        "MenuPositionLikeDB",
+        back_populates="position",
+        cascade="all, delete-orphan",
+    )
+
+
+class MenuPositionLikeDB(Base):
+    __tablename__ = "MenuPositionLikes"
+    __table_args__ = (
+        UniqueConstraint(
+            "position_id",
+            "user_id",
+            name="UQ_MenuPositionLikes_position_user",
+        ),
+    )
+
+    menu_position_like_id = Column(Integer, primary_key=True, index=True)
+    position_id = Column(
+        Integer,
+        ForeignKey("MenuPositions.position_id"),
+        nullable=False,
+        index=True,
+    )
+    user_id = Column(
+        Integer,
+        ForeignKey("Users.user_id"),
+        nullable=False,
+        index=True,
+    )
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    position = relationship("MenuPositionDB", back_populates="like_links")
 
 
 class ProductPrepTimeSettingDB(Base):
@@ -420,11 +453,16 @@ class OAuthCodeExchangeIn(BaseModel):
     state: str
     redirect_uri: str
     email: EmailStr | None = None
+    name: str | None = None
 
 
 class GoogleIdTokenExchangeIn(BaseModel):
     id_token: str
     email: EmailStr | None = None
+
+
+class AppleAuthorizationStartOut(OAuthAuthorizationStartOut):
+    nonce: str
 
 
 class AddressCreate(BaseModel):
@@ -479,6 +517,18 @@ class AdminCatalogPositionOut(BaseModel):
     description: str | None = None
     price: float | None = None
     is_active: bool = True
+
+
+class MenuPositionLikeToggleIn(BaseModel):
+    liked: bool
+    session_token: str | None = None
+    user_email: EmailStr | None = None
+
+
+class MenuPositionLikeOut(BaseModel):
+    position_id: int
+    likes_count: int = 0
+    liked_by_me: bool = False
 
 
 class AdminCatalogAddonOut(BaseModel):

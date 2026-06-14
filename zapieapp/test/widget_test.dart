@@ -120,6 +120,72 @@ void main() {
     expect(session.authProvider, 'google');
     expect(session.loyaltyPoints, 12);
   });
+
+  testWidgets('apple auth callback success saves session and redirects to dashboard',
+      (tester) async {
+    final mockClient = MockClient((http.Request request) async {
+      expect(request.method, 'POST');
+      expect(request.url.path, '/apple-auth/callback');
+
+      final payload = jsonDecode(request.body) as Map<String, dynamic>;
+      expect(payload['code'], 'apple-code');
+      expect(payload['state'], 'apple-signed-state');
+      expect(payload['redirect_uri'], 'https://apple.example.com/auth/callback');
+      expect(payload['name'], 'Daniel Gromak');
+
+      return http.Response(
+        jsonEncode({
+          'jwt': 'apple-jwt-token',
+          'session_token': 'apple-session-token',
+          'role': 'user',
+          'user_id': 23,
+          'email': 'daniel.gromak2137@gmail.com',
+          'loyalty_points': 7,
+        }),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        onGenerateRoute: (settings) {
+          if (settings.name == AppRoutes.dashboard) {
+            return MaterialPageRoute<void>(
+              builder: (_) => const Scaffold(
+                body: Text('Dashboard test target'),
+              ),
+            );
+          }
+          return MaterialPageRoute<void>(
+            builder: (_) => const SizedBox.shrink(),
+          );
+        },
+        home: AuthCallbackScreen(
+          callbackUri: Uri.parse(
+            'http://127.0.0.1:3001/auth/callback?code=apple-code&state=apple-signed-state&provider=apple&user=%7B%22email%22%3A%22daniel.gromak2137%40gmail.com%22%2C%22name%22%3A%7B%22firstName%22%3A%22Daniel%22%2C%22lastName%22%3A%22Gromak%22%7D%7D',
+          ),
+          httpClient: mockClient,
+          googleRedirectUri: 'zapieapp://auth/callback',
+          appleRedirectUri: 'https://apple.example.com/auth/callback',
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Dashboard test target'), findsOneWidget);
+
+    final session = SessionPersistence.loadAuthSessionSync();
+    expect(session, isNotNull);
+    expect(session!.email, 'daniel.gromak2137@gmail.com');
+    expect(session.sessionToken, 'apple-session-token');
+    expect(session.jwt, 'apple-jwt-token');
+    expect(session.role, 'user');
+    expect(session.authProvider, 'apple');
+    expect(session.loyaltyPoints, 7);
+  });
 }
 
 class _TestAssetBundle extends CachingAssetBundle {

@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,7 @@ from models import (
     EMPLOYEE_ROLE,
     MenuAddonDB,
     MenuPositionAddonDB,
+    MenuPositionLikeDB,
     MenuPositionDB,
     ProductPrepTimeSettingDB,
     SessionsDB,
@@ -34,7 +36,7 @@ from models import (
     UserSchema,
 )
 from oauth_router import oauth_routes
-from oauth_service import GoogleOAuthService, build_google_user_defaults
+from oauth_service import GoogleOAuthService, build_social_auth_user_defaults
 from prep_time_config import infer_prep_group_key, prep_group_label
 from router import routes
 
@@ -88,11 +90,23 @@ class MenuService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_all_positions(self):
+    def get_all_positions(
+        self,
+        session_token: str | None = None,
+        user_email: str | None = None,
+    ):
         self._ensure_required_positions()
         settings_by_group = self._get_prep_settings_by_group()
+        viewer_user_id = self._resolve_user_id_once(session_token, user_email)
+        like_counts = self._get_position_like_counts()
+        liked_position_ids = self._get_liked_position_ids(viewer_user_id)
         return [
-            self._serialize_position(position, settings_by_group)
+            self._serialize_position(
+                position,
+                settings_by_group,
+                likes_count=like_counts.get(position.position_id, 0),
+                liked_by_me=position.position_id in liked_position_ids,
+            )
             for position in self.db.query(MenuPositionDB)
             .order_by(
                 MenuPositionDB.position_type.asc(),
@@ -113,7 +127,12 @@ class MenuService:
         )
         if not position or not self._should_expose_position_to_customer(position):
             raise HTTPException(status_code=404, detail="Menu position not found")
-        return self._serialize_position(position, self._get_prep_settings_by_group())
+        return self._serialize_position(
+            position,
+            self._get_prep_settings_by_group(),
+            likes_count=self._count_position_likes(position.position_id),
+            liked_by_me=False,
+        )
 
     def get_position_addons(self, position_id: int):
         self.get_position(position_id)
@@ -160,6 +179,9 @@ class MenuService:
         self,
         position: MenuPositionDB,
         settings_by_group: dict[str, ProductPrepTimeSettingDB],
+        *,
+        likes_count: int = 0,
+        liked_by_me: bool = False,
     ) -> dict[str, object | None]:
         group_key = infer_prep_group_key(position.position_type, position.name)
         setting = settings_by_group.get(group_key) if group_key else None
@@ -185,6 +207,55 @@ class MenuService:
             "prep_group_key": group_key,
             "prep_group_label": prep_group_label(group_key),
             "prep_minutes": setting.minutes if setting is not None else None,
+            "likes_count": int(likes_count),
+            "liked_by_me": bool(liked_by_me),
+        }
+
+    def toggle_position_like(
+        self,
+        position_id: int,
+        *,
+        session_token: str | None,
+        user_email: str | None,
+        liked: bool,
+    ) -> dict[str, object]:
+        user_id = self._resolve_user_id_once(session_token, user_email)
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Musisz byc zalogowany, aby lajkowac produkty.")
+
+        position = (
+            self.db.query(MenuPositionDB)
+            .filter(MenuPositionDB.position_id == position_id)
+            .first()
+        )
+        if position is None:
+            raise HTTPException(status_code=404, detail="Menu position not found")
+
+        existing_like = (
+            self.db.query(MenuPositionLikeDB)
+            .filter(
+                MenuPositionLikeDB.position_id == position_id,
+                MenuPositionLikeDB.user_id == user_id,
+            )
+            .first()
+        )
+
+        if liked and existing_like is None:
+            self.db.add(
+                MenuPositionLikeDB(
+                    position_id=position_id,
+                    user_id=user_id,
+                )
+            )
+            self.db.commit()
+        elif not liked and existing_like is not None:
+            self.db.delete(existing_like)
+            self.db.commit()
+
+        return {
+            "position_id": position_id,
+            "likes_count": self._count_position_likes(position_id),
+            "liked_by_me": liked,
         }
 
     def _get_string_runtime_setting(self, setting_key: str) -> str | None:
@@ -255,6 +326,69 @@ class MenuService:
             )
         )
         self.db.commit()
+
+    def _get_position_like_counts(self) -> dict[int, int]:
+        rows = (
+            self.db.query(
+                MenuPositionLikeDB.position_id,
+                func.count(MenuPositionLikeDB.menu_position_like_id),
+            )
+            .group_by(MenuPositionLikeDB.position_id)
+            .all()
+        )
+        return {
+            int(position_id): int(count)
+            for position_id, count in rows
+            if position_id is not None
+        }
+
+    def _get_liked_position_ids(self, user_id: int | None) -> set[int]:
+        if user_id is None:
+            return set()
+        rows = (
+            self.db.query(MenuPositionLikeDB.position_id)
+            .filter(MenuPositionLikeDB.user_id == user_id)
+            .all()
+        )
+        return {
+            int(position_id)
+            for (position_id,) in rows
+            if position_id is not None
+        }
+
+    def _count_position_likes(self, position_id: int) -> int:
+        count = (
+            self.db.query(func.count(MenuPositionLikeDB.menu_position_like_id))
+            .filter(MenuPositionLikeDB.position_id == position_id)
+            .scalar()
+        )
+        return int(count or 0)
+
+    def _resolve_user_id_once(
+        self,
+        session_token: str | None,
+        user_email: str | None,
+    ) -> int | None:
+        if session_token:
+            session = (
+                self.db.query(SessionsDB)
+                .filter(SessionsDB.session_token == session_token)
+                .order_by(SessionsDB.last_seen_at.desc(), SessionsDB.id.desc())
+                .first()
+            )
+            if session is not None:
+                return session.user_id
+
+        if user_email:
+            user = (
+                self.db.query(UserDB)
+                .filter(UserDB.email == user_email.strip().lower())
+                .first()
+            )
+            if user is not None:
+                return user.user_id
+
+        return None
 
 
 class UserService:
@@ -338,7 +472,7 @@ class UserService:
 
         return self._create_session_response(user)
 
-    def login_or_register_google_user(
+    def login_or_register_oauth_user(
         self,
         email: str,
         name: str | None = None,
@@ -353,7 +487,7 @@ class UserService:
             .first()
         )
         if user is None:
-            defaults = build_google_user_defaults(name)
+            defaults = build_social_auth_user_defaults(name)
             user = UserDB(
                 name=defaults["name"],
                 email=normalized_email,

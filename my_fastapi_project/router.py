@@ -34,6 +34,8 @@ from models import (
     DeliveryAddressValidationIn,
     DeliveryAddressValidationOut,
     MenuAddonSchema,
+    MenuPositionLikeOut,
+    MenuPositionLikeToggleIn,
     OpeningHoursOut,
     PrepTimeSettingOut,
     PrepTimeSettingUpdateIn,
@@ -84,8 +86,28 @@ def routes(MenuService, UserService, CheckoutService, get_db):
         return user
 
     @r.get("/positions")
-    def get_positions(db: Session = Depends(get_db)):
-        return MenuService(db).get_all_positions()
+    def get_positions(
+        session_token: str | None = None,
+        email: str | None = None,
+        db: Session = Depends(get_db),
+    ):
+        return MenuService(db).get_all_positions(
+            session_token=session_token,
+            user_email=email,
+        )
+
+    @r.post("/positions/{position_id}/like", response_model=MenuPositionLikeOut)
+    def toggle_position_like(
+        position_id: int,
+        payload: MenuPositionLikeToggleIn,
+        db: Session = Depends(get_db),
+    ):
+        return MenuService(db).toggle_position_like(
+            position_id=position_id,
+            session_token=payload.session_token,
+            user_email=payload.user_email,
+            liked=payload.liked,
+        )
 
     @r.get("/opening-hours", response_model=OpeningHoursOut)
     def get_opening_hours(db: Session = Depends(get_db)):
