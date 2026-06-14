@@ -134,16 +134,97 @@ def _base_payload(items: list[dict[str, Any]], *, eta_minutes: int, total_amount
     }
 
 
-def _build_scenarios() -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
-    one_large = [_large_item(1, 101, "Pieczarka 50cm")]
-    four_large = [_large_item(index, 100 + index, f"Zapiekanka {index} 50cm") for index in range(1, 5)]
-    seven_large = [_large_item(index, 200 + index, f"Zapiekanka {index} 50cm") for index in range(1, 8)]
-    ten_large = [_large_item(index, 300 + index, f"Zapiekanka {index} 50cm") for index in range(1, 11)]
-    fourteen_large = [_large_item(index, 400 + index, f"Zapiekanka {index} 50cm") for index in range(1, 15)]
-    vac_only = [
-        _non_kitchen_item(1, 901, "Pieczarka VAC", "zapiekanki_frozen vac", 21.0),
-        _non_kitchen_item(2, 902, "Kids Szynka 25cm", "kids", 19.0),
+def _load_catalog_positions(api_base_url: str) -> list[dict[str, Any]]:
+    positions = _get_json(f"{api_base_url}/positions")
+    if not isinstance(positions, list):
+        raise RuntimeError("/positions did not return a list")
+    return [dict(item) for item in positions if isinstance(item, dict)]
+
+
+def _is_large_hot_zapiekanka(position: dict[str, Any]) -> bool:
+    if not position.get("is_active", False):
+        return False
+    position_type = str(position.get("position_type") or "").strip().lower()
+    if position_type != "zapiekanki":
+        return False
+    name = str(position.get("name") or "").strip()
+    return "25cm" not in name and "vac" not in name.lower()
+
+
+def _resolve_phase2_catalog_inputs(api_base_url: str) -> dict[str, dict[str, Any]]:
+    positions = _load_catalog_positions(api_base_url)
+
+    large_hot = next((item for item in positions if _is_large_hot_zapiekanka(item)), None)
+    if large_hot is None:
+        raise RuntimeError("No active large hot zapiekanka found in /positions")
+
+    vac_item = next(
+        (
+            item
+            for item in positions
+            if str(item.get("position_type") or "").strip().lower() == "zapiekanki_frozen"
+            and item.get("is_active", False)
+        ),
+        None,
+    )
+    if vac_item is None:
+        raise RuntimeError("No active VAC position found in /positions")
+
+    kids_item = next(
+        (
+            item
+            for item in positions
+            if str(item.get("position_type") or "").strip().lower() == "kids"
+            and item.get("is_active", False)
+        ),
+        None,
+    )
+    if kids_item is None:
+        raise RuntimeError("No active kids position found in /positions")
+
+    return {
+        "large_hot": large_hot,
+        "vac": vac_item,
+        "kids": kids_item,
+    }
+
+
+def _large_items_from_catalog(count: int, position: dict[str, Any]) -> list[dict[str, Any]]:
+    position_id = int(position["position_id"])
+    name = str(position.get("name") or "Zapiekanka 50cm")
+    return [_large_item(index, position_id, name) for index in range(1, count + 1)]
+
+
+def _non_kitchen_items_from_catalog(vac_position: dict[str, Any], kids_position: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _non_kitchen_item(
+            1,
+            int(vac_position["position_id"]),
+            str(vac_position.get("name") or "VAC"),
+            str(vac_position.get("description") or "zapiekanki_frozen vac"),
+            float(vac_position.get("price") or 0.0),
+        ),
+        _non_kitchen_item(
+            2,
+            int(kids_position["position_id"]),
+            str(kids_position.get("name") or "Kids 25cm"),
+            str(kids_position.get("description") or "kids"),
+            float(kids_position.get("price") or 0.0),
+        ),
     ]
+
+
+def _build_scenarios(catalog_inputs: dict[str, dict[str, Any]]) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
+    large_hot = catalog_inputs["large_hot"]
+    vac_item = catalog_inputs["vac"]
+    kids_item = catalog_inputs["kids"]
+
+    one_large = _large_items_from_catalog(1, large_hot)
+    four_large = _large_items_from_catalog(4, large_hot)
+    seven_large = _large_items_from_catalog(7, large_hot)
+    ten_large = _large_items_from_catalog(10, large_hot)
+    fourteen_large = _large_items_from_catalog(14, large_hot)
+    vac_only = _non_kitchen_items_from_catalog(vac_item, kids_item)
 
     return [
         (
@@ -198,7 +279,11 @@ def _build_scenarios() -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
         ),
         (
             "vac_and_25cm_non_kitchen",
-            _base_payload(vac_only, eta_minutes=12, total_amount=40.0),
+            _base_payload(
+                vac_only,
+                eta_minutes=12,
+                total_amount=sum(float(item["price"]) for item in vac_only),
+            ),
             {
                 "eta_minutes": 12,
                 "kitchen_eta_minutes": None,
@@ -273,6 +358,8 @@ def _run_override_smoke(
         },
     )
     original_override = int(original_catalog.get("kitchen_eta_override_minutes") or 0)
+    catalog_inputs = _resolve_phase2_catalog_inputs(api_base_url)
+    large_hot = catalog_inputs["large_hot"]
 
     try:
         _patch_json(
@@ -284,7 +371,11 @@ def _run_override_smoke(
             },
         )
 
-        payload = _base_payload([_large_item(1, 101, "Pieczarka 50cm")], eta_minutes=10, total_amount=40.0)
+        payload = _base_payload(
+            _large_items_from_catalog(1, large_hot),
+            eta_minutes=10,
+            total_amount=float(large_hot.get("price") or 0.0),
+        )
         response = _post_json(preview_url, payload)
         expected_eta = 6 + override_minutes
         expected = {
@@ -333,8 +424,9 @@ def main() -> int:
 
     preview_url = f"{args.api_base_url}/checkout/eta-preview"
     results: list[ScenarioResult] = []
+    catalog_inputs = _resolve_phase2_catalog_inputs(args.api_base_url)
 
-    for name, payload, expected in _build_scenarios():
+    for name, payload, expected in _build_scenarios(catalog_inputs):
         response = _post_json(preview_url, deepcopy(payload))
         results.append(
             _compare_response(

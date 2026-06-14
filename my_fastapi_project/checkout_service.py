@@ -427,8 +427,21 @@ class CheckoutService:
             available_from=available_from,
         )
 
-        requested_queue_pieces = self._count_zapiekanki_queue_pieces_for_positions(
-            checkout_positions
+        positions_by_id = {
+            position_id: position
+            for position in checkout_positions
+            for position_id in [getattr(position, "position_id", None)]
+            if position_id is not None
+        }
+        if not positions_by_id and len(checkout_positions) == len(payload.items):
+            positions_by_id = {
+                item.position_id: position
+                for item, position in zip(payload.items, checkout_positions)
+                if getattr(item, "position_id", None) is not None
+            }
+        requested_queue_pieces = self._count_zapiekanki_queue_pieces_for_items(
+            payload.items,
+            positions_by_id=positions_by_id or None,
         )
         if requested_queue_pieces > 0:
             kitchen_batch_metrics = self._build_zapiekanki_batch_metrics(
@@ -2577,9 +2590,17 @@ class CheckoutService:
                     pieces += resolved_quantity
                 continue
 
-            if self._is_large_zapiekanka_signature(
-                getattr(item, "name", None),
-                getattr(item, "description", None),
+            item_name = getattr(item, "name", None)
+            item_description = getattr(item, "description", None)
+            combined = " ".join(
+                part.strip().lower()
+                for part in (item_name or "", item_description or "")
+                if part and part.strip()
+            )
+            excluded_markers = ("kids", "25cm", "vac", "frozen", "mroz")
+            if (
+                self._is_zapiekanki_order_item(item_name, item_description)
+                and not any(marker in combined for marker in excluded_markers)
             ):
                 pieces += resolved_quantity
         return pieces
