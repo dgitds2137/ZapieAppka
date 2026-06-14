@@ -120,7 +120,7 @@ def _base_payload(items: list[dict[str, Any]], *, eta_minutes: int, total_amount
         "eta_minutes": eta_minutes,
         "payment_method": "preview",
         "fulfillment_method": "odbior",
-        "fulfillment_option_index": 0,
+        "fulfillment_option_index": 1,
         "address_option_index": 0,
         "address": {
             "title": "Sklotowa 6/9",
