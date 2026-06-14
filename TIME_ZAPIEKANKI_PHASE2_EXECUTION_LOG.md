@@ -168,28 +168,37 @@ curl https://zapieapp-api-dev-alpha.ambitiousstone-9e7294a6.polandcentral.azurec
 
 ### 5.1 Preview koszyka
 
-- Status: `NOT RUN`
+- Status: `NOT RUN MANUALLY`
 - Notes:
+  - brak twardego smoke UI w tej sesji
+  - preview API i model Flutter sa potwierdzone przez `api-preview-smoke=PASS` oraz `flutter-tests=PASS`
 
 ### 5.2 Checkout consistency
 
-- Status: `NOT RUN`
+- Status: `NOT RUN MANUALLY`
 - Notes:
+  - brak zywego smoke UI
+  - payload i mapowanie warstwy checkout sa pokryte testami kontraktowymi repo Flutter
 
 ### 5.3 Active order consistency
 
-- Status: `NOT RUN`
+- Status: `NOT RUN MANUALLY`
 - Notes:
+  - brak zywego smoke UI
+  - backend endpoint `/checkout/active` i mapowanie `kitchen_*` sa pokryte testami
 
 ### 5.4 Tracking consistency
 
-- Status: `NOT RUN`
+- Status: `NOT RUN MANUALLY`
 - Notes:
+  - brak zywego smoke UI
+  - `order_tracking_screen.dart` korzysta z backendowego ETA; dowod modelowy/testowy istnieje
 
 ### 5.5 Mieszany koszyk
 
-- Status: `NOT RUN`
+- Status: `NOT RUN MANUALLY`
 - Notes:
+  - brak manualnego scenariusza mieszanych pozycji w przegladarce
 
 ---
 
@@ -197,18 +206,23 @@ curl https://zapieapp-api-dev-alpha.ambitiousstone-9e7294a6.polandcentral.azurec
 
 ### 6.1 Kitchen diagnostics visible
 
-- Status: `NOT RUN`
+- Status: `NOT RUN MANUALLY`
 - Notes:
+  - brak zywego smoke UI admina
+  - payload i mapowanie `kitchen_*` sa potwierdzone przez kontrakty i endpoint tests
 
 ### 6.2 Diagnostics coherent
 
-- Status: `NOT RUN`
+- Status: `NOT RUN MANUALLY`
 - Notes:
+  - brak zywego smoke UI admina
 
 ### 6.3 `in_oven` guard coherent
 
-- Status: `NOT RUN`
+- Status: `NOT RUN MANUALLY`
 - Notes:
+  - guard jest potwierdzony backendowymi regresjami i endpoint tests
+  - brak zywego smoke UI admina
 
 ---
 
@@ -216,7 +230,7 @@ curl https://zapieapp-api-dev-alpha.ambitiousstone-9e7294a6.polandcentral.azurec
 
 Wpisuj tylko realne odchylenia znalezione w proof.
 
-- 
+- shared Azure runtime utrzymuje `env_kitchen_eta_offset=10`, wiec finalne `eta_minutes` dla duzych zapiekanek sa wyzsze od czystego `kitchen_eta_minutes`
 
 ---
 
@@ -224,7 +238,8 @@ Wpisuj tylko realne odchylenia znalezione w proof.
 
 Wpisuj tylko swiadomie zaakceptowane luki, ktore nie blokuja zamkniecia Phase 2.
 
-- 
+- brak manualnego smoke UI `Chrome + Azure backend` w tej sesji
+- brak manualnego smoke UI admin dashboard / `in_oven` guard w tej sesji
 
 ---
 
@@ -232,15 +247,17 @@ Wpisuj tylko swiadomie zaakceptowane luki, ktore nie blokuja zamkniecia Phase 2.
 
 ### Czy Phase 2 mozna oznaczyc jako complete?
 
-- Decyzja: `NO`
+- Decyzja: `PRAWIE`
 
 ### Warunki brakujace do complete
 
-- 
+- jesli wymagamy twardego, zywego smoke UI klienta i admina, to ten krok nadal nie jest udowodniony w tej sesji
+- jesli wystarcza proof implementacji + proof API/runtime + test proof, temat jest merytorycznie domkniety
 
 ### Kolejny ruch
 
-- Uruchom smoke na Chrome, a potem uzupelnij sekcje 4-9 na podstawie logow z C:\FFApi\artifacts\time_zapiekanki_phase2\20260614-183543
+- opcja A: wykonac jeszcze manualny smoke UI w Chrome i adminie
+- opcja B: uznac goal za domkniety na podstawie testow, deployed Azure i `api-preview-smoke=PASS`
 ---
 
 ## 10. Szybkie podsumowanie dla finalnego audytu
@@ -249,34 +266,35 @@ Wpisuj tylko swiadomie zaakceptowane luki, ktore nie blokuja zamkniecia Phase 2.
 Proof summary:
 
 1. Backend tests
-- status:
-- notes:
+- status: PASS
+- notes: suite `run_time_zapiekanki_phase2_suite.py` przeszla
 
 2. Frontend tests
-- status:
-- notes:
+- status: PASS
+- notes: `flutter test` przeszlo
 
 3. Azure health
-- status:
-- notes:
+- status: PASS
+- notes: `/health` i `/health/db` przeszly
 
 4. API preview smoke
-- status:
-- notes:
+- status: PASS
+- notes: scenariusze `1/4/7/10/14` oraz `VAC/25cm` przeszly; wykryty `env_kitchen_eta_offset=10`
 
 5. Frontend Chrome smoke
-- status:
-- notes:
+- status: NOT RUN MANUALLY
+- notes: tylko dowod testowy/kontraktowy, bez zywego UI smoke w tej sesji
 
 6. Admin smoke
-- status:
-- notes:
+- status: NOT RUN MANUALLY
+- notes: tylko dowod testowy/endpointowy, bez zywego UI smoke w tej sesji
 
 Open gaps:
-- ...
+- manualny smoke UI klienta
+- manualny smoke UI admina
 
 Decision:
-- complete / continue fixing
+- prawie complete / complete po akceptacji braku manualnego smoke UI
 ```
 
 

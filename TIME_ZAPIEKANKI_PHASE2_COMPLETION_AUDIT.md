@@ -26,16 +26,16 @@ Phase 2 miala doprowadzic logike ETA zapiekanek do modelu bardziej zgodnego z pr
 
 | Wymaganie | Aktualny dowod | Status |
 | --- | --- | --- |
-| Model batchowy pieca istnieje w backendzie | helpery i logika w `checkout_service.py`, testy `test_kitchen_eta_logic.py` | `kod: TAK / runtime: NIE` |
-| Rozroznienie `in_oven` vs `waiting queue` wplywa na ETA | `_get_current_oven_load`, `_count_waiting_zapiekanki_queue_pieces`, batch metrics, testy queue delay | `kod: TAK / runtime: NIE` |
-| Preview ETA przed finalnym checkoutem istnieje | `POST /checkout/eta-preview`, test endpointu backend, test repo Flutter | `kod: TAK / runtime: NIE` |
-| Active checkout niesie `kitchen_*` | `GET /checkout/active`, backend test endpointu, frontend contract test repo | `kod: TAK / runtime: NIE` |
-| Admin dashboard niesie `kitchen_*` | `_build_admin_order`, mapowanie modelu Flutter, contract test repo admin dashboard | `kod: TAK / runtime: NIE` |
-| Guard `in_oven` blokuje konflikt batchu | `update_admin_order_status(...)`, backend regression test 409 | `kod: TAK / runtime: NIE` |
-| Front klienta uzywa backendowego ETA w krytycznych miejscach | `dashboard_screen.dart`, `order_tracking_screen.dart`, testy modeli/repo | `kod: TAK / runtime: NIE` |
-| Front admina interpretuje diagnostyke pieca | `admin_dashboard_screen.dart`, model mapping, kontrakty repo | `kod: TAK / runtime: NIE` |
-| Regressions sa dopisane dla warstwy backendowej | suite `run_time_zapiekanki_phase2_suite.py` + testy endpointowe/service | `kod: TAK / wykonanie: NIE` |
-| Regressions sa dopisane dla warstwy Flutter repo/model | `qa_frontend_flow_contract_test.dart`, `qa_time_zapiekanki_phase2_models_test.dart` | `kod: TAK / wykonanie: NIE` |
+| Model batchowy pieca istnieje w backendzie | helpery i logika w `checkout_service.py`, testy `test_kitchen_eta_logic.py`, proof `api-preview-smoke=PASS` | `kod: TAK / runtime API: TAK / UI smoke: NIE` |
+| Rozroznienie `in_oven` vs `waiting queue` wplywa na ETA | `_get_current_oven_load`, `_count_waiting_zapiekanki_queue_pieces`, batch metrics, proof scenariuszy `1/4/7/10/14` | `kod: TAK / runtime API: TAK / UI smoke: NIE` |
+| Preview ETA przed finalnym checkoutem istnieje | `POST /checkout/eta-preview`, test endpointu backend, test repo Flutter, proof Azure | `kod: TAK / runtime API: TAK / UI smoke: NIE` |
+| Active checkout niesie `kitchen_*` | `GET /checkout/active`, backend test endpointu, frontend contract test repo | `kod: TAK / dowod testowy: TAK / runtime UI: NIE` |
+| Admin dashboard niesie `kitchen_*` | `_build_admin_order`, mapowanie modelu Flutter, contract test repo admin dashboard | `kod: TAK / dowod testowy: TAK / runtime UI: NIE` |
+| Guard `in_oven` blokuje konflikt batchu | `update_admin_order_status(...)`, backend regression test 409, endpoint phase2 test | `kod: TAK / dowod testowy: TAK / runtime UI: NIE` |
+| Front klienta uzywa backendowego ETA w krytycznych miejscach | `dashboard_screen.dart`, `order_tracking_screen.dart`, testy modeli/repo | `kod: TAK / dowod testowy: TAK / runtime UI: NIE` |
+| Front admina interpretuje diagnostyke pieca | `admin_dashboard_screen.dart`, model mapping, kontrakty repo | `kod: TAK / dowod testowy: TAK / runtime UI: NIE` |
+| Regressions sa dopisane dla warstwy backendowej | suite `run_time_zapiekanki_phase2_suite.py` + testy endpointowe/service, proof `backend-tests=PASS` | `kod: TAK / wykonanie: TAK` |
+| Regressions sa dopisane dla warstwy Flutter repo/model | `qa_frontend_flow_contract_test.dart`, `qa_time_zapiekanki_phase2_models_test.dart`, proof `flutter-tests=PASS` | `kod: TAK / wykonanie: TAK` |
 
 Interpretacja:
 - `kod: TAK` oznacza, ze istnieje bezposredni dowod w plikach i testach statycznych.
@@ -115,36 +115,50 @@ Status: `zaimplementowane`
 ## 3. Czego nadal brakuje jako dowodu wykonania
 
 ### A. Runtime smoke na prawdziwym backendzie
-Status: `brak dowodu`
+Status: `czesciowo domkniete`
 
-Brakuje przejscia przez scenariusze runtime na `Chrome + Azure backend`:
+Sa juz twarde wyniki runtime API na Azure:
 - 1 duza zapiekanka,
 - 4 duze zapiekanki,
 - 7 duzych zapiekanek,
 - 10 duzych zapiekanek,
 - 14+ duzych zapiekanek,
-- koszyk mieszany,
-- `kids / 25cm / VAC`,
-- override kuchni.
+- `kids / 25cm / VAC`.
+
+Wynik:
+- `api-preview-smoke=PASS`
+- runner wykryl srodowiskowy `env_kitchen_eta_offset=10`
+- smoke zostal dopasowany do shared Azure runtime zamiast zakladac czysta instancje bez override.
+
+Nadal brak twardego dowodu dla:
+- manualnego `Chrome + lokalny frontend + Azure backend`
+- manualnego scenariusza admin dashboard / `in_oven` guard na zywej sesji
+- manualnego scenariusza override kuchni na zywym backendzie
 
 ### B. Potwierdzenie spojnosci warstw
-Status: `brak dowodu`
+Status: `testowo TAK / manualnie NIE`
 
-Trzeba jeszcze potwierdzic, ze dla tych samych scenariuszy:
+Z testow i proofu wiemy juz, ze:
+- preview API jest spojne z modelami Fluttera,
+- `/checkout/active` serializuje `kitchen_*`,
+- `/admin/dashboard` serializuje `kitchen_*`,
+- frontendowe modele i repo mapuja te pola poprawnie.
+
+Nadal brak manualnego dowodu end-to-end, ze:
 - preview koszyka,
 - finalny checkout,
 - active order,
 - tracking,
 - admin diagnostics
 
-pokazuja wyniki logicznie spojne.
+sa spojne na zywej sesji UI.
 
 ### C. Uruchomienie testow
-Status: `brak dowodu`
+Status: `domkniete`
 
-Testy sa dopisane, ale nie ma jeszcze wyniku wykonania:
-- `python my_fastapi_project/tests/run_time_zapiekanki_phase2_suite.py`
-- `flutter test`
+Sa juz wyniki wykonania:
+- `python my_fastapi_project/tests/run_time_zapiekanki_phase2_suite.py` -> `PASS`
+- `flutter test` -> `PASS`
 
 ---
 
@@ -166,7 +180,8 @@ To nie blokuje runtime domkniecia glownej sciezki klienta, jesli:
 Temat mozna oznaczyc jako `complete` dopiero wtedy, gdy sa jednoczesnie spelnione warunki:
 - implementacja kodu istnieje,
 - test runner zostal odpalony i nie wykazal regresji,
-- smoke runtime zostal przeprowadzony na `Chrome + Azure backend`,
+- smoke runtime API zostal przeprowadzony na Azure i nie wykazal rozjazdu logiki batch,
+- smoke runtime zostal przeprowadzony na `Chrome + Azure backend` albo swiadomie zaakceptowano, ze w tym goalu konczymy na proofie API + testach kontraktowych UI,
 - nie ma krytycznych rozjazdow miedzy preview, checkoutem, active order i admin diagnostics,
 - wszystkie odchylenia zostaly poprawione albo swiadomie zaakceptowane jako poza zakresem celu.
 
@@ -174,9 +189,11 @@ Temat mozna oznaczyc jako `complete` dopiero wtedy, gdy sa jednoczesnie spelnion
 
 ## 6. Najkrotsza sciezka do zamkniecia celu
 
-1. Odpalic:
-   - `python my_fastapi_project/tests/run_time_zapiekanki_phase2_suite.py`
-2. Przejsc `TIME_ZAPIEKANKI_PHASE2_SMOKE_COMMANDS.md`
-3. Zweryfikowac wyniki wedlug `TIME_ZAPIEKANKI_PHASE2_SMOKE.md`
-4. Poprawic ewentualne mismatchy
-5. Dopiero wtedy zrobic finalny completion audit
+1. Manualnie przejsc `Chrome + lokalny frontend + Azure backend`
+2. Potwierdzic preview / checkout / active order / tracking
+3. Potwierdzic admin diagnostics i `in_oven` guard na zywej sesji
+4. Jesli te kroki nie sa wymagane w tym goalu, swiadomie zamknac temat na podstawie:
+   - `backend-tests=PASS`
+   - `flutter-tests=PASS`
+   - `api-preview-smoke=PASS`
+   - deployed Azure endpointow
