@@ -2310,8 +2310,17 @@ class CheckoutService:
                 ),
             )
 
-        if self._contains_zapiekanki_positions(resolved_positions):
-            base_eta = self._kitchen_eta_bucket_minutes_by_queue()
+        requested_queue_pieces = self._count_zapiekanki_queue_pieces_for_positions(
+            resolved_positions
+        )
+        if requested_queue_pieces > 0:
+            current_queue_pieces = self._count_active_zapiekanki_queue()
+            if current_queue_pieces <= 0 and requested_queue_pieces == 1:
+                base_eta = 6
+            else:
+                base_eta = self._kitchen_eta_bucket_minutes_by_queue(
+                    current_queue_pieces + requested_queue_pieces
+                )
             base_eta = self._cap_kitchen_eta_total_minutes(base_eta)
             if available_from is None:
                 return base_eta
@@ -2357,15 +2366,30 @@ class CheckoutService:
         )
 
     def _is_zapiekanki_order_item(self, item_name: str | None, item_description: str | None) -> bool:
-        group_key = infer_prep_group_key(
-            None,
-            " ".join(
-                part.strip()
-                for part in (item_name or "", item_description or "")
-                if part and part.strip()
-            ),
-        )
+        group_key = infer_prep_group_key(item_name, item_description)
         return group_key == "zapiekanki"
+
+    def _is_large_zapiekanka_signature(
+        self,
+        position_type: str | None,
+        name: str | None,
+    ) -> bool:
+        combined = " ".join(
+            part.strip().lower()
+            for part in (position_type or "", name or "")
+            if part and part.strip()
+        )
+        if not combined:
+            return False
+
+        if infer_prep_group_key(position_type, name) != "zapiekanki":
+            return False
+
+        excluded_markers = ("kids", "25cm", "vac", "frozen", "mroz")
+        if any(marker in combined for marker in excluded_markers):
+            return False
+
+        return True
 
     def _is_zapiekanki_queue_order(
         self,
@@ -2373,10 +2397,65 @@ class CheckoutService:
     ) -> bool:
         if not checkout_order.items:
             return False
-        return any(
-            self._is_zapiekanki_order_item(item.name, item.description)
-            for item in checkout_order.items
-            if item.name
+        return self._count_zapiekanki_queue_pieces_for_order(checkout_order) > 0
+
+    def _count_zapiekanki_queue_pieces_for_positions(
+        self,
+        positions: list[MenuPositionDB],
+    ) -> int:
+        return sum(
+            1
+            for position in positions
+            if self._is_large_zapiekanka_signature(
+                position.position_type,
+                position.name,
+            )
+        )
+
+    def _count_zapiekanki_queue_pieces_for_items(
+        self,
+        items,
+        *,
+        positions_by_id: dict[int, MenuPositionDB] | None = None,
+    ) -> int:
+        if not items:
+            return 0
+
+        pieces = 0
+        for item in items:
+            quantity = getattr(item, "quantity", None)
+            resolved_quantity = max(1, int(quantity or 1))
+            position_id = getattr(item, "position_id", None)
+
+            if (
+                position_id is not None
+                and positions_by_id is not None
+                and position_id in positions_by_id
+            ):
+                position = positions_by_id[position_id]
+                if self._is_large_zapiekanka_signature(
+                    position.position_type,
+                    position.name,
+                ):
+                    pieces += resolved_quantity
+                continue
+
+            if self._is_large_zapiekanka_signature(
+                getattr(item, "name", None),
+                getattr(item, "description", None),
+            ):
+                pieces += resolved_quantity
+        return pieces
+
+    def _count_zapiekanki_queue_pieces_for_order(
+        self,
+        checkout_order: CheckoutOrderDB,
+        *,
+        positions_by_id: dict[int, MenuPositionDB] | None = None,
+    ) -> int:
+        return self._count_zapiekanki_queue_pieces_for_items(
+            checkout_order.items,
+            positions_by_id=positions_by_id,
         )
 
     def _count_active_zapiekanki_queue(self) -> int:
@@ -2390,11 +2469,31 @@ class CheckoutService:
                 CheckoutOrderDB.processing_status != CHECKOUT_ORDER_STATUS_CANCELLED,
             )
         )
+        orders = query.all()
+        position_ids = sorted(
+            {
+                item.position_id
+                for order in orders
+                for item in (order.items or [])
+                if getattr(item, "position_id", None) is not None
+            }
+        )
+        positions_by_id = {}
+        if position_ids:
+            positions_by_id = {
+                position.position_id: position
+                for position in self.db.query(MenuPositionDB)
+                .filter(MenuPositionDB.position_id.in_(position_ids))
+                .all()
+            }
+
         return sum(
-            1
-            for order in query.all()
-            if self._is_zapiekanki_queue_order(order)
-            and self._order_oven_kind(order) == "zapiekanki"
+            self._count_zapiekanki_queue_pieces_for_order(
+                order,
+                positions_by_id=positions_by_id,
+            )
+            for order in orders
+            if self._order_oven_kind(order) == "zapiekanki"
         )
 
     def _kitchen_eta_bucket_minutes_by_queue(
@@ -2407,7 +2506,7 @@ class CheckoutService:
             return 6
         if resolved_queue <= 3:
             return 7
-        if resolved_queue <= 8:
+        if resolved_queue <= 6:
             return 10
         if resolved_queue <= 13:
             return 15

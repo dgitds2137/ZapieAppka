@@ -188,6 +188,22 @@ Szablon:
 - Uwagi do kolejnych watkow:
   - jesli bedzie potrzebny pelny widget test sukcesu callbacku, warto najpierw wydzielic klient HTTP z `AuthCallbackScreen`, zamiast mockowac globalny `http.post`
 
+## 2026-06-14 13:10:00 +02:00 - ETA zapiekanek doprecyzowane do sztuk duzych pozycji
+
+- Zakres: uporzadkowanie specyfikacji ETA zapiekanek i zblizenie implementacji do realnej logiki kuchni.
+- Dokumentacja:
+  - `TIME_ZAPIEKANKI_LOGIC.md` przepisane na czysta, aktualna specyfikacje
+  - usunieto historyczny opis, ktory mieszal target biznesowy z dawnym stanem wdrozenia
+- Backend:
+  - ETA dla zapiekanek liczy teraz sztuki duzych, goracych zapiekanek zamiast samej liczby zamowien z zapiekankami
+  - z kolejki wykluczane sa pozycje `kids`, `25cm`, `VAC`, `frozen`
+  - zachowano wyjatek `0 aktywnych + 1 nowa duza zapiekanka = 6 min`
+  - kolejne buckety sa liczone po lacznej liczbie sztuk: `1-3 -> 7`, `4-6 -> 10`, `7-13 -> 15`, `14+ -> 20`
+  - reczny override kuchni pozostaje bez zmian: `0/10/20/30/40`, cap finalnego ETA `60`
+- Testy:
+  - zaktualizowano `my_fastapi_project/tests/test_kitchen_eta_logic.py`
+  - dopisano scenariusze dla liczenia sztuk, wykluczen `kids/VAC` i pierwszej pojedynczej zapiekanki za `6 min`
+
 ## 2026-06-07 22:00:00 +02:00 - Kitchen ETA controls + admin catalog QA
 
 - Zakres: domkniecie sterowania ETA kuchni i testow katalogu admina.
