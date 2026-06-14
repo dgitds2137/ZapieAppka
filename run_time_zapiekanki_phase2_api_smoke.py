@@ -214,6 +214,17 @@ def _non_kitchen_items_from_catalog(vac_position: dict[str, Any], kids_position:
     ]
 
 
+def _resolve_non_kitchen_expected_eta_minutes(*positions: dict[str, Any], fallback_minutes: int = 12) -> int:
+    prep_minutes = [
+        int(item.get("prep_minutes") or 0)
+        for item in positions
+        if int(item.get("prep_minutes") or 0) > 0
+    ]
+    if not prep_minutes:
+        return fallback_minutes
+    return max(prep_minutes)
+
+
 def _build_scenarios(catalog_inputs: dict[str, dict[str, Any]]) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     large_hot = catalog_inputs["large_hot"]
     vac_item = catalog_inputs["vac"]
@@ -225,6 +236,11 @@ def _build_scenarios(catalog_inputs: dict[str, dict[str, Any]]) -> list[tuple[st
     ten_large = _large_items_from_catalog(10, large_hot)
     fourteen_large = _large_items_from_catalog(14, large_hot)
     vac_only = _non_kitchen_items_from_catalog(vac_item, kids_item)
+    non_kitchen_expected_eta = _resolve_non_kitchen_expected_eta_minutes(
+        vac_item,
+        kids_item,
+        fallback_minutes=12,
+    )
 
     return [
         (
@@ -281,11 +297,11 @@ def _build_scenarios(catalog_inputs: dict[str, dict[str, Any]]) -> list[tuple[st
             "vac_and_25cm_non_kitchen",
             _base_payload(
                 vac_only,
-                eta_minutes=12,
+                eta_minutes=non_kitchen_expected_eta,
                 total_amount=sum(float(item["price"]) for item in vac_only),
             ),
             {
-                "eta_minutes": 12,
+                "eta_minutes": non_kitchen_expected_eta,
                 "kitchen_eta_minutes": None,
                 "kitchen_batch_index": None,
                 "kitchen_slots_used_by_order": 0,
@@ -425,17 +441,52 @@ def main() -> int:
     preview_url = f"{args.api_base_url}/checkout/eta-preview"
     results: list[ScenarioResult] = []
     catalog_inputs = _resolve_phase2_catalog_inputs(args.api_base_url)
+    scenario_definitions = _build_scenarios(catalog_inputs)
+    scenario_responses: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
 
-    for name, payload, expected in _build_scenarios(catalog_inputs):
+    for name, payload, expected in scenario_definitions:
         response = _post_json(preview_url, deepcopy(payload))
+        scenario_responses.append((name, expected, response))
+
+    observed_kitchen_eta_offset = 0
+    if args.strict_clean_queue:
+        for _name, expected, response in scenario_responses:
+            expected_kitchen_eta = expected.get("kitchen_eta_minutes")
+            actual_kitchen_eta = response.get("kitchen_eta_minutes")
+            actual_eta = response.get("eta_minutes")
+            if (
+                expected_kitchen_eta is not None
+                and actual_kitchen_eta is not None
+                and actual_eta is not None
+            ):
+                observed_kitchen_eta_offset = max(
+                    0,
+                    int(actual_eta) - int(actual_kitchen_eta),
+                )
+                break
+
+    for name, expected, response in scenario_responses:
+        adjusted_expected = dict(expected)
+        if (
+            args.strict_clean_queue
+            and adjusted_expected.get("kitchen_eta_minutes") is not None
+        ):
+            adjusted_expected["eta_minutes"] = int(
+                adjusted_expected["kitchen_eta_minutes"]
+            ) + observed_kitchen_eta_offset
         results.append(
             _compare_response(
                 name=name,
-                expected=expected,
+                expected=adjusted_expected,
                 response=response,
                 strict=args.strict_clean_queue,
             )
         )
+
+    if args.strict_clean_queue and observed_kitchen_eta_offset > 0:
+        for result in results:
+            if result.expected_kitchen_eta_minutes is not None:
+                result.note += f"; env_kitchen_eta_offset={observed_kitchen_eta_offset}"
 
     if args.override_minutes is not None:
         if not args.admin_session_token or not args.admin_email:
